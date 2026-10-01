@@ -1,16 +1,18 @@
-# Macrun
+<h1 align="center">Macrun</h1>
 
-### Your AI agent runs in the cloud. Now it can work on your Mac.
+<h3 align="center">Your AI agent runs in the cloud. Now it can work on your Mac.</h3>
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [Get started](#get-started) · [Let your agent install it](#let-your-agent-install-it)
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="#get-started">Get started</a> · <a href="#let-your-agent-install-it">Let your agent install it</a>
+</p>
 
 ![Macrun connects a cloud AI agent to your Mac: code and commands go out; logs and screenshots come back.](docs/images/macrun-banner.png)
 
-**Macrun lets Claude Code, Codex, and other AI agents on a remote server run commands, sync code, and operate apps on your Mac.**
+<p align="center"><strong>Macrun lets Claude Code, Codex, and other AI agents on a remote server run commands, sync code, and operate apps on your Mac.</strong></p>
 
-Keep the agent on your Linux server. Use the Mac you already own to compile macOS apps, run tests, and interact with the desktop. Macrun sends the work to the Mac and brings back the logs, files, and screenshots the agent needs to continue.
+<p align="center">Keep the agent on your Linux server. Use the Mac you already own to compile macOS apps, run tests, and interact with the desktop. Macrun sends the work to the Mac and brings back the logs, files, and screenshots the agent needs to continue.</p>
 
-**Open source · MIT · macOS / Linux · 0.2 demo**
+<p align="center"><strong>Open source · MIT · macOS / Linux · 0.2 demo</strong></p>
 
 ## What can I do with it?
 

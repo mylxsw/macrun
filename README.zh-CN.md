@@ -1,16 +1,18 @@
-# Macrun
+<h1 align="center">Macrun</h1>
 
-### 让服务器上的 AI Agent，直接用上你的 Mac。
+<h3 align="center">让服务器上的 AI Agent，直接用上你的 Mac。</h3>
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [开始使用](#开始使用) · [让 Agent 帮你安装](#让-agent-帮你安装)
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="#开始使用">开始使用</a> · <a href="#让-agent-帮你安装">让 Agent 帮你安装</a>
+</p>
 
 ![Macrun 连接云端 AI Agent 和你的 Mac：发送代码与命令，取回日志与截图。](docs/images/macrun-banner.png)
 
-**Macrun 让远程服务器上的 Claude Code、Codex 等 AI Agent，能够在你的 Mac 上执行命令、同步代码、操作应用。**
+<p align="center"><strong>Macrun 让远程服务器上的 Claude Code、Codex 等 AI Agent，能够在你的 Mac 上执行命令、同步代码、操作应用。</strong></p>
 
-Agent 继续在 Linux 服务器上工作，你现有的 Mac 负责 macOS 应用编译、测试和桌面操作。Macrun 把任务交给 Mac，再把日志、文件和截图传回 Agent，让它根据真实结果继续修改和验证。
+<p align="center">Agent 继续在 Linux 服务器上工作，你现有的 Mac 负责 macOS 应用编译、测试和桌面操作。Macrun 把任务交给 Mac，再把日志、文件和截图传回 Agent，让它根据真实结果继续修改和验证。</p>
 
-**开源 · MIT · macOS / Linux · 0.2 demo**
+<p align="center"><strong>开源 · MIT · macOS / Linux · 0.2 demo</strong></p>
 
 ## 它能帮我做什么？
 
