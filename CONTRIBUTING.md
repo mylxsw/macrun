@@ -1,6 +1,6 @@
-# Contributing to macrun
+# Contributing to Macrun
 
-macrun is a small remote-tool runtime. Favor reusable commands, files, synchronization and MCP capabilities over project-specific compiler or application workflows.
+Macrun is a small remote-tool runtime. Favor reusable commands, files, synchronization and MCP capabilities over project-specific compiler or application workflows.
 
 ## Work locally
 
@@ -17,4 +17,4 @@ Changes to operations, task states, retry semantics, sync behavior or protocol v
 
 Keep [English](README.md) and [Chinese](README.zh-CN.md) README instructions aligned. Update [agent installation](docs/agent-install.md), [operations](docs/operations.md), or [the Skill](skills/macrun/SKILL.md) when their behavior changes. Installation examples must identify which machine runs each command and use generic paths, not personal deployment addresses.
 
-Report evidence accurately: build success, local fixture smoke tests, real remote transport, and real GUI behavior are different checks. Never publish tokens, private keys, raw private task logs, or screenshots containing unrelated personal information in issues or commits. For an issue, include OS/architecture, macrun revision, relevant redacted logs and a minimal reproduction.
+Report evidence accurately: build success, local fixture smoke tests, real remote transport, and real GUI behavior are different checks. Never publish tokens, private keys, raw private task logs, or screenshots containing unrelated personal information in issues or commits. For an issue, include OS/architecture, Macrun revision, relevant redacted logs and a minimal reproduction.

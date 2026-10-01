@@ -1,4 +1,4 @@
-# Running and maintaining macrun
+# Running and maintaining Macrun
 
 [English overview](../README.md) · [中文概览](../README.zh-CN.md) · [Agent installation](agent-install.md)
 

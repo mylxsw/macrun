@@ -1,6 +1,6 @@
-# Install and configure macrun — guide for coding agents
+# Install and configure Macrun — guide for coding agents
 
-This is the installation entrypoint for Claude Code, Codex, and other agents. For day-to-day remote work after installation, load [the macrun usage Skill](../skills/macrun/SKILL.md). Human overview: [English](../README.md) / [中文](../README.zh-CN.md).
+This is the installation entrypoint for Claude Code, Codex, and other agents. For day-to-day remote work after installation, load [the Macrun usage Skill](../skills/macrun/SKILL.md). Human overview: [English](../README.md) / [中文](../README.zh-CN.md).
 
 Read this guide before changing either machine. It defines the inputs, execution locations, and evidence needed to finish installation. A successful package copy is not a working deployment.
 
@@ -12,7 +12,7 @@ Inspect available configuration first. Ask only for values you cannot determine 
 | --- | --- |
 | Agent/server host | SSH alias or local access; OS, CPU architecture, service user |
 | Worker | Local/remote access; OS, CPU architecture, GUI login user if applicable |
-| Source revision | Same macrun Git commit for both executables and the Skill |
+| Source revision | Same Macrun Git commit for both executables and the Skill |
 | Connection | Server numeric IP reachable from the worker, UDP port, intended listen interface |
 | Filesystem layout | Absolute binary, server data, worker data, socket and log paths |
 | Agent clients | Claude Code, Codex, or another installed MCP host; existing `macrun` entries |
@@ -22,7 +22,7 @@ Inspect available configuration first. Ask only for values you cannot determine 
 
 Do not infer CPU architecture from “Linux.” `aarch64` maps to `linux/arm64`; `x86_64` maps to `linux/amd64`. A Mac ARM64 build does not run on Linux ARM64. Do not substitute the local machine when remote access fails.
 
-macrun currently accepts a numeric socket address for `--server`, not an SSH alias or hostname. Use `IP:port`, or `[IPv6]:port`. UDP must reach the server; an SSH tunnel alone does not carry QUIC. Reuse an existing reachable private network when appropriate; changing cloud firewall/network configuration is a separate concrete action, not a hidden installation step.
+Macrun currently accepts a numeric socket address for `--server`, not an SSH alias or hostname. Use `IP:port`, or `[IPv6]:port`. UDP must reach the server; an SSH tunnel alone does not carry QUIC. Reuse an existing reachable private network when appropriate; changing cloud firewall/network configuration is a separate concrete action, not a hidden installation step.
 
 Inspect existing services and state before modification. Follow the user's infrastructure repository/deployment conventions if present. This guide does not grant permission to overwrite unrelated agent settings, terminate other apps, or rotate an existing identity.
 
@@ -133,7 +133,7 @@ args = ["mcp"]
 
 Store it at the selected worker config path and add `--config /absolute/path/to/worker.toml` to the worker launch arguments. Restart the worker only after accounting for running tasks. Configuration changes are not hot-reloaded.
 
-Check the backend's own daemon, Accessibility and Screen Recording permissions under the correct app identity. A permission boolean is not proof of live capture. Discover backends/tools through macrun and test a harmless observation; if authorized, use a disposable application/workflow to verify input followed by a new observation. Do not manipulate an unrelated user's document to prove clicking works.
+Check the backend's own daemon, Accessibility and Screen Recording permissions under the correct app identity. A permission boolean is not proof of live capture. Discover backends/tools through Macrun and test a harmless observation; if authorized, use a disposable application/workflow to verify input followed by a new observation. Do not manipulate an unrelated user's document to prove clicking works.
 
 **Checkpoint:** discovery works, a real backend call completes, and actual screenshot content reaches the agent. If GUI is blocked, report command/file installation separately from GUI readiness.
 
@@ -189,7 +189,7 @@ Run `macrun --workspace /absolute/server/project sync` and verify a known file's
 
 Report:
 
-- Host identities/architectures and installed macrun revision.
+- Host identities/architectures and installed Macrun revision.
 - Binary, data, socket, config and service paths; no credential values.
 - Service running state and configured startup behavior.
 - MCP entries and Skill destinations for each selected client.

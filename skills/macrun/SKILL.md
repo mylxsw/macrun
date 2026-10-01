@@ -1,11 +1,11 @@
 ---
 name: macrun
-description: Use macrun to run commands, synchronize source files, retrieve results and screenshots, and call computer-use tools on a remote Mac or Linux worker from an agent host. Use when the user asks to work through macrun or an already configured macrun connection.
+description: Use Macrun to run commands, synchronize source files, retrieve results and screenshots, and call computer-use tools on a remote Mac or Linux worker from an agent host. Use when the user asks to work through Macrun or an already configured Macrun connection.
 ---
 
-# macrun
+# Macrun
 
-macrun connects an agent host to one remote worker. Prefer the configured macrun MCP tools; use the CLI on the server host when MCP is unavailable or for upload/download and continuous sync. This skill guides use of an existing connection; it does not authorize installing services, changing other MCP entries, or replacing the user's chosen computer-use backend.
+Macrun connects an agent host to one remote worker. Prefer the configured Macrun MCP tools; use the CLI on the server host when MCP is unavailable or for upload/download and continuous sync. This skill guides use of an existing connection; it does not authorize installing services, changing other MCP entries, or replacing the user's chosen computer-use backend.
 
 ## Establish where work happens
 
@@ -13,7 +13,7 @@ macrun connects an agent host to one remote worker. Prefer the configured macrun
 - **Worker:** remote shell commands, command `cwd`, file tool paths, GUI apps and local MCP backends.
 - Read the project's instructions and existing configuration. Discover the actual socket, source directory, remote directory and backend names; do not assume example addresses or personal deployment paths.
 - Call `device_status` before remote work. `connected: true` confirms the worker link, not GUI permissions or successful compilation. If offline, report the observed connection error; inspect logs/configuration within scope instead of silently switching machines or redeploying.
-- macrun 0.2 has no dedicated `build`, `test`, `run`, `shot` or `ui` commands. Compose generic capabilities for the requested task. It supports one worker per server, not device selection/routing.
+- Macrun 0.2 has no dedicated `build`, `test`, `run`, `shot` or `ui` commands. Compose generic capabilities for the requested task. It supports one worker per server, not device selection/routing.
 
 Read [references/cli.md](references/cli.md) only when using the CLI, diagnosing connection setup, or transferring files without MCP.
 
@@ -36,7 +36,7 @@ Use the live tool schema as the authority for arguments; agent hosts may prefix 
 
 1. Inspect the source project's `macrun.toml`. `remote_root` names a directory on the worker, not the server. If no mapping exists, use a user-specified destination or ask for the missing destination before syncing into an existing worktree.
 2. Call `sync_start` with an explicit server-side `workspace` when it differs from the MCP frontend's working directory. Save its `job_id` and poll `sync_get` until `status` is `succeeded`. Do not query a sync job with `task_get`.
-3. Start the requested build/test/command using `exec_start` with the worker-side `cwd`. Choose commands from the project itself; macrun does not choose an Xcode scheme or build system.
+3. Start the requested build/test/command using `exec_start` with the worker-side `cwd`. Choose commands from the project itself; Macrun does not choose an Xcode scheme or build system.
 
 There is no implicit synchronization before commands. Uncommitted source files are included. Deletions of previously managed files propagate; unrelated worker-generated files are retained. Use separate remote roots for distinct source projects. Default exclusions include `.git`, `.build`, `DerivedData`, `.macrun`, `target`; configure other caches and local environment files explicitly.
 
@@ -61,7 +61,7 @@ There is no implicit synchronization before commands. Uncommitted source files a
 4. After an action, obtain a fresh observation and verify the requested effect. “AXPress succeeded” or “input sent” alone is not an outcome. Do not blindly reuse stale elements after a new snapshot.
 5. On a stale or invalid backend session, call `mcp_tools` again, then re-observe the UI. Preserve existing windows and user work; do not kill unrelated apps to recover a session.
 
-Backend calls execute serially per backend. macrun forwards original results rather than translating every backend into Cua-specific methods. Completed image blocks are surfaced by `task_get` to the agent; inspect those images when visual verification matters.
+Backend calls execute serially per backend. Macrun forwards original results rather than translating every backend into Cua-specific methods. Completed image blocks are surfaced by `task_get` to the agent; inspect those images when visual verification matters.
 
 ## Files and result delivery
 

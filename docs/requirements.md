@@ -1,4 +1,4 @@
-# macrun 0.2 需求
+# Macrun 0.2 需求
 
 目标：美国 Linux 上的 Claude Code 可操作中国 Mac mini，完成任意由 agent 组织的开发与验证流程。提供通用能力，不设计编译专用 API。
 

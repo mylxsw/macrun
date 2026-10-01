@@ -1,4 +1,4 @@
-# macrun 0.2 验证记录
+# Macrun 0.2 验证记录
 
 更新日期：2026-10-02。区分通用远程工具自动化测试与后续真实部署，不把 fixture 当作真实 GUI 验证。
 
@@ -27,9 +27,9 @@ MCP 测试使用仓库内 Python fixture，证明消息、图片和状态传递�
 
 - Ubuntu 24.04 ARM64 服务端 → Apple Silicon Mac worker，通过已有 Tailscale 私网运行 QUIC。服务端 systemd active/running；Mac LaunchAgent 在图形用户登录后 running。
 - 实际目录同步、watch 自动更新、命令执行（返回 Mac 主机名和 arm64）、退出码、文件读取与下载。
-- Claude Code 用户级 macrun MCP 显示 Connected；独立 stdio 协议客户端验证 14 个工具及 device_status。
+- Claude Code 用户级 Macrun MCP 显示 Connected；独立 stdio 协议客户端验证 14 个工具及 device_status。
 - 真实 CuaDriver 0.26.0 backend 工具发现、启动计算器、点击数字 2，随后获取的新控件树与真实截图均显示 2。
-- 该截图经 macrun 的 stdio MCP `task_get` 返回 image 内容，不只是 worker 文件路径。
+- 该截图经 Macrun 的 stdio MCP `task_get` 返回 image 内容，不只是 worker 文件路径。
 - 后续为 Oracle 上的 Claude/Codex 安装了提交 `3788092` 的 usage Skill，文件逐一核对一致；Codex MCP 配置已启用。没有把配置存在当作实际 Codex 模型会话验收。
 
 部署凭据、主机地址、私人配置及原始任务日志不进入公共文档。本地部署证据位于 `.local/deployment/verification.log`、`live-discovery.txt`、`get_window_state-result.json`，这些文件不随 Git 发布。

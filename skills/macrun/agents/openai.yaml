@@ -1,4 +1,4 @@
 interface:
-  display_name: "macrun"
+  display_name: "Macrun"
   short_description: "Run remote commands, sync code, and verify GUI results"
   default_prompt: "Use $macrun to complete this task on the configured remote worker and verify its results."
