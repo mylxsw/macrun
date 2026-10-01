@@ -1,0 +1,39 @@
+[package]
+name = "macrun"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Remote macOS build and window automation demo over QUIC"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+blake3 = "1"
+clap = { version = "4", features = ["derive", "env"] }
+fs2 = "0.4"
+globset = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+libc = "0.2"
+pathdiff = "0.2"
+plist = "1"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.37"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+toml = "0.9"
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

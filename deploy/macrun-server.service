@@ -1,0 +1,14 @@
+[Unit]
+Description=macrun demo server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_USER
+ExecStart=/usr/local/bin/macrun --socket /tmp/macrun.sock serve --listen 0.0.0.0:7443 --data /home/REPLACE_USER/.local/share/macrun-server
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

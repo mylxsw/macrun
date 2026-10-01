@@ -1,0 +1,12 @@
+/target/
+/.local/
+.macrun/
+*.pem
+*.key
+.DS_Store
+
+# Runtime identities and local configuration
+*.der
+.env
+.env.*
+!.env.example

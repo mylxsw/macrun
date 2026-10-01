@@ -1,0 +1,9 @@
+remote_root = "~/src/macrun-demo/Counter"
+derived_data = "~/Library/Caches/macrun/Counter/DerivedData"
+project = "Counter.xcodeproj"
+scheme = "Counter"
+configuration = "Debug"
+app_relative_path = "Build/Products/Debug/Counter.app"
+exclude = []
+screenshot_max_edge = 1600
+allow_foreground_fallback = false

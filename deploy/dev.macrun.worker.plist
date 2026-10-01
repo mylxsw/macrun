@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>dev.macrun.worker</string>
+<key>ProgramArguments</key><array>
+<string>/Users/REPLACE_USER/.local/bin/macrun</string><string>worker</string>
+<string>--server</string><string>REPLACE_SERVER_IP:7443</string>
+<string>--cert</string><string>/Users/REPLACE_USER/.local/share/macrun-worker/cert.der</string>
+<string>--token-file</string><string>/Users/REPLACE_USER/.local/share/macrun-worker/token</string>
+<string>--data</string><string>/Users/REPLACE_USER/.local/share/macrun-worker</string>
+<string>--cua-binary</string><string>/Users/REPLACE_USER/.local/bin/cua-driver</string>
+</array>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string></dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>LimitLoadToSessionType</key><string>Aqua</string>
+<key>StandardOutPath</key><string>/Users/REPLACE_USER/.local/share/macrun-worker/stdout.log</string>
+<key>StandardErrorPath</key><string>/Users/REPLACE_USER/.local/share/macrun-worker/stderr.log</string>
+</dict></plist>
