@@ -25,6 +25,28 @@ Mac：                        macrun worker（主动连接）
 - Linux → worker 单向目录同步：包含未提交改动，文件哈希增量、受管理文件删除、符号链接和可执行位、同步中断修复；`sync --watch` 持续轮询。
 - Claude Code stdio MCP 入口：14 个通用工具，不需 agent 自己解析 QUIC 协议。
 
+## Agent Skill（Claude Code / Codex）
+
+项目附带 [macrun Skill](skills/macrun/SKILL.md)，指导 agent 正确区分两端路径、同步后执行、查询异步任务、处理断线与重复请求，以及发现 computer-use 工具并验证界面效果。Skill 不绑定某台服务器或某个 backend。
+
+把整个 `skills/macrun/` 目录放到 **agent 运行的机器** 的技能目录中。下面在本仓库根目录执行，按使用的 agent 选择一组；目标已存在时先比较合并，不直接覆盖：
+
+```bash
+# Claude Code：用户级技能
+mkdir -p ~/.claude/skills
+test -e ~/.claude/skills/macrun || cp -R skills/macrun ~/.claude/skills/macrun
+
+# Codex：用户级技能
+mkdir -p ~/.agents/skills
+test -e ~/.agents/skills/macrun || cp -R skills/macrun ~/.agents/skills/macrun
+```
+
+也可以把同一个目录放到工作项目的 `.claude/skills/macrun/` 或 `.agents/skills/macrun/`。复制方式在升级时需要重新比较并更新；不要只复制 SKILL.md，关联的 `references/` 也需要保留。
+
+安装后新开 agent 会话，在 Claude Code 中可用 `/macrun`，在 Codex 中可用 `$macrun`，也可以直接描述远程操作任务让 agent 选择技能。MCP 连接仍需单独按下文配置；Skill 本身不会部署服务或注册 MCP。安装机制参考 [Claude Code Skills](https://code.claude.com/docs/en/skills) 和 [Codex Skills](https://developers.openai.com/codex/skills/)。
+
+例如：“使用 macrun 同步当前项目到配置的 Mac 目录，等待同步成功，执行项目测试并检查退出码；如果需要界面操作，先发现 backend 工具，操作后返回新的截图验证结果。”
+
 ## 常用任务（Makefile）
 
 先运行 `make` 或 `make help` 查看全部命令。macrun 是同一个程序的不同运行模式，不是两套独立代码：在 Mac 构建出的程序提供客户端/worker，在 Linux 构建出的程序提供服务端/CLI。
