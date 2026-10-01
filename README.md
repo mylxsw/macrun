@@ -1,156 +1,174 @@
 # macrun
 
-在 Linux 修改代码，在 Mac 上构建、运行并观察 macOS 应用的 Rust demo。一个二进制包含 CLI、服务端和 worker 三种角色，通过 QUIC 长连接传输，窗口观察和输入交给本机 Cua Driver。
+让远程 AI agent 使用另一台电脑上的命令、文件和本地 MCP 工具。目标电脑主动连接服务器，无需目标电脑的公网入站端口。
 
-**当前验证范围见 [docs/validation.md](docs/validation.md)。构建成功、协议测试通过与真实 GUI 验收是不同的证据。**
+典型场景：Claude Code 在美国 Linux 上修改代码，中国 Mac mini 接收工作副本、执行命令、运行桌面应用；agent 获取日志和截图，调用 computer use，自己决定后续步骤。macrun 不提供编译、Xcode 或测试框架专用工具。
 
-## 已实现
+**当前版本：0.2 demo。** 单服务器、单 worker；Linux/macOS；QUIC/UDP 连接。代码同步、命令执行与 MCP 调用相互独立，agent 自己组装流程。
 
-- Linux/macOS 共用 Rust 协议；QUIC TLS、固定证书信任、共享令牌、心跳重连。
-- Unix socket CLI；单任务、忙状态、实时日志、任务取消；CLI 退出后任务继续。
-- 按内容哈希进行文件增量同步；保留执行位、内部符号链接，管理删除，记录外部链接；中断标记与下次修复。
-- Xcode build/test、Swift Package build/test；固定缓存；超时和取消清理进程组。
-- `.app` 路径启动、记录应用身份、停止、窗口选择；Cua 持续 MCP 连接、截图、控件树、快照绑定的点击/输入/按键/滚动。
-- 每个任务的结构化结果、日志、PNG；服务端重启处理与需要人工处理的 worker 恢复状态。
+```text
+Linux：Claude Code → macrun mcp → macrun serve
+                                      ⇅ QUIC
+Mac：                        macrun worker（主动连接）
+                               ├─ shell 后台任务
+                               ├─ 文件读写和目录同步
+                               └─ 持久 stdio MCP → Cua / OCU / 其他本地工具
+```
 
-## 构建与检查
+## 能力
 
-需要 Rust 1.98 或更新版本；macOS 使用 Xcode 命令行工具，Linux 使用 C 编译器。
+- 任意 shell 命令：工作目录、环境变量、超时、任务编号、日志字节偏移、退出码、取消进程组。
+- Mac 保存任务和结果；网络断开不会取消命令或重建本地 MCP 会话。
+- 用 UUID `request_id` 去重：同编号同参数返回已有任务，同编号不同参数拒绝。
+- 本地 stdio MCP 服务配置、工具发现、异步调用。按 backend 串行调用，保留原始参数、文本、图片及错误结果。
+- 文件列目录、分块读写、PNG/JPEG 图片内容；CLI 上传下载任意文件。
+- Linux → worker 单向目录同步：包含未提交改动，文件哈希增量、受管理文件删除、符号链接和可执行位、同步中断修复；`sync --watch` 持续轮询。
+- Claude Code stdio MCP 入口：14 个通用工具，不需 agent 自己解析 QUIC 协议。
 
-```sh
+## 构建
+
+```bash
 cargo build --locked --release
 cargo test --locked
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
 python3 scripts/smoke.py target/release/macrun
 ```
 
-本次开发机没有预装 Rust，工具链安装在工作区 `.tools/`，未修改 shell 配置。此机器上可用 `scripts/cargo-local.sh` 替代 `cargo`；其他机器直接用标准 cargo。`scripts/smoke.py` 启动真实 server/worker 与 QUIC 连接，以编译器替身测试调度和恢复，不证明 Xcode 或 GUI 能力。
+仓库维护机器未将 Rust 加入 PATH 时，可用 `scripts/cargo-local.sh` 代替 `cargo`。分发包需分别在 Linux/macOS 构建；Dockerfile 提供 Linux 服务端镜像构建。构建 `macrun:generic-demo` 镜像后，可在 Mac 执行 `python3 scripts/cross-smoke.py` 验证 Linux 容器到 Mac 的实际调用。
 
-Mac 本机真实示例测试（先 `cargo build`）：
+## 1. 启动服务器
 
-```sh
-python3 scripts/native-smoke.py
+在运行 Claude Code 的 Linux 上：
+
+```bash
+macrun init --data /srv/macrun
+macrun --socket /tmp/macrun.sock serve --listen 0.0.0.0:7443 --data /srv/macrun
 ```
 
-该脚本只启动自己的 Counter 示例、server 和 worker，尝试构建、启动和 Cua 截图，结果保存在 `.local/native-*/`；结束时清理自己的进程。不会修改 Cua 安装或系统权限。
+将生成的 `cert.der` 和 `token` 复制到目标电脑。`key.der` 留在服务器。服务器需允许所配置的 UDP 端口；当前没有 TCP/SSH 备用传输，跨境可达性和性能需要实测。
 
-## 两台机器的配置
+## 2. 启动目标电脑
 
-### Linux 服务端
-
-在 Linux 构建或使用下文 Docker 镜像。先生成一次身份：
-
-```sh
-macrun init --data "$HOME/.local/share/macrun-server"
-macrun --socket /tmp/macrun.sock serve \
-  --listen 0.0.0.0:7443 \
-  --data "$HOME/.local/share/macrun-server"
-```
-
-允许 Mac 连到该服务器的 UDP 7443。把 `cert.der` 与 `token` 通过现有可信通道复制到 Mac；`key.der` 留在 Linux。初始化拒绝覆盖已有身份。`serve` 保持运行，agent 另开终端调用 CLI。
-
-### Mac worker
-
-安装 Xcode、CuaDriver.app，保持图形用户登录，授予 Cua 辅助功能和屏幕录制权限。在正常图形会话里启动 Cua：
-
-```sh
-open -n -g -a CuaDriver --args serve
-cua-driver status
-cua-driver permissions status --json
-macrun worker \
-  --server SERVER_IP:7443 \
-  --cert /absolute/path/cert.der \
-  --token-file /absolute/path/token \
-  --data "$HOME/.local/share/macrun-worker" \
-  --cua-binary "$HOME/.local/bin/cua-driver"
-```
-
-`SERVER_IP` 替换为 IPv4 地址。demo 可先在图形 Terminal 中运行 worker；常驻安装使用 [LaunchAgent 模板](deploy/dev.macrun.worker.plist)，替换绝对路径、服务器地址和用户名。Cua 可通过 `--cua-socket` 指向已有 daemon 的明确端点。不要使用 daemon 之外的裸驱动直接持有桌面权限。
-
-[systemd 模板](deploy/macrun-server.service) 用于 Linux。模板不会自动安装或启动，先手工验证连接。
-
-### 项目配置
-
-Linux 工作区根目录放 `macrun.toml`，可参考 [Counter 配置](examples/Counter/macrun.toml)。`remote_root`、`derived_data` 在 Mac 上解释；两者使用不同的固定目录。不要让 mirror 指向 Linux 源目录或日常项目工作区。
+`worker.toml` 示例：
 
 ```toml
-remote_root = "~/src/macrun-demo/MyApp"
-derived_data = "~/Library/Caches/macrun/MyApp/DerivedData"
-project = "MyApp.xcodeproj"
-scheme = "MyApp"
-configuration = "Debug"
-app_relative_path = "Build/Products/Debug/MyApp.app"
-exclude = ["node_modules", "*.xcuserstate"]
-screenshot_max_edge = 1600
-allow_foreground_fallback = false
+[mcp.computer]
+command = "/absolute/path/to/ocu"
+args = ["mcp"]
+
+# 也可以使用 Cua，名称完全由你指定，不必同时安装二者。
+# [mcp.cua]
+# command = "/absolute/path/to/cua-driver"
+# args = ["mcp"]
 ```
 
-`project`、`workspace`、`package = true` 三选一。Swift Package 用配置的 derived_data 作为 scratch 路径；普通 package 不自动生成 `.app`。Xcode 工程继承已有开发签名设置。Counter 使用本地 ad-hoc 签名，不需要开发者账号，其 scheme 仅演示 build/run；test 应对有测试 target 的实际项目或 Swift Package 使用。
+每个 backend 可设置 `env = { KEY = "value" }` 和 `cwd = "/absolute/path"`。配置只在 worker 启动时读取。没有 MCP 需求时可不传 `--config`。
 
-同步期间暂停源码写入。默认排除 `.git`、`.build`、`DerivedData`、`.macrun`、`target`，不按 `.gitignore` 排除，也不整体排除 `.swiftpm`。`exclude` 是相对路径 glob，匹配目录后不再进入它。遇到冲突或中断时镜像可能部分更新，构建会停止；下一次 sync 扫描并修复。
-
-## 使用
-
-在 Linux 工作区执行：
-
-```sh
-macrun status --json
-macrun sync
-macrun build
-macrun test --filter MyAppTests/testExample
-macrun run
+```bash
+macrun worker --server SERVER_IP:7443 \
+  --cert ./cert.der --token-file ./token \
+  --data ./worker-state --config ./worker.toml
 ```
 
-日志到 stderr，任务结束后 stdout 输出 `.macrun/artifacts/<job-id>/` 的绝对路径。读取其中的 `result.json` 获得 `run_id`、`window_id`、`snapshot_id`，从 `accessibility.json` 获取真实 element token：
+computer use 的安装、Mac 图形登录会话和系统权限仍由原工具负责。macrun 不会伪造显示器、AX 窗口或截屏结果。启动模板见 `deploy/dev.macrun.worker.plist`；服务端模板见 `deploy/macrun-server.service`。
 
-```sh
-macrun ui click --run RUN_ID --window WINDOW_ID --snapshot SNAPSHOT_ID --element TOKEN
-macrun ui type --run RUN_ID --window WINDOW_ID --snapshot SNAPSHOT_ID --element TOKEN --text 'hello'
-macrun ui click --run RUN_ID --window WINDOW_ID --snapshot SNAPSHOT_ID --x 100 --y 80
-macrun ui key --run RUN_ID --window WINDOW_ID --snapshot SNAPSHOT_ID --key Return
-macrun ui scroll --run RUN_ID --window WINDOW_ID --snapshot SNAPSHOT_ID --element TOKEN --dy 3
-macrun shot --run RUN_ID --window WINDOW_ID
-macrun stop --run RUN_ID
-macrun cancel JOB_ID
+## 3. 接入 Claude Code
+
+在 Linux 的 MCP 配置中注册本地进程（路径替换为实际绝对路径）：
+
+```json
+{
+  "mcpServers": {
+    "macrun": {
+      "command": "/usr/local/bin/macrun",
+      "args": ["--socket", "/tmp/macrun.sock", "--workspace", "/srv/code/my-app", "mcp"]
+    }
+  }
+}
 ```
 
-每次动作消费快照，成功后返回新快照。失败后也先重新观察。坐标是窗口左上角起算的 point；结果提供 PNG 像素与 point 的比例，适配层再转换到 Cua 原始截图像素。**`scroll --dy` 是带符号的滚轮步数，正数向下，范围 1–100；不是 point。** 这是依照实际 Cua 接口对原设计的修正。
+标准输入输出只用于 MCP，诊断日志走 stderr。支持 MCP 2025-03-26；backend 兼容 2024-11-05、2025-03-26、2025-06-18。只实现工具能力，不是完整的 MCP 任意消息代理；resources、prompts、sampling/elicitation 回调和进度通知转发尚未实现。
 
-多窗口的普通观察必须指定 `--window`；首次 run 在结果里列出窗口并明确标记初始选择。后台拒绝默认直接返回；开启前台回退时可能影响焦点/鼠标，结果记录实际 delivery。macrun 成功只表示驱动接受操作且取得后续观察，`effect_verified=false`，业务效果由 agent 根据画面判断。
+| MCP 工具 | 作用 |
+|---|---|
+| `device_status` | worker 在线状态及最新同步信息 |
+| `exec_start` | 提交 shell 任务，立即返回 `task_id` |
+| `task_get` / `task_cancel` | 查询状态、日志、最终结果 / 请求取消 |
+| `file_list` / `file_read` / `file_write` / `file_move` | 文件目录与分块操作 |
+| `file_image` | 把 Mac 图片以 MCP image 内容返回 |
+| `mcp_servers` / `mcp_tools` | backend 列表、原始工具定义和会话编号 |
+| `mcp_call` | 异步调用 backend 工具 |
+| `sync_start` / `sync_get` | 提交一次目录同步 / 查询同步完成状态 |
 
-`cancel` 等待原任务清理完成并返回原任务的取消结果，退出码 12。`status` 随时可用，包含环境采样时间和上次结果。重复普通任务返回 4；不排队。
+`exec_start`、`mcp_call` 必须传 UUID `request_id`。返回的 `task_id` 等于它，便于回复丢失后查询。同步使用独立的 `job_id`，由服务端保存结果。
 
-## 恢复和限制
+## 4. 通用命令和任务
 
-- worker 断线停止活动构建/测试的进程组；已经完成 run 的应用可以保留，重连后快照失效。未知结果的输入动作不自动重试。
-- server 重启将未完成结果标为 `server_restarted`，worker 清理后才重新注册。
-- worker 崩溃可能留下 `process.json`；启动时核验进程身份。状态为 `recovery_required` 时先检查记录的 pid/进程组，确认旧任务已经结束，再把 journal 移到备份位置并重启 worker。不要直接删除记录并继续执行。
-- 同步中断计划保存在 worker state 的 mirrors 子目录；下次 sync 自动修复，不需要手工移除标记。
-- GUI 前提是同一登录用户、可用显示器、已运行的 Cua daemon 和系统权限。独立的 headless build/test 不依赖 Cua；UI 测试仍需要图形环境。
-- 只面向可信单用户 demo，没有构建代码隔离；不承诺任意应用、后台输入、脱离进程组的子进程或严格崩溃自动恢复。
-- screenshot/UI 整体超时会关闭 Cua 客户端，下次重新连接；不会自动重放动作。Cua 服务本身保持外部管理。
-- 不变文件仍需扫描/哈希；大文件变化时整文件传输。协议 JSON 帧上限 16MiB，文件内容流式传输；超大型工作区清单应在后续版本分段。
-
-## Linux amd64 镜像
-
-```sh
-docker build --platform linux/amd64 -t macrun:demo .
-docker run --name macrun-demo -p 7443:7443/udp \
-  -v /absolute/server-state:/state \
-  -v /absolute/project:/work \
-  macrun:demo --socket /tmp/macrun.sock serve --listen 0.0.0.0:7443 --data /state
-docker exec macrun-demo macrun --workspace /work status --json
+```bash
+macrun exec --cwd /Users/demo/work/my-app 'pwd; make test'
+macrun task TASK_UUID
+macrun task TASK_UUID --offset 65536
+macrun cancel TASK_UUID
 ```
 
-镜像含 CLI 和 server；首次身份仍需 `init`。容器内 agent/CLI 必须访问同一 Unix socket 和项目目录。本地跨系统测试不等于远程服务器到家庭网络验证。已有 `macrun:demo` 镜像时，可运行 `python3 scripts/cross-smoke.py`，使用本机 Linux 容器服务端和 Mac worker 验证真实 Xcode 构建；仅创建并清理自己的测试容器。
+`exec` 默认超时 3600 秒，`--timeout` 可调整，`--request-id` 可固定。`call` 是完整 JSON API，操作名称与 MCP 工具对应，使用点分隔：
 
-## 代码导航
+```bash
+macrun call exec.start --args '{"request_id":"YOUR_UUID","command":"echo $MESSAGE","cwd":"/tmp","env":{"MESSAGE":"hello"},"timeout_seconds":300}'
+macrun call mcp.tools --args '{"server":"computer"}'
+macrun call mcp.call --args '{"request_id":"YOUR_UUID","server":"computer","session":"SESSION_FROM_MCP_TOOLS","tool":"get_app_state","arguments":{"app":"TextEdit"}}'
+```
 
-`src/server.rs` 管理连接与任务；`src/worker.rs` 执行任务；`src/sync.rs` 处理可恢复文件同步；`src/process.rs` 清理进程组；`src/cua.rs` 适配持久 MCP；`src/model.rs` 定义两端协议；`src/main.rs` 是 CLI。
+调用者应按发现的 backend schema 组织参数，不要假定不同 computer use 产品的参数相同。`mcp.call` 默认超时 300 秒；任务结果中的 `result.result` 为 backend 的原始 MCP result。`task_get` 会把其中的图片作为图片内容交付 agent。
 
-[需求快照](docs/requirements.md)和[设计快照](docs/design.md)来自本次 Obsidian 方案；实现差异与实际验证记录以 [validation.md](docs/validation.md) 为准。Cua 适配参考其[官方工作流](https://github.com/trycua/cua/blob/main/libs/cua-driver/rust/Skills/cua-driver/WORKFLOW.md)，实际兼容性以安装版本的 tools/list 与实测为准。
+任务状态：`accepted`、`running`、`succeeded`、`failed`、`cancelled`、`timed_out`、`unknown`。执行命令的真实退出码在 `result.exit_code`。CLI 查询成功不等于被查询任务成功，agent 必须检查状态及退出码。stdout/stderr 合并，增量日志最多每次 64 KiB。命令 stdin 关闭，不支持交互式输入；命令结束会清理其进程组内的子进程，需要常驻的命令应保持任务运行。提交结果带有 Mac 上的 result_path，过大的原始结果可用文件接口读取。
 
-## License
+断线后任务继续；重连后用原 `task_id` 查询。worker 重启会将未完成任务标记为 `unknown`，尝试清理记录的命令进程组，不自动重跑。MCP 超时、取消、进程崩溃时结果可能未知；该 backend 会话失效，需重新 `mcp_tools` 并重新观察界面。网络断线本身不会使 backend 会话失效。详见 [设计](docs/design.md)。
 
-[MIT](LICENSE) © 2026 mylxsw.
+## 5. 文件和截图
+
+```bash
+macrun call file.list --args '{"path":"/tmp"}'
+macrun call file.read --args '{"path":"/tmp/report.txt","offset":0,"length":65536,"text":true}'
+macrun download /tmp/screenshot.png ./screenshot.png
+macrun upload ./input.zip /tmp/input.zip
+```
+
+MCP 的 `file_image` 用于直接让 agent 看到 Mac 上的 PNG/JPEG（8 MiB 上限）。其他文件每次读取/写入最大 512 KiB，返回 base64 和下一字节偏移。下载比较大小及修改时间版本，发现变化则失败并保留 `.part` 文件；上传先写临时路径，再重命名。传输失败不自动续传；可重新运行。写文件不是事务目录更新。
+
+## 6. 持续目录同步
+
+Linux 源目录下的 `macrun.toml`：
+
+```toml
+remote_root = "~/work/my-app"
+exclude = ["node_modules", "dist", ".env", ".env.*"]
+sync_timeout_seconds = 120
+```
+
+```bash
+macrun --workspace /srv/code/my-app sync
+macrun --workspace /srv/code/my-app sync --watch --interval-ms 1000
+```
+
+`sync` 等到同步完成再返回；`sync --watch` 是需保持运行的前台进程，可交给服务管理器。间隔是每次同步完成后的等待时间，不是固定实时 SLA。断线自动重试；源文件在同步期间变化则本次失败，下一次重新扫描。
+
+默认排除 `.git`、`.build`、`DerivedData`、`.macrun`、`target`；其他缓存或私有文件通过 exclude 配置。保留 Mac 上未受同步管理的文件。变化文件整文件传输，没有块级增量；每轮扫描都会读取文件并计算哈希。同步失败可能已经安装部分文件，只有 `succeeded` 表示本轮完整收敛。
+
+Agent 需要自己安排同步与命令：等待一次 sync 成功后再执行；如果命令要求源码不变，应暂停 watch/停止编辑，或自行创建固定工作副本。macrun 不隐式同步，不锁定命令工作目录，也不判断是否正在编译。
+
+## 从 0.1 迁移
+
+这是明确的 demo 接口重构，协议版本从 1 升为 2，服务端和 worker 必须一起更新。
+
+- 移除 `build/test/run/shot/stop/ui` 专用命令；改用 `exec`、文件和本地 MCP 调用。
+- `macrun.toml` 仅保留同步参数。删除 `project/workspace/package/scheme/derived_data`、构建及 UI 参数。
+- worker 的 `--cua-binary/--cua-socket` 改为通用 `--config worker.toml`。
+- 推荐使用新的状态目录；旧 worker 的活动应用不会被新版本自动接管或关闭。
+- 原生 Counter 工程保留为用户自己组合命令的示例，不是产品内置工作流。
+
+## 验证和边界
+
+具体执行证据见 [验证记录](docs/validation.md)。本地协议测试不是美中跨境部署或真实 GUI 验收。当前不支持多 worker 路由、PTY/交互式 shell 输入、完整 MCP 回调、TCP fallback、同步暂停 API 或自动任务结果清理。任务及日志保留在 worker 状态目录，敏感命令和输出也会持久化；demo 按受信任单用户环境使用。
+
+本地 backend 的功能限制仍然存在：macrun 能传回操作结果，不会把“事件已发送”判断成“界面效果已经验证”。

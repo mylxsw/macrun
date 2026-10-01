@@ -8,15 +8,13 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncReadExt,
     net::{UnixListener, UnixStream},
-    sync::{Mutex, broadcast, mpsc},
+    sync::{Mutex, broadcast},
 };
-use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 struct Peer {
     connection: quinn::Connection,
-    control: mpsc::Sender<Control>,
     instance: String,
     status: Value,
     seen: u64,
@@ -26,7 +24,6 @@ struct Active {
     job_id: String,
     directory: PathBuf,
     reply: broadcast::Sender<Reply>,
-    cancel: CancellationToken,
 }
 #[derive(Default)]
 struct State {
@@ -109,7 +106,6 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
         send.finish()?;
         return Ok(());
     }
-    let (tx, mut rx) = mpsc::channel(32);
     {
         let mut s = state.lock().await;
         if s.peer.is_some() {
@@ -125,7 +121,6 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
         wire::send(&mut send, &Control::Welcome { protocol: PROTOCOL }).await?;
         s.peer = Some(Peer {
             connection: conn.clone(),
-            control: tx,
             instance: instance.clone(),
             status,
             seen: now(),
@@ -135,16 +130,10 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
     let result:Result<()>=async {
         let mut heartbeat=tokio::time::interval(Duration::from_secs(5));
         loop {tokio::select! {
-            message=control_rx.recv()=>{match message.ok_or_else(||anyhow::anyhow!("control stream closed"))?? {Control::Heartbeat{mut status}=>{
+            message=control_rx.recv()=>{match message.ok_or_else(||anyhow::anyhow!("control stream closed"))?? {Control::Heartbeat{status}=>{
                 let mut s=state.lock().await;
-                // A heartbeat queued before Done must not make a completed worker look busy again.
-                if s.active.is_none() && s.last.as_ref().is_some_and(|last|status["job_id"]==last["job_id"]) {
-                    status["ready"]=json!(s.last.as_ref().unwrap().pointer("/error/code").and_then(Value::as_str)!=Some("recovery_required"));
-                    status["job_id"]=Value::Null;
-                }
                 if let Some(p)=s.peer.as_mut(){p.status=status;p.seen=now();}
             },_=>anyhow::bail!("unexpected control")}},
-            Some(message)=rx.recv()=>wire::send(&mut send,&message).await?,
             _=heartbeat.tick()=>{if state.lock().await.peer.as_ref().is_none_or(|p|now()-p.seen>15000){anyhow::bail!("heartbeat timeout");}wire::send(&mut send,&Control::Heartbeat{status:json!({})}).await?;},
             _=conn.closed()=>break,
         }}Ok(())
@@ -165,44 +154,57 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         wire::send(&mut socket, &Reply::Status { value }).await?;
         return Ok(());
     }
-    if req.kind == "cancel" {
-        let s = state.lock().await;
-        let Some(active) = s.active.clone().filter(|a| req.args["job_id"] == a.job_id) else {
-            wire::send(
-                &mut socket,
-                &Reply::Error {
-                    error: Fault::new("invalid_config", "job is not active"),
-                },
-            )
-            .await?;
-            return Ok(());
-        };
-        let receiver = active.reply.subscribe();
-        active.cancel.cancel();
-        if let Some(peer) = &s.peer {
-            let _ = peer
-                .control
-                .send(Control::Cancel {
-                    job_id: active.job_id.clone(),
-                })
-                .await;
-        }
-        drop(s);
-        return follow(socket, active, receiver).await;
-    }
-    if ![
-        "sync", "build", "test", "run", "shot", "stop", "snapshot", "click", "type", "key",
-        "scroll",
-    ]
-    .contains(&req.kind.as_str())
-    {
-        wire::send(
-            &mut socket,
-            &Reply::Error {
-                error: Fault::new("invalid_config", "unknown command"),
+    if req.kind == "sync.get" {
+        let ident = req.args["job_id"].as_str().unwrap_or("");
+        uuid::Uuid::parse_str(ident)?;
+        let path = data.join("sync-jobs").join(ident).join("result.json");
+        let reply = match std::fs::read(path)
+            .and_then(|b| serde_json::from_slice::<Value>(&b).map_err(std::io::Error::other))
+        {
+            Ok(value) => Reply::Status { value },
+            Err(e) => Reply::Error {
+                error: Fault::new("not_found", e),
             },
-        )
-        .await?;
+        };
+        wire::send(&mut socket, &reply).await?;
+        return Ok(());
+    }
+    if req.kind != "sync" {
+        let peer = state.lock().await.peer.clone();
+        let reply = if let Some(peer) = peer {
+            let request_id = req.args.get("request_id").cloned();
+            let operation = async {
+                let (mut send, mut recv) = peer.connection.open_bi().await?;
+                wire::send(
+                    &mut send,
+                    &Task {
+                        job_id: id(),
+                        request: req,
+                        project: Project::default(),
+                        manifest: None,
+                    },
+                )
+                .await?;
+                send.finish()?;
+                wire::recv::<_, Reply>(&mut recv).await
+            };
+            match tokio::time::timeout(Duration::from_secs(35), operation).await {
+                Ok(Ok(reply)) => reply,
+                other => Reply::Error {
+                    error: Fault::new(
+                        "outcome_unknown",
+                        format!(
+                            "Connection/request interrupted: {other:?}. Query task by request_id {request_id:?}; do not repeat an action with a new ID."
+                        ),
+                    ),
+                },
+            }
+        } else {
+            Reply::Error {
+                error: Fault::new("worker_offline", "worker is not connected"),
+            }
+        };
+        wire::send(&mut socket, &reply).await?;
         return Ok(());
     }
     let project = match Project::load(&req.workspace) {
@@ -244,15 +246,15 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         return Ok(());
     }
     let job_id = id();
-    let directory = req.workspace.join(".macrun/artifacts").join(&job_id);
+    let directory = data.join("sync-jobs").join(&job_id);
     std::fs::create_dir_all(&directory)?;
     let (reply, receiver) = broadcast::channel(512);
     let active = Active {
         job_id: job_id.clone(),
         directory: directory.clone(),
         reply,
-        cancel: CancellationToken::new(),
     };
+    let detached = req.args["detach"] == true;
     let task = Task {
         job_id,
         request: req,
@@ -269,7 +271,19 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
     tokio::spawn(async move {
         execute(task, peer, state, data, background, initial).await;
     });
-    follow(socket, active, receiver).await
+    if detached {
+        wire::send(
+            &mut socket,
+            &Reply::Accepted {
+                job_id: active.job_id,
+                directory: active.directory,
+            },
+        )
+        .await?;
+        Ok(())
+    } else {
+        follow(socket, active, receiver).await
+    }
 }
 async fn follow(
     mut socket: UnixStream,
@@ -322,13 +336,6 @@ async fn execute(
             .cloned()
             .unwrap_or_else(|| Fault::new("worker_disconnected", e))
     });
-    if error
-        .as_ref()
-        .is_some_and(|e| e.code == "worker_disconnected")
-        && ["click", "type", "key", "scroll"].contains(&task.request.kind.as_str())
-    {
-        result["action_status"] = json!("unknown");
-    }
     finish(&mut result, error);
     if let Err(e) = wire::atomic_json(&active.directory.join("result.json"), &result) {
         eprintln!("persist result: {e}");
@@ -344,9 +351,6 @@ async fn execute(
             p.status["ready"] = json!(
                 result.pointer("/error/code").and_then(Value::as_str) != Some("recovery_required")
             );
-            if let Some(run) = result.get("run") {
-                p.status["run"] = run.clone();
-            }
             p.status["job_id"] = Value::Null;
         }
     }
@@ -361,7 +365,7 @@ async fn execute_inner(
     active: &Active,
     result: &mut Value,
 ) -> Result<()> {
-    let sync_needed = ["sync", "build", "test", "run"].contains(&task.request.kind.as_str());
+    let sync_needed = task.request.kind == "sync";
     if sync_needed {
         let root = task.request.workspace.clone();
         let exclusions = task.project.exclude.clone();
@@ -369,9 +373,6 @@ async fn execute_inner(
         task.manifest =
             Some(tokio::task::spawn_blocking(move || sync::scan(&root, &exclusions)).await??);
         result["phases_ms"]["scan"] = json!(now() - before);
-    }
-    if active.cancel.is_cancelled() {
-        return Err(Fault::new("cancelled", "cancelled before dispatch").into());
     }
     let (mut send, mut recv) = peer.connection.open_bi().await?;
     wire::send(&mut send, task).await?;
@@ -382,22 +383,10 @@ async fn execute_inner(
         match event {
             Event::Need { paths } => {
                 let transfer = send_files(task, &peer.connection, &paths, &mut send);
-                tokio::select! {r=transfer=>{if let Err(e)=r {let _=peer.control.send(Control::Cancel{job_id:task.job_id.clone()}).await;peer.connection.close(2u32.into(),b"sync source failed");return Err(e);}},_ = active.cancel.cancelled()=>{let _=peer.control.send(Control::Cancel{job_id:task.job_id.clone()}).await;}}
-            }
-            Event::Log { name, text } => {
-                if !["build.log", "test.log", "run.log"].contains(&name.as_str()) {
-                    anyhow::bail!("unexpected log path");
+                if let Err(e) = transfer.await {
+                    peer.connection.close(2u32.into(), b"sync source failed");
+                    return Err(e);
                 }
-                let mut f = tokio::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(active.directory.join(&name))
-                    .await?;
-                f.write_all(text.as_bytes()).await?;
-                if !result["logs"].as_array().unwrap().contains(&json!(name)) {
-                    result["logs"].as_array_mut().unwrap().push(json!(name));
-                }
-                let _ = active.reply.send(Reply::Log { name, text });
             }
             Event::Progress { phase: new } => {
                 result["phases_ms"][&phase] = json!(now() - phase_start);
@@ -411,31 +400,6 @@ async fn execute_inner(
                     for (k, v) in m {
                         result[k] = v.clone();
                     }
-                }
-            }
-            Event::Artifact { path, data } => {
-                use base64::Engine;
-                let rel = sync::relative(&path)?;
-                let dest = active.directory.join(rel);
-                if let Some(p) = dest.parent() {
-                    tokio::fs::create_dir_all(p).await?;
-                }
-                let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
-                let mut f = tokio::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(dest)
-                    .await?;
-                f.write_all(&bytes).await?;
-                if !result["artifacts"]
-                    .as_array()
-                    .unwrap()
-                    .contains(&json!(path))
-                {
-                    result["artifacts"]
-                        .as_array_mut()
-                        .unwrap()
-                        .push(json!(path));
                 }
             }
             Event::Done { error } => {

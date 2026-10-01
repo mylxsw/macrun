@@ -1,45 +1,53 @@
 #!/usr/bin/env python3
-"""Local Linux amd64 Docker server + native macOS worker, real Xcode build."""
-import json,os,pathlib,shutil,socket,subprocess,time,uuid
-repo=pathlib.Path(__file__).resolve().parents[1]; binary=repo/'target/debug/macrun'
-root=repo/'.local'/f'cross-{int(time.time())}';root.mkdir(parents=True);source=root/'source'
-shutil.copytree(repo/'examples/Counter',source)
-(source/'macrun.toml').write_text(f'remote_root={json.dumps(str(root/"mirror"))}\nderived_data={json.dumps(str(root/"DerivedData"))}\nproject="Counter.xcodeproj"\nscheme="Counter"\napp_relative_path="Build/Products/Debug/Counter.app"\n')
+"""Linux amd64 server/CLI in Docker -> Mac worker. Uses MCP fixture, not real GUI."""
+import json,pathlib,socket,subprocess,sys,tempfile,time,uuid
+binary=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
+image=sys.argv[2] if len(sys.argv)>2 else 'macrun:generic-demo'
+root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-cross-',dir='.local')).resolve()
+source=root/'source';source.mkdir();mirror=root/'mirror';server=root/'server';worker=root/'worker'
+(source/'macrun.toml').write_text(f'remote_root = {json.dumps(str(mirror))}\n')
+(source/'uncommitted.txt').write_text('Linux source v1')
+fixture=pathlib.Path('tests/fixtures/mcp.py').resolve();cfg=root/'worker.toml'
+cfg.write_text(f'[mcp.fixture]\ncommand = {json.dumps(sys.executable)}\nargs = [{json.dumps(str(fixture))}]\n')
 with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-name='macrun-cross-'+uuid.uuid4().hex[:8];worker=None;log=None
-base=['docker','exec',name,'macrun','--socket','/tmp/macrun.sock','--workspace','/demo/source']
-def call(*args,timeout=180):
- p=subprocess.run([*base,*args],capture_output=True,text=True,timeout=timeout)
- assert p.returncode==0,(args,p.returncode,p.stderr[-2000:])
- if args[0]=='status':return json.loads(p.stdout)
- directory=root/pathlib.Path(p.stdout.strip().splitlines()[-1]).relative_to('/demo')
- return json.loads((directory/'result.json').read_text())
-try:
- subprocess.run([str(binary),'init','--data',str(root/'server')],check=True,capture_output=True)
- subprocess.run(['docker','run','-d','--platform','linux/amd64','--name',name,'-p',f'{port}:7443/udp','-v',f'{root}:/demo','macrun:demo','--socket','/tmp/macrun.sock','serve','--listen','0.0.0.0:7443','--data','/demo/server'],check=True,capture_output=True)
- log=open(root/'worker.log','w')
- worker=subprocess.Popen([str(binary),'worker','--server',f'127.0.0.1:{port}','--cert',str(root/'server/cert.der'),'--token-file',str(root/'server/token'),'--data',str(root/'worker')],stdout=log,stderr=log)
+name='macrun-cross-'+uuid.uuid4().hex[:10]
+def run(args):return subprocess.check_output(args,text=True,stderr=subprocess.STDOUT,timeout=45).strip()
+def call(kind,**args):return json.loads(run(['docker','exec',name,'macrun','--workspace','/source','call',kind,'--args',json.dumps(args)]))
+def wait(task):
  for _ in range(100):
-  try:
-   status=call('status','--json',timeout=10)
-   if (status.get('worker') or {}).get('ready'):break
-  except AssertionError:pass
-  time.sleep(.2)
- else:raise RuntimeError('cross-platform worker did not register')
- first=call('build');assert first['status']=='succeeded'
- assert (root/'DerivedData/Build/Products/Debug/Counter.app/Contents/MacOS/Counter').exists()
- assert call('sync')['sync']['bytes']==0
- with (source/'main.swift').open('a') as f:f.write('\n// Uncommitted cross-platform change\n')
- second=call('build');assert second['sync']['files']==1
- assert (root/'mirror/main.swift').read_text()==(source/'main.swift').read_text()
- (root/'summary.json').write_text(json.dumps({'first':first,'second':second,'environment':status},indent=2))
- print('PASS: Linux amd64 server/CLI -> QUIC UDP -> macOS arm64 worker -> real Xcode build; second build transferred one changed source file')
+  v=call('task.get',task_id=task)
+  if 'ended_at' in v:return v
+  time.sleep(.1)
+ raise AssertionError('task timed out')
+wrk=None;log=None;started=False
+try:
+ run([str(binary),'init','--data',str(server)])
+ run(['docker','run','--rm','-d','--platform','linux/amd64','--name',name,'-p',f'127.0.0.1:{port}:7443/udp','-v',f'{server}:/state','-v',f'{source}:/source:ro',image,'serve','--data','/state'])
+ started=True
+ log=open(root/'worker.log','w');wrk=subprocess.Popen([str(binary),'worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(cfg)],stdout=log,stderr=log)
+ for _ in range(100):
+  v=json.loads(run(['docker','exec',name,'macrun','status']))
+  if v['connected']:break
+  time.sleep(.1)
+ else:raise AssertionError('worker not connected')
+ result=json.loads(run(['docker','exec',name,'macrun','--workspace','/source','sync']))
+ assert result['status']=='succeeded' and (mirror/'uncommitted.txt').read_text()=='Linux source v1'
+ task=call('exec.start',request_id=str(uuid.uuid4()),command='uname -s; cat uncommitted.txt',cwd=str(mirror))['task_id']
+ v=wait(task);assert v['status']=='succeeded' and 'Darwin' in v['output']['text']
+ (source/'uncommitted.txt').write_text('Linux source v2')
+ result=json.loads(run(['docker','exec',name,'macrun','--workspace','/source','sync']))
+ assert result['sync']['files']==1
+ discovery=call('mcp.tools',server='fixture')
+ task=call('mcp.call',request_id=str(uuid.uuid4()),server='fixture',session=discovery['session'],tool='observe',arguments={'text':'跨平台'})['task_id']
+ v=wait(task);assert v['result']['result']['content'][1]['type']=='image'
+ assert '跨平台' in json.loads(v['result']['result']['content'][0]['text'])['text']
+ (root/'result.json').write_text(json.dumps({'status':'passed','image':image,'checks':['Linux amd64 server/CLI','Mac arm64 command execution','incremental sync','MCP image result']},indent=2))
+ print('PASS: Linux amd64 server/CLI -> QUIC -> Mac worker: sync, command, MCP image result')
  print(f'Evidence: {root}')
 finally:
- if worker is not None:
-  worker.terminate()
-  try:worker.wait(timeout=5)
-  except subprocess.TimeoutExpired:worker.kill();worker.wait()
+ if wrk is not None and wrk.poll() is None:
+  wrk.terminate()
+  try:wrk.wait(timeout=5)
+  except subprocess.TimeoutExpired:wrk.kill();wrk.wait()
  if log:log.close()
- subprocess.run(['docker','container','stop','--time','2',name],capture_output=True)
- subprocess.run(['docker','container','remove',name],capture_output=True)
+ if started:subprocess.run(['docker','stop','-t','2',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

@@ -1,0 +1,8 @@
+# Replace command with an installed absolute path. Only one backend is needed.
+[mcp.computer]
+command = "/absolute/path/to/ocu"
+args = ["mcp"]
+
+# [mcp.cua]
+# command = "/absolute/path/to/cua-driver"
+# args = ["mcp"]

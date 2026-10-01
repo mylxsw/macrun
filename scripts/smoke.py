@@ -1,96 +1,129 @@
 #!/usr/bin/env python3
-"""Real QUIC + Unix socket smoke test; a tiny fake xcodebuild isolates task orchestration."""
-import json, os, pathlib, shutil, socket, subprocess, sys, tempfile, time
-binary = pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
-root = pathlib.Path(tempfile.mkdtemp(prefix='macrun-smoke-'))
-source, mirror, cache, server, worker = [root / n for n in ('source','mirror','cache','server','worker')]
-source.mkdir(); tools = root/'bin'; tools.mkdir(); sock = str(root/'cli.sock')
-with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s: s.bind(('127.0.0.1',0)); port=s.getsockname()[1]
-compiler=tools/'xcodebuild'
-compiler.write_text('''#!/bin/sh
-printf 'STREAM-BEGIN\\n'
-if [ -f delay ]; then sleep 30 & echo $! > child.pid; wait; fi
-if [ -f fail ]; then printf 'deliberate compile error\\n' >&2; exit 1; fi
-printf 'STREAM-END\\n'
-''');compiler.chmod(0o755)
-(source/'macrun.toml').write_text(f'remote_root = {json.dumps(str(mirror))}\nderived_data = {json.dumps(str(cache))}\nproject = "Demo.xcodeproj"\nscheme = "Demo"\n')
-(source/'hello.swift').write_text('first version')
+"""Real CLI/MCP -> Unix socket -> QUIC -> generic worker; no GUI required."""
+import base64,json,os,pathlib,socket,subprocess,sys,tempfile,time,uuid
+binary=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
+fixture=pathlib.Path('tests/fixtures/mcp.py').resolve()
+root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-generic-'))
+source=root/'source';source.mkdir();mirror=root/'mirror';server=root/'server';worker=root/'worker'
+sock=str(root/'cli.sock')
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
+(source/'macrun.toml').write_text(f'remote_root = {json.dumps(str(mirror))}\nexclude = ["ignored"]\n')
+(source/'hello.txt').write_text('first');(source/'ignored').write_text('skip')
+config=root/'worker.toml';config.write_text(f'[mcp.fixture]\ncommand = {json.dumps(sys.executable)}\nargs = [{json.dumps(str(fixture))}]\n')
 base=[str(binary),'--socket',sock,'--workspace',str(source)]
-children=[]; files=[]
-def spawn(args, env=None):
-    log=open(root/f'process-{len(children)}.log','w');files.append(log)
-    p=subprocess.Popen([str(binary),*args],stdout=log,stderr=log,env=env);children.append(p);return p
-def call(*args, code=0):
-    p=subprocess.run([*base,*args],capture_output=True,text=True,timeout=40)
-    assert p.returncode==code,(args,p.returncode,p.stdout,p.stderr)
-    if args[0]=='status':return json.loads(p.stdout)
-    directory=pathlib.Path(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
-    return json.loads((directory/'result.json').read_text()) if directory else p.stderr
-
-def wait_ready():
-    for _ in range(150):
-        try:
-            v=call('status','--json')
-            if v.get('worker',{}).get('ready') and not v.get('active'):return
-        except (AssertionError,AttributeError):pass
-        time.sleep(.1)
-    raise AssertionError('worker not ready')
+children=[];logs=[]
+def spawn(args):
+ f=open(root/f'process-{len(children)}.log','w');logs.append(f)
+ p=subprocess.Popen([str(binary),*args],stdout=f,stderr=f);children.append(p);return p
+def cli(*args,ok=True):
+ p=subprocess.run([*base,*args],capture_output=True,text=True,timeout=45)
+ if ok:assert p.returncode==0,(args,p.stdout,p.stderr)
+ else:assert p.returncode!=0,(args,p.stdout);return p.stderr
+ return p.stdout.strip()
+def call(kind,**args):return json.loads(cli('call',kind,'--args',json.dumps(args)))
+def ready():
+ for _ in range(180):
+  try:
+   if json.loads(cli('status'))['connected']:return
+  except Exception:pass
+  time.sleep(.1)
+ raise AssertionError('worker did not reconnect')
+def done(task):
+ for _ in range(200):
+  v=call('task.get',task_id=task)
+  if 'ended_at' in v:return v
+  time.sleep(.05)
+ raise AssertionError(('task did not finish',task))
+def submit(command,**extra):return call('exec.start',command=command,cwd=str(mirror),request_id=str(uuid.uuid4()),**extra)['task_id']
 try:
-    subprocess.run([str(binary),'init','--data',str(server)],check=True,capture_output=True)
-    srv=spawn(['--socket',sock,'serve','--listen',f'127.0.0.1:{port}','--data',str(server)])
-    for _ in range(50):
-        if pathlib.Path(sock).exists():break
-        time.sleep(.1)
-    assert 'worker_offline' in call('sync',code=3)
-    env=dict(os.environ,PATH=f'{tools}:{os.environ["PATH"]}')
-    worker_args=['worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker)]
-    wrk=spawn(worker_args,env);wait_ready()
-    first=call('sync');assert first['sync']['files']==2
-    second=call('sync');assert second['sync']['bytes']==0 and second['sync']['files']==0
-    (source/'hello.swift').write_text('second version');assert call('build')['sync']['files']==1
-    assert (mirror/'hello.swift').read_text()=='second version'
-    (mirror/'generated').write_text('keep');(source/'hello.swift').unlink();call('sync');assert not (mirror/'hello.swift').exists() and (mirror/'generated').exists()
-    (source/'fail').write_text('');assert call('test',code=1)['error']['code']=='test_failed';(source/'fail').unlink()
-    (source/'delay').write_text('')
-    job=subprocess.Popen([*base,'build'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-    children.append(job)
-    for _ in range(100):
-        status=call('status','--json');active=status.get('active')
-        if active and (pathlib.Path(active['directory'])/'build.log').exists():break
-        time.sleep(.1)
-    else:raise AssertionError('no streamed log')
-    assert 'STREAM-BEGIN' in (pathlib.Path(active['directory'])/'build.log').read_text()
-    assert 'busy' in call('sync',code=4)
-    cancelled=call('cancel',active['job_id'],code=12);assert cancelled['error']['code']=='cancelled'
-    job.communicate(timeout=10);assert job.returncode==12
-    wait_ready();(source/'delay').unlink();call('build')
-    # CLI detachment leaves server-owned work alive.
-    (source/'delay').write_text('')
-    detached=subprocess.Popen([*base,'build'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);children.append(detached)
-    for _ in range(100):
-        active=call('status','--json').get('active')
-        if active and (pathlib.Path(active['directory'])/'build.log').exists():break
-        time.sleep(.1)
-    detached.terminate();detached.wait(timeout=5)
-    assert call('status','--json')['active']['job_id']==active['job_id']
-    call('cancel',active['job_id'],code=12);wait_ready()
-    # Server restart forces cleanup; the worker reconnects instead of replaying.
-    job=subprocess.Popen([*base,'build'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);children.append(job)
-    for _ in range(100):
-        active=call('status','--json').get('active')
-        if active and (pathlib.Path(active['directory'])/'build.log').exists():break
-        time.sleep(.1)
-    srv.kill();srv.wait();job.communicate(timeout=10)
-    srv=spawn(['--socket',sock,'serve','--listen',f'127.0.0.1:{port}','--data',str(server)])
-    wait_ready()
-    old=json.loads((pathlib.Path(active['directory'])/'result.json').read_text());assert old['error']['code']=='server_restarted'
-    (source/'delay').unlink();call('build')
-    print('PASS: offline, QUIC registration, incremental sync, deletion, unmanaged files, streamed logs, build/test, busy, cancel, CLI detachment, server restart and worker reconnect')
-    print(f'Evidence: {root}')
+ cli('init','--data',str(server))
+ srvargs=['--socket',sock,'serve','--listen',f'127.0.0.1:{port}','--data',str(server)]
+ srv=spawn(srvargs)
+ for _ in range(60):
+  if pathlib.Path(sock).exists():break
+  time.sleep(.05)
+ assert 'worker_offline' in cli('exec','--cwd','/tmp','true',ok=False)
+ wrkargs=['worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config)]
+ wrk=spawn(wrkargs);ready()
+ first=json.loads(cli('sync'));assert first['sync']['files']==2
+ assert not (mirror/'ignored').exists()
+ assert json.loads(cli('sync'))['sync']['bytes']==0
+ (source/'hello.txt').write_text('second');cli('sync');assert (mirror/'hello.txt').read_text()=='second'
+ (mirror/'generated').write_text('keep');(source/'hello.txt').unlink();cli('sync');assert not (mirror/'hello.txt').exists() and (mirror/'generated').exists()
+ assert done(submit('printf "$MSG"; exit 7',env={'MSG':'中文测试'}))['result']['exit_code']==7
+ # Idempotent replay, conflicting reuse rejected.
+ request_id=str(uuid.uuid4());args=dict(command='echo once >> count',cwd=str(mirror),request_id=request_id)
+ call('exec.start',**args);call('exec.start',**args);done(request_id);assert (mirror/'count').read_text()=='once\n'
+ assert 'different operation' in cli('call','exec.start','--args',json.dumps(dict(args,command='echo wrong')),ok=False)
+ task=submit('sleep 20');call('task.cancel',task_id=task);assert done(task)['status']=='cancelled'
+ assert done(submit('sleep 20',timeout_seconds=1))['status']=='timed_out'
+ # Arbitrary binary upload/download, > one chunk, and text offsets.
+ blob=os.urandom(1400000);local=root/'binary';local.write_bytes(blob)
+ cli('upload',str(local),str(mirror/'binary'));cli('download',str(mirror/'binary'),str(root/'download'))
+ assert (root/'download').read_bytes()==blob
+ call('file.write',path=str(mirror/'text'),text='abcdef')
+ assert call('file.read',path=str(mirror/'text'),offset=2,length=3,text=True)['text']=='cde'
+ assert any(x['name']=='binary' for x in call('file.list',path=str(mirror))['entries'])
+ # Persistent MCP state and image blocks.
+ discovery=call('mcp.tools',server='fixture');session=discovery['session'];assert discovery['result']['tools'][0]['name']=='observe'
+ def mcp(**a):return call('mcp.call',server='fixture',session=session,tool='observe',arguments=a,request_id=str(uuid.uuid4()))['task_id']
+ v=done(mcp(text='中文'));assert json.loads(v['result']['result']['content'][0]['text'])['count']==1
+ image=v['result']['result']['content'][1];assert image['type']=='image'
+ call('file.write',path=str(mirror/'shot.png'),data=image['data']);assert call('file.image',path=str(mirror/'shot.png'))['content'][0]['data']==image['data']
+ # Server loss must not cancel command or kill MCP session.
+ task=submit('echo before; sleep 3; echo after; echo once >> reconnect-count')
+ srv.kill();srv.wait();time.sleep(3.5);srv=spawn(srvargs);ready()
+ v=done(task);assert v['status']=='succeeded' and 'after' in v['output']['text']
+ assert (mirror/'reconnect-count').read_text()=='once\n'
+ assert call('mcp.tools',server='fixture')['session']==session
+ assert json.loads(done(mcp())['result']['result']['content'][0]['text'])['count']==2
+ # Backend death invalidates session, no replay; caller must rediscover.
+ assert done(mcp(crash=True))['status']=='unknown'
+ assert done(mcp())['status']=='failed'
+ new=call('mcp.tools',server='fixture');assert new['session']!=session;session=new['session']
+ assert done(mcp(error=True))['status']=='failed'
+ # Continuous sync, eventually observes changes without a build command.
+ watcher=spawn(['--socket',sock,'--workspace',str(source),'sync','--watch','--interval-ms','100'])
+ (source/'watched').write_text('auto')
+ for _ in range(80):
+  if (mirror/'watched').exists():break
+  time.sleep(.1)
+ assert (mirror/'watched').read_text()=='auto';watcher.terminate();watcher.wait()
+ # Actual stdio MCP frontend returns images, not just path/base64 text.
+ client=subprocess.Popen([*base,'mcp'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True);children.append(client)
+ def rpc(method,params={}):
+  client.stdin.write(json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params})+'\n');client.stdin.flush();return json.loads(client.stdout.readline())
+ assert rpc('initialize',{'protocolVersion':'2025-03-26'})['result']['capabilities']['tools']=={}
+ assert len(rpc('tools/list')['result']['tools'])==14
+ out=rpc('tools/call',{'name':'file_image','arguments':{'path':str(mirror/'shot.png')}})
+ assert any(c['type']=='image' for c in out['result']['content'])
+ out=rpc('tools/call',{'name':'task_get','arguments':{'task_id':mcp()}})
+ # task may still be running; poll via same MCP frontend.
+ tid=json.loads(out['result']['content'][0]['text'])['task_id']
+ done(tid);out=rpc('tools/call',{'name':'task_get','arguments':{'task_id':tid}})
+ assert any(c['type']=='image' for c in out['result']['content'])
+ client.stdin.close();client.wait(timeout=5)
+ # Worker restart does not replay an accepted/running job.
+ task=submit('echo started; sleep 20; echo should-not-run >> restart-count')
+ for _ in range(50):
+  if call('task.get',task_id=task).get('output',{}).get('text'):break
+  time.sleep(.05)
+ wrk.kill();wrk.wait();wrk=spawn(wrkargs)
+ # Wait until the NEW worker answers, not just stale connected status.
+ for _ in range(180):
+  try:
+   v=call('task.get',task_id=task)
+   if v['status']=='unknown':break
+  except Exception:pass
+  time.sleep(.1)
+ else:raise AssertionError('restart did not mark unknown')
+ assert not (mirror/'restart-count').exists()
+ print('PASS: sync/increment/deletion/watch, command env/exit/cancel/timeout/dedup, binary transfer, MCP images/session/error, server reconnect, worker restart')
+ print(f'Evidence: {root}')
 finally:
-    for p in children:
-        if p.poll() is None:
-            p.terminate()
-            try:p.wait(timeout=5)
-            except subprocess.TimeoutExpired:p.kill();p.wait()
-    for f in files:f.close()
+ for p in reversed(children):
+  if p.poll() is None:
+   p.terminate()
+   try:p.wait(timeout=6)
+   except subprocess.TimeoutExpired:p.kill();p.wait()
+ for f in logs:f.close()

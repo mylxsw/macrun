@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -30,24 +30,13 @@ impl Fault {
     }
     pub fn exit_code(&self) -> i32 {
         match self.code.as_str() {
-            "build_failed" | "test_failed" => 1,
-            "invalid_config" | "artifact_not_found" => 2,
+            "command_failed" => 1,
+            "invalid_config" | "not_found" => 2,
             "worker_offline" | "worker_disconnected" => 3,
             "busy" => 4,
             "sync_failed" | "source_changed" | "path_conflict" => 5,
             "timed_out" => 6,
             "connection_auth_failed" => 7,
-            "no_gui_session" | "no_display" | "not_gui_agent" => 8,
-            "window_not_found" | "window_required" => 9,
-            "cua_unavailable"
-            | "cua_refused"
-            | "capture_permission_denied"
-            | "observation_failed" => 10,
-            "app_not_running"
-            | "app_exited"
-            | "app_instance_conflict"
-            | "target_mismatch"
-            | "stale_snapshot" => 11,
             "cancelled" => 12,
             _ => 13,
         }
@@ -89,9 +78,6 @@ pub enum Control {
     Heartbeat {
         status: Value,
     },
-    Cancel {
-        job_id: String,
-    },
     Reject {
         error: Fault,
     },
@@ -104,7 +90,6 @@ pub enum Event {
     Log { name: String, text: String },
     Progress { phase: String },
     Detail { value: Value },
-    Artifact { path: String, data: String },
     Done { error: Option<Fault> },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,9 +109,7 @@ pub enum Reply {
 }
 pub fn initial_result(task: &Task) -> Value {
     json!({"job_id":task.job_id,"kind":task.request.kind,"status":"accepted","exit_code":0,
-        "started_at":now(),"project":task.project,"action_status":"not_sent",
-        "observation_status":"not_attempted","effect_verified":false,"delivery":"unknown",
-        "phases_ms":{},"logs":[],"artifacts":[]})
+        "started_at":now(),"sync_config":task.project,"phases_ms":{},"logs":[],"artifacts":[]})
 }
 pub fn finish(result: &mut Value, error: Option<Fault>) {
     result["ended_at"] = json!(now());

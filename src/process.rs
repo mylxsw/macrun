@@ -55,9 +55,44 @@ pub async fn run(
     log: &str,
     journal: &Path,
 ) -> Outcome<()> {
+    let code = run_command(
+        program,
+        args,
+        cwd,
+        &std::collections::BTreeMap::new(),
+        timeout,
+        cancel,
+        events,
+        log,
+        journal,
+    )
+    .await?;
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(Fault::new(
+            "command_failed",
+            format!("{program} exited {code}"),
+        ))
+    }
+}
+#[allow(clippy::too_many_arguments)]
+pub async fn run_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &std::collections::BTreeMap<String, String>,
+    timeout: u64,
+    cancel: &CancellationToken,
+    events: &mpsc::Sender<Event>,
+    log: &str,
+    journal: &Path,
+) -> Outcome<i32> {
     let mut cmd = Command::new(program);
     cmd.args(args)
+        .envs(env)
         .current_dir(cwd)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
@@ -79,7 +114,7 @@ pub async fn run(
     let a = tokio::spawn(pump(out, events.clone(), log.into()));
     let b = tokio::spawn(pump(err, events.clone(), log.into()));
     let result = tokio::select! {
-        status=child.wait()=>status.map_err(|e|Fault::new("recovery_required",e)).and_then(|s| if s.success(){Ok(())}else{Err(Fault::new(if log=="test.log"{"test_failed"}else{"build_failed"},format!("{program} exited {s}")))}),
+        status=child.wait()=>status.map_err(|e|Fault::new("recovery_required",e)).map(|s| s.code().unwrap_or(128)),
         _=cancel.cancelled()=>Err(Fault::new("cancelled","task cancelled")),
         _=tokio::time::sleep(Duration::from_secs(timeout))=>Err(Fault::new("timed_out",format!("{program} exceeded {timeout}s"))),
     };
@@ -108,22 +143,52 @@ pub async fn run(
 }
 async fn pump<R: tokio::io::AsyncRead + Unpin>(mut r: R, tx: mpsc::Sender<Event>, name: String) {
     let mut b = [0; 8192];
-    while let Ok(n) = r.read(&mut b).await {
-        if n == 0 {
+    let mut pending = Vec::new();
+    loop {
+        let n = r.read(&mut b).await.unwrap_or(0);
+        pending.extend_from_slice(&b[..n]);
+        let mut text = String::new();
+        loop {
+            match std::str::from_utf8(&pending) {
+                Ok(valid) => {
+                    text.push_str(valid);
+                    pending.clear();
+                    break;
+                }
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    text.push_str(std::str::from_utf8(&pending[..valid]).unwrap());
+                    pending.drain(..valid);
+                    if let Some(invalid) = e.error_len() {
+                        text.push('\u{fffd}');
+                        pending.drain(..invalid);
+                    } else {
+                        if n == 0 {
+                            text.push('\u{fffd}');
+                            pending.clear();
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if !text.is_empty()
+            && tx
+                .send(Event::Log {
+                    name: name.clone(),
+                    text,
+                })
+                .await
+                .is_err()
+        {
             break;
         }
-        if tx
-            .send(Event::Log {
-                name: name.clone(),
-                text: String::from_utf8_lossy(&b[..n]).into(),
-            })
-            .await
-            .is_err()
-        {
+        if n == 0 {
             break;
         }
     }
 }
+
 pub fn recover(journal: &Path) -> Outcome<()> {
     if !journal.exists() {
         return Ok(());

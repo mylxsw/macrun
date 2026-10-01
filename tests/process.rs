@@ -47,3 +47,30 @@ async fn cancellation_kills_descendants_and_preserves_streamed_output() {
     }
     assert!(!t.path().join("process.json").exists());
 }
+
+#[tokio::test]
+async fn pipe_reads_do_not_split_utf8_characters() {
+    let t = tempfile::tempdir().unwrap();
+    let (tx, mut rx) = mpsc::channel(100);
+    process::run(
+        "/bin/sh",
+        &[
+            "-c".into(),
+            "printf '\\344'; sleep 0.1; printf '\\275\\240'".into(),
+        ],
+        t.path(),
+        5,
+        &CancellationToken::new(),
+        &tx,
+        "output.log",
+        &t.path().join("process.json"),
+    )
+    .await
+    .unwrap();
+    drop(tx);
+    let mut output = String::new();
+    while let Some(Event::Log { text, .. }) = rx.recv().await {
+        output.push_str(&text);
+    }
+    assert_eq!(output, "你");
+}

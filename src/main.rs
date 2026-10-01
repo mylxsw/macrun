@@ -1,12 +1,14 @@
-use clap::{Args, Parser, Subcommand};
-use macrun::{
-    model::{Reply, Request},
-    wire,
-};
-use serde_json::{Value, json};
-use std::path::PathBuf;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use clap::{Parser, Subcommand};
+use macrun::{frontend, model::id, wire};
+use serde_json::json;
+use std::{path::PathBuf, time::Duration};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[derive(Parser)]
-#[command(version, about = "Remote macOS build and window automation demo")]
+#[command(
+    version,
+    about = "Generic remote commands, files, directory sync and local MCP tools"
+)]
 struct Cli {
     #[arg(
         long,
@@ -22,7 +24,6 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Cmd {
-    /// Generate a local TLS identity and shared token (copy cert.der and token to worker).
     Init {
         #[arg(long)]
         data: PathBuf,
@@ -42,107 +43,65 @@ enum Cmd {
         token_file: PathBuf,
         #[arg(long)]
         data: PathBuf,
-        #[arg(long, default_value = "cua-driver")]
-        cua_binary: String,
         #[arg(long)]
-        cua_socket: Option<String>,
+        config: Option<PathBuf>,
     },
-    Status {
-        #[arg(long)]
-        json: bool,
+    /// Expose generic tools to Claude Code using stdio MCP.
+    Mcp,
+    Status,
+    /// Call any generic operation with JSON arguments (e.g. file.read, mcp.tools).
+    Call {
+        operation: String,
+        #[arg(long, default_value = "{}")]
+        args: String,
     },
-    Sync,
-    Build,
-    Test {
+    Exec {
         #[arg(long)]
-        filter: Option<String>,
+        cwd: String,
+        #[arg(long)]
+        request_id: Option<String>,
+        #[arg(long, default_value_t = 3600)]
+        timeout: u64,
+        command: String,
     },
-    Run,
-    Shot(Target),
-    Stop {
-        #[arg(long)]
-        run: Option<String>,
+    Task {
+        task_id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
     },
     Cancel {
-        job_id: String,
+        task_id: String,
     },
-    Ui {
-        #[command(subcommand)]
-        action: Ui,
-    },
-}
-#[derive(Args)]
-struct Target {
-    #[arg(long)]
-    run: Option<String>,
-    #[arg(long)]
-    window: Option<u64>,
-}
-#[derive(Args)]
-struct ActionTarget {
-    #[arg(long)]
-    run: String,
-    #[arg(long)]
-    window: u64,
-    #[arg(long)]
-    snapshot: String,
-}
-#[derive(Subcommand)]
-enum Ui {
-    Snapshot(Target),
-    Click {
-        #[command(flatten)]
-        target: ActionTarget,
-        #[arg(long, conflicts_with = "x")]
-        element: Option<String>,
-        #[arg(long, requires = "y", allow_hyphen_values = true)]
-        x: Option<f64>,
-        #[arg(long, requires = "x", allow_hyphen_values = true)]
-        y: Option<f64>,
-    },
-    Type {
-        #[command(flatten)]
-        target: ActionTarget,
+    /// Synchronize once; --watch continuously polls for changes. Does not run commands.
+    Sync {
         #[arg(long)]
-        element: String,
-        #[arg(long)]
-        text: String,
+        watch: bool,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
     },
-    Key {
-        #[command(flatten)]
-        target: ActionTarget,
-        #[arg(long)]
-        key: String,
+    Download {
+        remote: String,
+        local: PathBuf,
     },
-    /// dy is signed wheel steps (positive down), not pixels/points.
-    Scroll {
-        #[command(flatten)]
-        target: ActionTarget,
-        #[arg(long)]
-        element: String,
-        #[arg(long, allow_hyphen_values = true)]
-        dy: i64,
+    Upload {
+        local: PathBuf,
+        remote: String,
     },
-}
-fn target(t: ActionTarget) -> Value {
-    json!({"run":t.run,"window":t.window,"snapshot":t.snapshot})
 }
 #[tokio::main]
 async fn main() {
     if let Err(e) = entry().await {
         eprintln!("{e:#}");
-        std::process::exit(13);
+        std::process::exit(1);
     }
 }
 async fn entry() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let root = std::fs::canonicalize(&cli.workspace)?;
     let (kind, args) = match cli.command {
         Cmd::Init { data } => {
             wire::init_tls(&data)?;
-            println!(
-                "Created identity in {}. Copy cert.der and token to the worker; keep key.der on the server.",
-                data.display()
-            );
+            println!("Created identity: {}", data.display());
             return Ok(());
         }
         Cmd::Serve { listen, data } => {
@@ -153,112 +112,130 @@ async fn entry() -> anyhow::Result<()> {
             cert,
             token_file,
             data,
-            cua_binary,
-            cua_socket,
+            config,
         } => {
             return macrun::worker::worker(macrun::worker::Options {
                 server,
                 cert,
                 token_file,
                 data,
-                cua_binary,
-                cua_socket,
+                config,
             })
             .await;
         }
-        Cmd::Status { .. } => ("status", json!({})),
-        Cmd::Sync => ("sync", json!({})),
-        Cmd::Build => ("build", json!({})),
-        Cmd::Test { filter } => ("test", json!({"filter":filter})),
-        Cmd::Run => ("run", json!({})),
-        Cmd::Shot(t) => ("shot", json!({"run":t.run,"window":t.window})),
-        Cmd::Stop { run } => ("stop", json!({"run":run})),
-        Cmd::Cancel { job_id } => ("cancel", json!({"job_id":job_id})),
-        Cmd::Ui { action } => match action {
-            Ui::Snapshot(t) => ("snapshot", json!({"run":t.run,"window":t.window})),
-            Ui::Click {
-                target: t,
-                element,
-                x,
-                y,
-            } => {
-                if element.is_none() && (x.is_none() || y.is_none()) {
-                    eprintln!("click requires --element or both --x and --y");
-                    std::process::exit(2);
+        Cmd::Mcp => return frontend::mcp(cli.socket, root).await,
+        Cmd::Status => ("status".into(), json!({})),
+        Cmd::Call { operation, args } => (operation, serde_json::from_str(&args)?),
+        Cmd::Exec {
+            cwd,
+            request_id,
+            timeout,
+            command,
+        } => (
+            "exec.start".into(),
+            json!({"cwd":cwd,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
+        ),
+        Cmd::Task { task_id, offset } => (
+            "task.get".into(),
+            json!({"task_id":task_id,"offset":offset}),
+        ),
+        Cmd::Cancel { task_id } => ("task.cancel".into(), json!({"task_id":task_id})),
+        Cmd::Sync { watch, interval_ms } => {
+            if interval_ms == 0 {
+                anyhow::bail!("interval must be positive");
+            }
+            loop {
+                let operation = async {
+                    let accepted =
+                        frontend::request(&cli.socket, &root, "sync", json!({"detach":true}))
+                            .await?;
+                    let jid = accepted["job_id"].clone();
+                    loop {
+                        let v = frontend::request(
+                            &cli.socket,
+                            &root,
+                            "sync.get",
+                            json!({"job_id":jid}),
+                        )
+                        .await?;
+                        if v.get("ended_at").is_some() {
+                            if v["status"] != "succeeded" {
+                                anyhow::bail!("{v}");
+                            }
+                            println!("{}", serde_json::to_string(&v)?);
+                            return Ok::<_, anyhow::Error>(());
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                };
+                let r = tokio::select! {r=operation=>r,_=tokio::signal::ctrl_c()=>return Ok(())};
+                if !watch {
+                    return r;
                 }
-                let mut a = target(t);
-                if let Some(e) = element {
-                    a["element"] = json!(e);
+                if let Err(e) = r {
+                    eprintln!("sync retry: {e}");
                 }
-                if let Some(x) = x {
-                    a["x"] = json!(x);
-                    a["y"] = json!(y);
-                }
-                ("click", a)
-            }
-            Ui::Type {
-                target: t,
-                element,
-                text,
-            } => {
-                let mut a = target(t);
-                a["element"] = json!(element);
-                a["text"] = json!(text);
-                ("type", a)
-            }
-            Ui::Key { target: t, key } => {
-                let mut a = target(t);
-                a["key"] = json!(key);
-                ("key", a)
-            }
-            Ui::Scroll {
-                target: t,
-                element,
-                dy,
-            } => {
-                let mut a = target(t);
-                a["element"] = json!(element);
-                a["dy"] = json!(dy);
-                ("scroll", a)
-            }
-        },
-    };
-    let workspace = std::fs::canonicalize(cli.workspace)?;
-    let mut socket = match tokio::net::UnixStream::connect(cli.socket).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("server_unavailable: {e}");
-            std::process::exit(3);
-        }
-    };
-    wire::send(
-        &mut socket,
-        &Request {
-            kind: kind.into(),
-            workspace,
-            args,
-        },
-    )
-    .await?;
-    loop {
-        match wire::recv::<_, Reply>(&mut socket).await? {
-            Reply::Accepted { job_id, .. } => eprintln!("job {job_id}"),
-            Reply::Log { text, .. } => eprint!("{text}"),
-            Reply::Status { value } => {
-                println!("{}", serde_json::to_string_pretty(&value)?);
-                return Ok(());
-            }
-            Reply::Done { result, directory } => {
-                if let Some(e) = result.get("error") {
-                    eprintln!("{e}");
-                }
-                println!("{}", directory.display());
-                std::process::exit(result["exit_code"].as_i64().unwrap_or(13) as i32);
-            }
-            Reply::Error { error } => {
-                eprintln!("{error}");
-                std::process::exit(error.exit_code());
+                tokio::select! {_=tokio::time::sleep(Duration::from_millis(interval_ms))=>{},_=tokio::signal::ctrl_c()=>return Ok(())}
             }
         }
-    }
+        Cmd::Download { remote, local } => {
+            let temp = local.with_extension(format!("{}.part", id()));
+            let mut f = tokio::fs::File::create(&temp).await?;
+            let mut offset = 0;
+            let mut version = None;
+            loop {
+                let v = frontend::request(
+                    &cli.socket,
+                    &root,
+                    "file.read",
+                    json!({"path":remote,"offset":offset}),
+                )
+                .await?;
+                if version.as_ref().is_some_and(|old| old != &v["version"]) {
+                    anyhow::bail!(
+                        "remote file changed; partial download retained at {}",
+                        temp.display()
+                    );
+                }
+                version = Some(v["version"].clone());
+                f.write_all(&STANDARD.decode(v["data"].as_str().unwrap_or(""))?)
+                    .await?;
+                offset = v["next_offset"].as_u64().unwrap();
+                if v["eof"] == true {
+                    break;
+                }
+            }
+            f.sync_all().await?;
+            drop(f);
+            tokio::fs::rename(&temp, &local).await?;
+            println!("{}", local.display());
+            return Ok(());
+        }
+        Cmd::Upload { local, remote } => {
+            let temp = format!("{remote}.macrun-upload-{}", id());
+            let mut f = tokio::fs::File::open(local).await?;
+            let mut offset = 0;
+            let mut b = vec![0; macrun::files::CHUNK];
+            loop {
+                let n = f.read(&mut b).await?;
+                frontend::request(&cli.socket,&root,"file.write",json!({"path":temp,"offset":offset,"truncate":offset==0,"data":STANDARD.encode(&b[..n])})).await?;
+                offset += n as u64;
+                if n == 0 {
+                    break;
+                }
+            }
+            frontend::request(
+                &cli.socket,
+                &root,
+                "file.move",
+                json!({"path":temp,"destination":remote}),
+            )
+            .await?;
+            println!("{remote}");
+            return Ok(());
+        }
+    };
+    let result = frontend::request(&cli.socket, &root, &kind, args).await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
 }
