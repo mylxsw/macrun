@@ -25,16 +25,65 @@ Mac：                        macrun worker（主动连接）
 - Linux → worker 单向目录同步：包含未提交改动，文件哈希增量、受管理文件删除、符号链接和可执行位、同步中断修复；`sync --watch` 持续轮询。
 - Claude Code stdio MCP 入口：14 个通用工具，不需 agent 自己解析 QUIC 协议。
 
-## 构建
+## 常用任务（Makefile）
+
+先运行 `make` 或 `make help` 查看全部命令。macrun 是同一个程序的不同运行模式，不是两套独立代码：在 Mac 构建出的程序提供客户端/worker，在 Linux 构建出的程序提供服务端/CLI。
 
 ```bash
-cargo build --locked --release
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
-python3 scripts/smoke.py target/release/macrun
+make doctor          # 检查 Rust、C 编译器；报告 Python / Docker 状态
+make deps            # 安装缺失的 Rust，准备 rustfmt/clippy，下载 Cargo.lock 依赖
+make build-client    # 构建当前系统 release 程序：dist/darwin-arm64/macrun（Apple Silicon Mac）
+make build-worker    # 同上，便于记忆 Mac worker 的构建入口
+make build-server    # 用 Docker 构建 Linux amd64，并导出 dist/linux-amd64/macrun
+make server-image    # 构建 Linux 容器镜像 macrun:generic-demo
+make check           # 格式检查、clippy、Rust 测试
+make smoke           # 构建后执行真实本地连接测试（GUI 使用 fixture）
+make cross-smoke     # Mac 上构建两端，执行 Linux 容器 → Mac 的验证
+make install         # 将当前系统程序安装到 ~/.local/bin/macrun
 ```
 
-仓库维护机器未将 Rust 加入 PATH 时，可用 `scripts/cargo-local.sh` 代替 `cargo`。分发包需分别在 Linux/macOS 构建；Dockerfile 提供 Linux 服务端镜像构建。构建 `macrun:generic-demo` 镜像后，可在 Mac 执行 `python3 scripts/cross-smoke.py` 验证 Linux 容器到 Mac 的实际调用。
+`build-client` 不会交叉编译 macOS：请在 Mac 上运行。Linux 上不使用 Docker 时，直接 `make build` 即可构建本机服务端。`build-server` 导出的程序采用 Debian bookworm 的 glibc 环境，不是静态 musl 程序；目标服务器需有兼容运行库。
+
+构建产物统一放在当前项目的 `dist/` 下，可以直接拷贝到目标电脑，不会自动安装：
+
+```text
+dist/
+├── darwin-arm64/macrun   # Apple Silicon Mac
+└── linux-amd64/macrun    # Linux x86-64 服务端
+```
+
+本机构建按当前系统和架构命名，例如 Intel Mac 为 `darwin-amd64`；Linux ARM64 为 `linux-arm64`。`PROFILE=debug` 的本机产物单独放在 `dist/debug/<平台>/macrun`，避免覆盖 release。`target/` 只作为 Cargo 构建缓存保留。只有显式执行 `make install` 才会复制到 `PREFIX/bin`（默认 `~/.local/bin`）。
+
+可覆盖参数：
+
+```bash
+make build PROFILE=debug
+make build-server PLATFORM=linux/arm64
+make server-image IMAGE=macrun:local
+make install PREFIX=/your/install/directory
+make smoke PYTHON=python3
+```
+
+`PROFILE` 只接受 `debug/release`，默认为 `release`；Docker 服务端始终构建 release。`cross-smoke` 当前只验证 Mac 宿主 + Linux amd64。其他变量见 Makefile：`DIST_DIR`、`TARGET_DIR`、`SERVER_DIST`、`DOCKER` 等。
+
+依赖准备会优先复用当前 Rust、用户目录的 Rust，或已有工作区工具链；均不存在时，在项目 `.local/tools` 安装 Rust，不修改 shell 配置。可以通过 `MACRUN_TOOLS_ROOT` 指定存放目录；`RUST_VERSION` 指定首次安装版本。使用系统包管理器安装的 Rust 如果没有 rustup，需要自己补上 rustfmt/clippy。`make deps` 不自动安装 Docker、Python 或 computer use 应用。
+
+系统前置环境：Mac 需要 Xcode 命令行工具（`xcode-select --install`）；Debian/Ubuntu 需要 C 编译环境（`sudo apt-get install build-essential curl ca-certificates`）。运行 smoke 需要 Python 3；构建 Linux 镜像需要启动 Docker Desktop、OrbStack 或 Docker Engine。Rust 安装来自 [官方 rustup](https://rust-lang.github.io/rustup/installation/index.html)，服务端程序通过 [Docker local exporter](https://docs.docker.com/build/exporters/local-tar/) 导出。
+
+日常启动也有快捷入口（前台运行，Ctrl-C 停止）：
+
+```bash
+make init DATA=.local/server
+make serve DATA=.local/server LISTEN=0.0.0.0:7443
+make worker SERVER=SERVER_IP:7443 CERT=./cert.der TOKEN_FILE=./token WORKER_CONFIG=./worker.toml
+make status
+make sync WORKSPACE=/srv/code/my-app
+make sync-watch WORKSPACE=/srv/code/my-app INTERVAL_MS=1000
+```
+
+`worker.toml` 可从 `examples/worker.toml` 复制后修改；不接入本地 MCP 时使用 `WORKER_CONFIG=`。`make init` 不覆盖已有身份；所有服务器调用可通过 `SOCKET` 指定 Unix socket。`make mcp` 只启动已构建的程序，不会输出构建日志；Claude Code 配置仍建议直接使用下方的二进制入口。
+
+原始 Cargo 命令和 `scripts/cargo-local.sh` 保留可用。CI 也使用 `make check` 和 `make smoke PROFILE=debug`。
 
 ## 1. 启动服务器
 
