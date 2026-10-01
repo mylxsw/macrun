@@ -1,6 +1,6 @@
 # macrun 0.2 验证记录
 
-日期：2026-10-01。范围为通用远程工具重构，不把 0.1 的 Xcode/Cua 专用验证当作新版本验证。
+更新日期：2026-10-02。区分通用远程工具自动化测试与后续真实部署，不把 fixture 当作真实 GUI 验证。
 
 ## 已通过
 
@@ -21,12 +21,26 @@ MCP 测试使用仓库内 Python fixture，证明消息、图片和状态传递�
 
 原始测试日志保存在 `.local/generic-tests.log`；容器构建日志在 `.local/docker-generic-build.log`。smoke 脚本输出独立临时证据目录，含服务器/worker 日志、任务 result.json、output.log 和同步结果。
 
+## 真实部署验证（2026-10-01 至 2026-10-02）
+
+独立于以上 fixture 测试，使用 0.2 源码提交 `9bd5624` 完成了以下实际验证：
+
+- Ubuntu 24.04 ARM64 服务端 → Apple Silicon Mac worker，通过已有 Tailscale 私网运行 QUIC。服务端 systemd active/running；Mac LaunchAgent 在图形用户登录后 running。
+- 实际目录同步、watch 自动更新、命令执行（返回 Mac 主机名和 arm64）、退出码、文件读取与下载。
+- Claude Code 用户级 macrun MCP 显示 Connected；独立 stdio 协议客户端验证 14 个工具及 device_status。
+- 真实 CuaDriver 0.26.0 backend 工具发现、启动计算器、点击数字 2，随后获取的新控件树与真实截图均显示 2。
+- 该截图经 macrun 的 stdio MCP `task_get` 返回 image 内容，不只是 worker 文件路径。
+- 后续为 Oracle 上的 Claude/Codex 安装了提交 `3788092` 的 usage Skill，文件逐一核对一致；Codex MCP 配置已启用。没有把配置存在当作实际 Codex 模型会话验收。
+
+部署凭据、主机地址、私人配置及原始任务日志不进入公共文档。本地部署证据位于 `.local/deployment/verification.log`、`live-discovery.txt`、`get_window_state-result.json`，这些文件不随 Git 发布。
+
 ## 尚未验证
 
-- 没有部署到实际美国 Linux 和中国 Mac mini；尚未证明跨境 UDP 可达性、延迟、长时间重连稳定性。
-- 没有安装或变更实际 Cua/OCU 及其 GUI 权限；截图来自 fixture，真实应用点击、输入和前后台行为仍需独立验收。
-- 没有在实际 Claude Code 会话中注册 MCP；已通过真实 stdio 协议客户端验证工具发现和图片内容。
-- 没有性能 SLA、多设备或多用户验证。
+- 没有持续的 WAN 性能 SLA 或长期重连稳定性证明；本次私网路径成功不代表任意公网 UDP 路径都可达。
+- 没有完整的实际业务项目编译与 GUI 自动化验收；计算器点击不能替代项目测试。
+- 没有实际 Claude/Codex 模型驱动的完整端到端会话验收；已有客户端连接状态和真实 stdio 工具协议证据。
+- 没有整机重启、注销、休眠、锁屏和无头环境下的恢复验收。
+- 没有多设备或多用户验证。
 
 ## 行为边界
 

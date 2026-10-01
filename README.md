@@ -1,245 +1,281 @@
 # macrun
 
-让远程 AI agent 使用另一台电脑上的命令、文件和本地 MCP 工具。目标电脑主动连接服务器，无需目标电脑的公网入站端口。
+**Give a remote coding agent access to the computer where the work needs to run.**
 
-典型场景：Claude Code 在美国 Linux 上修改代码，中国 Mac mini 接收工作副本、执行命令、运行桌面应用；agent 获取日志和截图，调用 computer use，自己决定后续步骤。macrun 不提供编译、Xcode 或测试框架专用工具。
+English | [简体中文](README.zh-CN.md)
 
-**当前版本：0.2 demo。** 单服务器、单 worker；Linux/macOS；QUIC/UDP 连接。代码同步、命令执行与 MCP 调用相互独立，agent 自己组装流程。
+Your agent edits code on a Linux server. Your Mac builds the app, runs tests, and hosts the desktop. macrun connects them: synchronize the working copy, start commands, inspect results, and call the Mac's existing computer-use tools through MCP.
+
+**Status: 0.2 demo · Linux/macOS · one server + one worker · MIT.** Designed for a trusted, single-user environment. macrun supplies general tools; the agent decides how to build, test, and operate your application.
+
+[Install](#install) · [Quick start](#quick-start) · [Claude / Codex](#connect-your-agent) · [Usage](#everyday-workflows) · [Agent installation guide](docs/agent-install.md) · [Operations](docs/operations.md)
+
+## Why macrun?
+
+A local computer-use MCP server can operate the computer on which it runs. macrun makes that capability available to an agent on another machine, alongside commands and file synchronization.
+
+- **Keep editing on the agent host.** Send uncommitted source changes to the worker without a Git commit or push.
+- **Run long jobs without holding a tool call open.** Receive a task ID immediately, then retrieve logs, exit codes, and results.
+- **Reuse local MCP tools.** Discover and call a configured stdio backend, including computer-use tools, while preserving its session and original text/image results.
+- **Bring evidence back to the agent.** Read files, download artifacts, and return screenshots as MCP image content.
+- **Recover from network interruptions.** Worker-owned tasks continue through connection loss. Query the same task after reconnecting instead of repeating side effects.
+
+macrun does not replace your compiler, test framework, or desktop automation backend. There are no Xcode-specific commands: `exec_start`, files, sync, and backend calls are the building blocks.
+
+## How it works
 
 ```text
-Linux：Claude Code → macrun mcp → macrun serve
-                                      ⇅ QUIC
-Mac：                        macrun worker（主动连接）
-                               ├─ shell 后台任务
-                               ├─ 文件读写和目录同步
-                               └─ 持久 stdio MCP → Cua / OCU / 其他本地工具
+Agent host (typically Linux)                    Worker (typically macOS)
+
+Claude Code / Codex                             macrun worker
+        │ stdio MCP                                  │
+    macrun mcp → macrun serve ←── outbound QUIC ───────┤
+                      ↑                              ├─ shell tasks
+                 macrun CLI                          ├─ files / source mirror
+                                                     └─ local stdio MCP backend
+                                                        (e.g. CuaDriver)
 ```
 
-## 能力
+The **worker initiates the connection**; it does not need a public inbound port. The server's configured UDP endpoint must be reachable, directly or over an existing private network such as Tailscale. SSH is useful for installation but is **not** macrun's runtime transport. There is no TCP fallback.
 
-- 任意 shell 命令：工作目录、环境变量、超时、任务编号、日志字节偏移、退出码、取消进程组。
-- Mac 保存任务和结果；网络断开不会取消命令或重建本地 MCP 会话。
-- 用 UUID `request_id` 去重：同编号同参数返回已有任务，同编号不同参数拒绝。
-- 本地 stdio MCP 服务配置、工具发现、异步调用。按 backend 串行调用，保留原始参数、文本、图片及错误结果。
-- 文件列目录、分块读写、PNG/JPEG 图片内容；CLI 上传下载任意文件。
-- Linux → worker 单向目录同步：包含未提交改动，文件哈希增量、受管理文件删除、符号链接和可执行位、同步中断修复；`sync --watch` 持续轮询。
-- Claude Code stdio MCP 入口：14 个通用工具，不需 agent 自己解析 QUIC 协议。
+One executable provides `serve`, `worker`, CLI and `mcp` modes. Server-host paths and worker paths are different filesystems. The MCP frontend talks to the server through a local Unix socket.
 
-## Agent Skill（Claude Code / Codex）
+## Install
 
-项目附带 [macrun Skill](skills/macrun/SKILL.md)，指导 agent 正确区分两端路径、同步后执行、查询异步任务、处理断线与重复请求，以及发现 computer-use 工具并验证界面效果。Skill 不绑定某台服务器或某个 backend。
+The documented installation path is a source build. Git, Make, a C compiler/linker and Rust are required. `make deps` reuses an existing Rust installation or bootstraps a local toolchain, adds rustfmt/clippy when rustup is available, and fetches locked dependencies. It does not install Docker, Python, Xcode, or a computer-use backend.
 
-把整个 `skills/macrun/` 目录放到 **agent 运行的机器** 的技能目录中。下面在本仓库根目录执行，按使用的 agent 选择一组；目标已存在时先比较合并，不直接覆盖：
+- **macOS:** install Xcode Command Line Tools (`xcode-select --install`). Full Xcode is only needed by projects that require it.
+- **Ubuntu/Debian:** install prerequisites with `sudo apt-get update && sudo apt-get install -y git build-essential curl ca-certificates`.
+- **Docker:** needed only for the Docker-based Linux build/image targets.
+- **Python 3:** needed for smoke tests, not normal server/worker operation.
+
+### Let an agent handle setup
+
+Give your agent this request, filling in the hosts you want to use:
+
+> Read https://github.com/mylxsw/macrun/blob/main/docs/agent-install.md and install macrun with SERVER as the agent/server host and WORKER as the target computer. Inspect their architectures and existing configuration first. Configure my installed Claude Code/Codex clients, install the usage Skill, and verify a real remote command. Configure computer use only if a backend is available; report any remaining GUI or permission steps.
+
+The guide is also available as [raw Markdown](https://raw.githubusercontent.com/mylxsw/macrun/main/docs/agent-install.md). Relative links resolve against this repository; when a tool only retrieves raw files, fetch the linked files from the same revision.
+
+### Native build on each machine
+
+Run on both the agent host and the worker, using the same source revision:
 
 ```bash
-# Claude Code：用户级技能
+git clone https://github.com/mylxsw/macrun.git
+cd macrun
+# Optionally check out a chosen revision on BOTH machines before building.
+make deps
+make build
+make install
+export PATH="$HOME/.local/bin:$PATH"
+macrun --version
+```
+
+`make build` writes a copy to the project's `dist/<os>-<arch>/macrun`; it does not install anything. `make install` explicitly copies the native binary to `~/.local/bin/macrun`. Use `PREFIX=/your/path` to change that installation prefix.
+
+| Build host / target | Output |
+| --- | --- |
+| Apple Silicon Mac | `dist/darwin-arm64/macrun` |
+| Intel Mac | `dist/darwin-amd64/macrun` |
+| Linux x86-64 | `dist/linux-amd64/macrun` |
+| Linux ARM64 | `dist/linux-arm64/macrun` |
+
+### Build the Linux binary on a Mac
+
+With Docker running, choose the **server's architecture**, not the Mac's:
+
+```bash
+make build-client                         # Native Mac binary
+make build-server PLATFORM=linux/amd64     # x86-64 Linux server
+# Or, for an ARM64 server:
+make build-server PLATFORM=linux/arm64
+```
+
+Copy the matching `dist/linux-*/macrun` to your Linux host and install it there. These Docker-built binaries use Debian bookworm's glibc environment; they are not static musl executables. Native Linux builds do not require Docker. `make server-image` builds a runnable container image; it does not deploy one.
+
+## Quick start
+
+First establish a foreground connection. Add service management only after it works. `SERVER_SSH` below is your SSH alias; `SERVER_IP` is a numeric IP reachable from the worker (they need not resolve to the same interface).
+
+### 1. Start the server — agent host
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
+macrun init --data "$HOME/.local/share/macrun-server"
+macrun serve --listen 0.0.0.0:7443 --data "$HOME/.local/share/macrun-server"
+```
+
+Run `init` **once for a new installation**. It creates the server identity and refuses to replace an existing one. Keep `key.der` on the server. Allow UDP 7443 along the chosen network path, or bind to a reachable private interface instead of `0.0.0.0`.
+
+### 2. Start the worker — target computer
+
+In a worker terminal, replace the two values:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+SERVER_SSH=your-server-ssh-alias
+SERVER_IP=192.0.2.10   # Example only: replace with the reachable server IP
+mkdir -p "$HOME/.local/share/macrun-worker"
+scp "$SERVER_SSH:.local/share/macrun-server/cert.der" "$HOME/.local/share/macrun-worker/"
+scp "$SERVER_SSH:.local/share/macrun-server/token" "$HOME/.local/share/macrun-worker/"
+chmod 600 "$HOME/.local/share/macrun-worker/token"
+macrun worker --server "$SERVER_IP:7443" \
+  --cert "$HOME/.local/share/macrun-worker/cert.der" \
+  --token-file "$HOME/.local/share/macrun-worker/token" \
+  --data "$HOME/.local/share/macrun-worker"
+```
+
+The copy commands assume SSH logs in as the server's service user. No backend configuration is needed for commands, files, or sync.
+
+### 3. Verify — a second terminal on the agent host
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
+macrun status
+macrun exec --cwd /tmp 'hostname; uname -m; echo macrun-ok'
+macrun task TASK_UUID  # Replace with the returned task_id; poll until complete
+```
+
+Expect `connected: true`, then a task with `status: succeeded`, `result.exit_code: 0`, and the **worker's** hostname plus `macrun-ok`. An accepted task is not yet a completed task.
+
+For persistent services, restart commands and logs, continue with [Operations](docs/operations.md). For an agent performing the installation, use the [agent installation guide](docs/agent-install.md).
+
+## Connect your agent
+
+Run registration on the **agent/server host**, after the binary and socket are available. Inspect any existing `macrun` entry first; do not overwrite unrelated configuration.
+
+```bash
+# Claude Code
+claude mcp add --scope user macrun -- "$HOME/.local/bin/macrun" \
+  --socket "$HOME/.local/share/macrun-server/control.sock" mcp
+claude mcp get macrun
+
+# Codex
+codex mcp add macrun -- "$HOME/.local/bin/macrun" \
+  --socket "$HOME/.local/share/macrun-server/control.sock" mcp
+codex mcp get macrun
+```
+
+Use a new agent session. The MCP frontend defaults to its working directory; start the agent in your source project, configure an explicit `--workspace /absolute/source/path` before `mcp`, or pass `workspace` to `sync_start`.
+
+### Install the usage Skill
+
+From the repository root **on the agent host**, choose the appropriate destination:
+
+```bash
+# Claude Code
 mkdir -p ~/.claude/skills
 test -e ~/.claude/skills/macrun || cp -R skills/macrun ~/.claude/skills/macrun
 
-# Codex：用户级技能
+# Codex
 mkdir -p ~/.agents/skills
 test -e ~/.agents/skills/macrun || cp -R skills/macrun ~/.agents/skills/macrun
 ```
 
-也可以把同一个目录放到工作项目的 `.claude/skills/macrun/` 或 `.agents/skills/macrun/`。复制方式在升级时需要重新比较并更新；不要只复制 SKILL.md，关联的 `references/` 也需要保留。
+These commands leave an existing skill untouched; compare and update it deliberately when upgrading. Copy the whole folder, including references. Project-local destinations are `.claude/skills/macrun/` and `.agents/skills/macrun/`.
 
-安装后新开 agent 会话，在 Claude Code 中可用 `/macrun`，在 Codex 中可用 `$macrun`，也可以直接描述远程操作任务让 agent 选择技能。MCP 连接仍需单独按下文配置；Skill 本身不会部署服务或注册 MCP。安装机制参考 [Claude Code Skills](https://code.claude.com/docs/en/skills) 和 [Codex Skills](https://developers.openai.com/codex/skills/)。
+Invoke `/macrun` in Claude Code or `$macrun` in Codex. The [usage Skill](skills/macrun/SKILL.md) guides task execution; the [installation guide](docs/agent-install.md) guides setup. Neither installs a compiler/backend nor registers MCP automatically. See the official [Claude skills](https://code.claude.com/docs/en/skills) and [Codex skills](https://developers.openai.com/codex/skills/) documentation for host-specific discovery behavior.
 
-例如：“使用 macrun 同步当前项目到配置的 Mac 目录，等待同步成功，执行项目测试并检查退出码；如果需要界面操作，先发现 backend 工具，操作后返回新的截图验证结果。”
+Try this prompt:
 
-## 常用任务（Makefile）
+> Use macrun to check the worker, synchronize this project's configured source mirror, wait for sync to succeed, run the project's tests on the worker, and report the exit code and relevant logs. If you operate the UI, discover the backend tools first and verify the result with a fresh screenshot.
 
-先运行 `make` 或 `make help` 查看全部命令。macrun 是同一个程序的不同运行模式，不是两套独立代码：在 Mac 构建出的程序提供客户端/worker，在 Linux 构建出的程序提供服务端/CLI。
+## Everyday workflows
 
-```bash
-make doctor          # 检查 Rust、C 编译器；报告 Python / Docker 状态
-make deps            # 安装缺失的 Rust，准备 rustfmt/clippy，下载 Cargo.lock 依赖
-make build-client    # 构建当前系统 release 程序：dist/darwin-arm64/macrun（Apple Silicon Mac）
-make build-worker    # 同上，便于记忆 Mac worker 的构建入口
-make build-server    # 用 Docker 构建 Linux amd64，并导出 dist/linux-amd64/macrun
-make server-image    # 构建 Linux 容器镜像 macrun:generic-demo
-make check           # 格式检查、clippy、Rust 测试
-make smoke           # 构建后执行真实本地连接测试（GUI 使用 fixture）
-make cross-smoke     # Mac 上构建两端，执行 Linux 容器 → Mac 的验证
-make install         # 将当前系统程序安装到 ~/.local/bin/macrun
-```
+### Synchronize source, then run a command
 
-`build-client` 不会交叉编译 macOS：请在 Mac 上运行。Linux 上不使用 Docker 时，直接 `make build` 即可构建本机服务端。`build-server` 导出的程序采用 Debian bookworm 的 glibc 环境，不是静态 musl 程序；目标服务器需有兼容运行库。
-
-构建产物统一放在当前项目的 `dist/` 下，可以直接拷贝到目标电脑，不会自动安装：
-
-```text
-dist/
-├── darwin-arm64/macrun   # Apple Silicon Mac
-└── linux-amd64/macrun    # Linux x86-64 服务端
-```
-
-本机构建按当前系统和架构命名，例如 Intel Mac 为 `darwin-amd64`；Linux ARM64 为 `linux-arm64`。`PROFILE=debug` 的本机产物单独放在 `dist/debug/<平台>/macrun`，避免覆盖 release。`target/` 只作为 Cargo 构建缓存保留。只有显式执行 `make install` 才会复制到 `PREFIX/bin`（默认 `~/.local/bin`）。
-
-可覆盖参数：
-
-```bash
-make build PROFILE=debug
-make build-server PLATFORM=linux/arm64
-make server-image IMAGE=macrun:local
-make install PREFIX=/your/install/directory
-make smoke PYTHON=python3
-```
-
-`PROFILE` 只接受 `debug/release`，默认为 `release`；Docker 服务端始终构建 release。`cross-smoke` 当前只验证 Mac 宿主 + Linux amd64。其他变量见 Makefile：`DIST_DIR`、`TARGET_DIR`、`SERVER_DIST`、`DOCKER` 等。
-
-依赖准备会优先复用当前 Rust、用户目录的 Rust，或已有工作区工具链；均不存在时，在项目 `.local/tools` 安装 Rust，不修改 shell 配置。可以通过 `MACRUN_TOOLS_ROOT` 指定存放目录；`RUST_VERSION` 指定首次安装版本。使用系统包管理器安装的 Rust 如果没有 rustup，需要自己补上 rustfmt/clippy。`make deps` 不自动安装 Docker、Python 或 computer use 应用。
-
-系统前置环境：Mac 需要 Xcode 命令行工具（`xcode-select --install`）；Debian/Ubuntu 需要 C 编译环境（`sudo apt-get install build-essential curl ca-certificates`）。运行 smoke 需要 Python 3；构建 Linux 镜像需要启动 Docker Desktop、OrbStack 或 Docker Engine。Rust 安装来自 [官方 rustup](https://rust-lang.github.io/rustup/installation/index.html)，服务端程序通过 [Docker local exporter](https://docs.docker.com/build/exporters/local-tar/) 导出。
-
-日常启动也有快捷入口（前台运行，Ctrl-C 停止）：
-
-```bash
-make init DATA=.local/server
-make serve DATA=.local/server LISTEN=0.0.0.0:7443
-make worker SERVER=SERVER_IP:7443 CERT=./cert.der TOKEN_FILE=./token WORKER_CONFIG=./worker.toml
-make status
-make sync WORKSPACE=/srv/code/my-app
-make sync-watch WORKSPACE=/srv/code/my-app INTERVAL_MS=1000
-```
-
-`worker.toml` 可从 `examples/worker.toml` 复制后修改；不接入本地 MCP 时使用 `WORKER_CONFIG=`。`make init` 不覆盖已有身份；所有服务器调用可通过 `SOCKET` 指定 Unix socket。`make mcp` 只启动已构建的程序，不会输出构建日志；Claude Code 配置仍建议直接使用下方的二进制入口。
-
-原始 Cargo 命令和 `scripts/cargo-local.sh` 保留可用。CI 也使用 `make check` 和 `make smoke PROFILE=debug`。
-
-## 1. 启动服务器
-
-在运行 Claude Code 的 Linux 上：
-
-```bash
-macrun init --data /srv/macrun
-macrun --socket /tmp/macrun.sock serve --listen 0.0.0.0:7443 --data /srv/macrun
-```
-
-将生成的 `cert.der` 和 `token` 复制到目标电脑。`key.der` 留在服务器。服务器需允许所配置的 UDP 端口；当前没有 TCP/SSH 备用传输，跨境可达性和性能需要实测。
-
-## 2. 启动目标电脑
-
-`worker.toml` 示例：
+Create `macrun.toml` in the **server-side source project**:
 
 ```toml
-[mcp.computer]
-command = "/absolute/path/to/ocu"
-args = ["mcp"]
-
-# 也可以使用 Cua，名称完全由你指定，不必同时安装二者。
-# [mcp.cua]
-# command = "/absolute/path/to/cua-driver"
-# args = ["mcp"]
-```
-
-每个 backend 可设置 `env = { KEY = "value" }` 和 `cwd = "/absolute/path"`。配置只在 worker 启动时读取。没有 MCP 需求时可不传 `--config`。
-
-```bash
-macrun worker --server SERVER_IP:7443 \
-  --cert ./cert.der --token-file ./token \
-  --data ./worker-state --config ./worker.toml
-```
-
-computer use 的安装、Mac 图形登录会话和系统权限仍由原工具负责。macrun 不会伪造显示器、AX 窗口或截屏结果。启动模板见 `deploy/dev.macrun.worker.plist`；服务端模板见 `deploy/macrun-server.service`。
-
-## 3. 接入 Claude Code
-
-在 Linux 的 MCP 配置中注册本地进程（路径替换为实际绝对路径）：
-
-```json
-{
-  "mcpServers": {
-    "macrun": {
-      "command": "/usr/local/bin/macrun",
-      "args": ["--socket", "/tmp/macrun.sock", "--workspace", "/srv/code/my-app", "mcp"]
-    }
-  }
-}
-```
-
-标准输入输出只用于 MCP，诊断日志走 stderr。支持 MCP 2025-03-26；backend 兼容 2024-11-05、2025-03-26、2025-06-18。只实现工具能力，不是完整的 MCP 任意消息代理；resources、prompts、sampling/elicitation 回调和进度通知转发尚未实现。
-
-| MCP 工具 | 作用 |
-|---|---|
-| `device_status` | worker 在线状态及最新同步信息 |
-| `exec_start` | 提交 shell 任务，立即返回 `task_id` |
-| `task_get` / `task_cancel` | 查询状态、日志、最终结果 / 请求取消 |
-| `file_list` / `file_read` / `file_write` / `file_move` | 文件目录与分块操作 |
-| `file_image` | 把 Mac 图片以 MCP image 内容返回 |
-| `mcp_servers` / `mcp_tools` | backend 列表、原始工具定义和会话编号 |
-| `mcp_call` | 异步调用 backend 工具 |
-| `sync_start` / `sync_get` | 提交一次目录同步 / 查询同步完成状态 |
-
-`exec_start`、`mcp_call` 必须传 UUID `request_id`。返回的 `task_id` 等于它，便于回复丢失后查询。同步使用独立的 `job_id`，由服务端保存结果。
-
-## 4. 通用命令和任务
-
-```bash
-macrun exec --cwd /Users/demo/work/my-app 'pwd; make test'
-macrun task TASK_UUID
-macrun task TASK_UUID --offset 65536
-macrun cancel TASK_UUID
-```
-
-`exec` 默认超时 3600 秒，`--timeout` 可调整，`--request-id` 可固定。`call` 是完整 JSON API，操作名称与 MCP 工具对应，使用点分隔：
-
-```bash
-macrun call exec.start --args '{"request_id":"YOUR_UUID","command":"echo $MESSAGE","cwd":"/tmp","env":{"MESSAGE":"hello"},"timeout_seconds":300}'
-macrun call mcp.tools --args '{"server":"computer"}'
-macrun call mcp.call --args '{"request_id":"YOUR_UUID","server":"computer","session":"SESSION_FROM_MCP_TOOLS","tool":"get_app_state","arguments":{"app":"TextEdit"}}'
-```
-
-调用者应按发现的 backend schema 组织参数，不要假定不同 computer use 产品的参数相同。`mcp.call` 默认超时 300 秒；任务结果中的 `result.result` 为 backend 的原始 MCP result。`task_get` 会把其中的图片作为图片内容交付 agent。
-
-任务状态：`accepted`、`running`、`succeeded`、`failed`、`cancelled`、`timed_out`、`unknown`。执行命令的真实退出码在 `result.exit_code`。CLI 查询成功不等于被查询任务成功，agent 必须检查状态及退出码。stdout/stderr 合并，增量日志最多每次 64 KiB。命令 stdin 关闭，不支持交互式输入；命令结束会清理其进程组内的子进程，需要常驻的命令应保持任务运行。提交结果带有 Mac 上的 result_path，过大的原始结果可用文件接口读取。
-
-断线后任务继续；重连后用原 `task_id` 查询。worker 重启会将未完成任务标记为 `unknown`，尝试清理记录的命令进程组，不自动重跑。MCP 超时、取消、进程崩溃时结果可能未知；该 backend 会话失效，需重新 `mcp_tools` 并重新观察界面。网络断线本身不会使 backend 会话失效。详见 [设计](docs/design.md)。
-
-## 5. 文件和截图
-
-```bash
-macrun call file.list --args '{"path":"/tmp"}'
-macrun call file.read --args '{"path":"/tmp/report.txt","offset":0,"length":65536,"text":true}'
-macrun download /tmp/screenshot.png ./screenshot.png
-macrun upload ./input.zip /tmp/input.zip
-```
-
-MCP 的 `file_image` 用于直接让 agent 看到 Mac 上的 PNG/JPEG（8 MiB 上限）。其他文件每次读取/写入最大 512 KiB，返回 base64 和下一字节偏移。下载比较大小及修改时间版本，发现变化则失败并保留 `.part` 文件；上传先写临时路径，再重命名。传输失败不自动续传；可重新运行。写文件不是事务目录更新。
-
-## 6. 持续目录同步
-
-Linux 源目录下的 `macrun.toml`：
-
-```toml
-remote_root = "~/work/my-app"
+remote_root = "/Users/YOUR_USER/work/my-app"
 exclude = ["node_modules", "dist", ".env", ".env.*"]
 sync_timeout_seconds = 120
 ```
 
 ```bash
-macrun --workspace /srv/code/my-app sync
-macrun --workspace /srv/code/my-app sync --watch --interval-ms 1000
+macrun --workspace /absolute/source/my-app sync
+macrun exec --cwd /Users/YOUR_USER/work/my-app 'make test'
+macrun task TASK_UUID
+# Optional continuous sync; keep this process running, Ctrl-C to stop:
+macrun --workspace /absolute/source/my-app sync --watch --interval-ms 1000
 ```
 
-`sync` 等到同步完成再返回；`sync --watch` 是需保持运行的前台进程，可交给服务管理器。间隔是每次同步完成后的等待时间，不是固定实时 SLA。断线自动重试；源文件在同步期间变化则本次失败，下一次重新扫描。
+Use your project's real command and paths. Sync transfers uncommitted files, preserves executable bits and symlinks, and propagates deletion of managed files while keeping unrelated generated files. Defaults exclude `.git`, `.build`, `DerivedData`, `.macrun`, `target`. Changed files transfer whole; this is not block-level delta sync.
 
-默认排除 `.git`、`.build`、`DerivedData`、`.macrun`、`target`；其他缓存或私有文件通过 exclude 配置。保留 Mac 上未受同步管理的文件。变化文件整文件传输，没有块级增量；每轮扫描都会读取文件并计算哈希。同步失败可能已经安装部分文件，只有 `succeeded` 表示本轮完整收敛。
+Sync and execution are independent. Wait for sync success before building. A failed sync may leave partial changes; it is not a transactional checkout. Each watch interval starts after the previous sync completes. To require a fixed source snapshot, pause edits/watch or use an isolated fixed copy.
 
-Agent 需要自己安排同步与命令：等待一次 sync 成功后再执行；如果命令要求源码不变，应暂停 watch/停止编辑，或自行创建固定工作副本。macrun 不隐式同步，不锁定命令工作目录，也不判断是否正在编译。
+### Commands, files, and artifacts
 
-## 从 0.1 迁移
+```bash
+macrun exec --cwd /tmp --timeout 7200 'your-long-running-command'
+macrun task TASK_UUID --offset 0
+macrun cancel TASK_UUID
+macrun call file.read --args '{"path":"/tmp/report.txt","text":true}'
+macrun upload ./input.zip /tmp/input.zip
+macrun download /tmp/report.txt ./report.txt
+```
 
-这是明确的 demo 接口重构，协议版本从 1 升为 2，服务端和 worker 必须一起更新。
+Remote paths belong to the worker; upload sources and download destinations belong to the CLI host. Logs combine stdout/stderr and use byte offsets (up to 64 KiB per read). File chunks are limited to 512 KiB; `file_image` returns existing PNG/JPEG images up to 8 MiB. Downloads detect file-version changes and may leave a `.part` file on failure; automatic resume is not implemented.
 
-- 移除 `build/test/run/shot/stop/ui` 专用命令；改用 `exec`、文件和本地 MCP 调用。
-- `macrun.toml` 仅保留同步参数。删除 `project/workspace/package/scheme/derived_data`、构建及 UI 参数。
-- worker 的 `--cua-binary/--cua-socket` 改为通用 `--config worker.toml`。
-- 推荐使用新的状态目录；旧 worker 的活动应用不会被新版本自动接管或关闭。
-- 原生 Counter 工程保留为用户自己组合命令的示例，不是产品内置工作流。
+Commands have no interactive stdin/PTY. Their process group is cleaned up on completion; do not rely on `command &` to install a persistent service. Use a service manager or keep the task running.
 
-## 验证和边界
+### Computer use through a local backend
 
-具体执行证据见 [验证记录](docs/validation.md)。本地协议测试不是美中跨境部署或真实 GUI 验收。当前不支持多 worker 路由、PTY/交互式 shell 输入、完整 MCP 回调、TCP fallback、同步暂停 API 或自动任务结果清理。任务及日志保留在 worker 状态目录，敏感命令和输出也会持久化；demo 按受信任单用户环境使用。
+Install and validate your chosen stdio MCP backend on the worker first. For an installed CuaDriver app, create `worker.toml` on that worker:
 
-本地 backend 的功能限制仍然存在：macrun 能传回操作结果，不会把“事件已发送”判断成“界面效果已经验证”。
+```toml
+[mcp.computer]
+command = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
+args = ["mcp"]
+```
+
+Restart the worker with `--config /absolute/path/to/worker.toml` added to its existing arguments. A backend may also set `env` and `cwd`; configuration is read at worker startup. macrun does not install desktop tools or grant macOS Accessibility/Screen Recording permissions.
+
+Discover `mcp_servers` → `mcp_tools`, save the returned backend session, submit `mcp_call` using the discovered schema, then poll `task_get`. Completed backend images are returned as image content to the agent. After a click, observe the window again: an input acknowledgement is not proof of the visual result. `file_image` reads a file; it does not take a screenshot.
+
+## Tool contract and recovery
+
+| MCP tools | Purpose |
+| --- | --- |
+| `device_status` | Connection and latest synchronization state |
+| `exec_start` | Start a shell task on the worker |
+| `task_get`, `task_cancel` | Read state/logs/results; request cancellation |
+| `file_list`, `file_read`, `file_write`, `file_move` | Remote directory and file operations |
+| `file_image` | Return an existing worker image as MCP content |
+| `mcp_servers`, `mcp_tools`, `mcp_call` | Discover and call local worker backends |
+| `sync_start`, `sync_get` | Start and inspect one source synchronization |
+
+`exec_start` and `mcp_call` require a UUID `request_id`; their `task_id` is that UUID. Reuse the same ID and arguments after uncertain delivery. A new ID may repeat side effects. Sync uses a separate `job_id` queried through `sync_get`.
+
+Task states: `accepted`, `running`, `succeeded`, `failed`, `cancelled`, `timed_out`, `unknown`. Check the state **and** command exit code/backend result. Network loss preserves worker tasks and backend sessions; worker restart marks unfinished tasks `unknown` and does not replay them. Backend timeout/cancellation/crash can invalidate its session. Rediscover tools and observe actual effects before retrying. See the [usage Skill](skills/macrun/SKILL.md) and [design notes (Chinese)](docs/design.md).
+
+## Development and evidence
+
+```bash
+make help          # All targets and configurable defaults
+make check         # Formatting, clippy, Rust tests
+make smoke         # Real local transport/task/file/MCP tests; fixture GUI
+make cross-smoke   # Mac host + Linux amd64 Docker server; fixture GUI
+make build PROFILE=debug
+```
+
+Debug distributions use `dist/debug/<platform>/macrun`; Cargo's intermediate files remain in `target/`. `make deps` does not change shell startup files. `MACRUN_TOOLS_ROOT` overrides toolchain storage; `RUST_VERSION` selects the initial bootstrap version. See [Makefile](Makefile) for `DIST_DIR`, `TARGET_DIR`, `PREFIX`, `PLATFORM` and runtime targets.
+
+See [validation evidence](docs/validation.md) for automated tests and the separately verified Linux ARM64 → Mac deployment with real Cua screenshots. Tests using a fixture do not establish GUI correctness. Contributions should include a focused change, relevant checks and precise evidence; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Current limits
+
+- Single server/worker; no multi-device routing or multi-user isolation.
+- Tools-only MCP frontend, not a transparent proxy for resources, prompts, sampling, elicitation or progress notifications. Frontend protocol: `2025-03-26`; backend negotiation supports `2024-11-05`, `2025-03-26`, `2025-06-18`.
+- No TCP fallback, interactive shell, automatic build orchestration, sync pause API or task/log retention policy.
+- No claim of unattended GUI reliability through logout, sleep or reboot. Desktop access depends on the backend, OS permissions and graphical session.
+- Commands and results persist on the worker. Treat this demo as trusted remote execution, not a hardened sandbox.
+
+Upgrading from 0.1 removes specialized build/UI commands and changes the wire protocol; update both ends together. Project config now accepts only `remote_root`, `exclude`, `sync_timeout_seconds`. Worker backends use `--config`, replacing old Cua-specific flags. Use new state directories for the 0.1 → 0.2 migration and inspect existing app processes separately.
+
+## License
+
+[MIT](LICENSE).
