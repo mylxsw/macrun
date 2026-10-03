@@ -10,3 +10,5 @@ pub mod backend;
 pub mod engine;
 pub mod files;
 pub mod frontend;
+
+pub mod logging;

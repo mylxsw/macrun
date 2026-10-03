@@ -41,6 +41,11 @@ impl Engine {
                     v["recovery"] = json!(process::recover(&journal).err());
                 }
                 wire::atomic_json(&p, &v)?;
+                crate::logging::event(
+                    "worker",
+                    "task_recovered",
+                    json!({"task_id":v["task_id"],"status":"unknown","reason":"worker_restarted"}),
+                );
             }
         }
         let backends = config
@@ -181,9 +186,18 @@ impl Engine {
                 }
             }
             result["ended_at"] = json!(now());
-            if let Err(e) = wire::atomic_json(&path, &result) {
-                eprintln!("persist task result: {e}");
+            if wire::atomic_json(&path, &result).is_err() {
+                crate::logging::event("worker", "persist_failed", json!({"task_id":ident}));
             }
+            crate::logging::event(
+                "worker",
+                "task_finished",
+                json!({
+                    "operation":kind,"task_id":ident,"status":result["status"],
+                    "duration_ms":now().saturating_sub(result["started_at"].as_u64().unwrap_or(now())),
+                    "exit_code":result.pointer("/result/exit_code")
+                }),
+            );
             engine.tasks.lock().await.remove(&ident);
         });
         Ok(

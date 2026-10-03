@@ -65,15 +65,15 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
     std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
     let endpoint = wire::server(listen, &data)?;
     let state = Arc::new(Mutex::new(State::default()));
-    eprintln!(
-        "macrun-server listening on {}, CLI {}",
-        endpoint.local_addr()?,
-        socket.display()
+    crate::logging::event(
+        "server",
+        "listening",
+        json!({"address":endpoint.local_addr()?.to_string(),"socket":socket}),
     );
     loop {
         tokio::select! {
-            incoming=endpoint.accept()=>{if let Some(incoming)=incoming {let s=state.clone();let t=token.clone();tokio::spawn(async move {if let Err(e)=register(incoming,s,t).await {eprintln!("worker connection: {e}");}});}},
-            accepted=local.accept()=>{let (stream,_)=accepted?;let s=state.clone();let d=data.clone();tokio::spawn(async move {if let Err(e)=handle_cli(stream,s,d).await{eprintln!("CLI: {e}");}});},
+            incoming=endpoint.accept()=>{if let Some(incoming)=incoming {let s=state.clone();let t=token.clone();tokio::spawn(async move {if register(incoming,s,t).await.is_err() {crate::logging::event("server", "connection_error", json!({"status":"failed"}));}});}},
+            accepted=local.accept()=>{let (stream,_)=accepted?;let s=state.clone();let d=data.clone();tokio::spawn(async move {if handle_cli(stream,s,d).await.is_err(){crate::logging::event("server", "cli_error", json!({"status":"failed","reason":"request_decode_or_transport_failed"}));}});},
             _=tokio::signal::ctrl_c()=>break,
         }
     }
@@ -126,6 +126,7 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
             seen: now(),
         });
     }
+    crate::logging::event("server", "worker_connected", json!({"instance":instance}));
     let mut control_rx = wire::read_channel::<_, Control>(recv);
     let result:Result<()>=async {
         let mut heartbeat=tokio::time::interval(Duration::from_secs(5));
@@ -144,19 +145,36 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
         s.peer = None;
     }
     drop(s);
+    crate::logging::event(
+        "server",
+        "worker_disconnected",
+        json!({"instance":instance}),
+    );
     result
 }
 async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Result<()> {
     let req: Request = wire::recv(&mut socket).await?;
+    let request_id = id();
+    let mut log = crate::logging::Operation::new("server", &req.kind, &request_id);
+    log.context(&req.args);
     if req.kind == "status" {
         let s = state.lock().await;
         let value = json!({"connected":s.peer.is_some(),"worker":s.peer.as_ref().map(|p|&p.status),"sampled_at":s.peer.as_ref().map(|p|p.seen),"active":s.active.as_ref().map(|a|json!({"job_id":a.job_id,"directory":a.directory})),"last":s.last});
-        wire::send(&mut socket, &Reply::Status { value }).await?;
+        log.send(&mut socket, &Reply::Status { value }).await?;
         return Ok(());
     }
     if req.kind == "sync.get" {
         let ident = req.args["job_id"].as_str().unwrap_or("");
-        uuid::Uuid::parse_str(ident)?;
+        if uuid::Uuid::parse_str(ident).is_err() {
+            log.send(
+                &mut socket,
+                &Reply::Error {
+                    error: Fault::new("invalid_argument", "job_id must be a UUID returned by sync"),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
         let path = data.join("sync-jobs").join(ident).join("result.json");
         let reply = match std::fs::read(path)
             .and_then(|b| serde_json::from_slice::<Value>(&b).map_err(std::io::Error::other))
@@ -166,19 +184,19 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
                 error: Fault::new("not_found", e),
             },
         };
-        wire::send(&mut socket, &reply).await?;
+        log.send(&mut socket, &reply).await?;
         return Ok(());
     }
     if req.kind != "sync" {
         let peer = state.lock().await.peer.clone();
         let reply = if let Some(peer) = peer {
-            let request_id = req.args.get("request_id").cloned();
+            let task_request_id = req.args.get("request_id").cloned();
             let operation = async {
                 let (mut send, mut recv) = peer.connection.open_bi().await?;
                 wire::send(
                     &mut send,
                     &Task {
-                        job_id: id(),
+                        job_id: request_id.clone(),
                         request: req,
                         project: Project::default(),
                         manifest: None,
@@ -194,7 +212,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
                     error: Fault::new(
                         "outcome_unknown",
                         format!(
-                            "Connection/request interrupted: {other:?}. Query task by request_id {request_id:?}; do not repeat an action with a new ID."
+                            "Connection/request interrupted: {other:?}. Query task by request_id {task_request_id:?}; do not repeat an action with a new ID."
                         ),
                     ),
                 },
@@ -204,19 +222,19 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
                 error: Fault::new("worker_offline", "worker is not connected"),
             }
         };
-        wire::send(&mut socket, &reply).await?;
+        log.send(&mut socket, &reply).await?;
         return Ok(());
     }
     let project = match Project::load(&req.workspace) {
         Ok(p) => p,
         Err(error) => {
-            wire::send(&mut socket, &Reply::Error { error }).await?;
+            log.send(&mut socket, &Reply::Error { error }).await?;
             return Ok(());
         }
     };
     let mut s = state.lock().await;
     if let Some(a) = &s.active {
-        wire::send(
+        log.send(
             &mut socket,
             &Reply::Error {
                 error: Fault::new("busy", format!("current job: {}", a.job_id)),
@@ -226,7 +244,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         return Ok(());
     }
     let Some(peer) = s.peer.clone() else {
-        wire::send(
+        log.send(
             &mut socket,
             &Reply::Error {
                 error: Fault::new("worker_offline", "worker is not connected"),
@@ -236,7 +254,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         return Ok(());
     };
     if peer.status["ready"] != true {
-        wire::send(
+        log.send(
             &mut socket,
             &Reply::Error {
                 error: Fault::new("recovery_required", peer.status.to_string()),
@@ -272,7 +290,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         execute(task, peer, state, data, background, initial).await;
     });
     if detached {
-        wire::send(
+        log.send(
             &mut socket,
             &Reply::Accepted {
                 job_id: active.job_id,
@@ -282,6 +300,11 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         .await?;
         Ok(())
     } else {
+        log.reply(&Reply::Accepted {
+            job_id: active.job_id.clone(),
+            directory: active.directory.clone(),
+        });
+        drop(log);
         follow(socket, active, receiver).await
     }
 }
@@ -337,8 +360,13 @@ async fn execute(
             .unwrap_or_else(|| Fault::new("worker_disconnected", e))
     });
     finish(&mut result, error);
-    if let Err(e) = wire::atomic_json(&active.directory.join("result.json"), &result) {
-        eprintln!("persist result: {e}");
+    crate::logging::event(
+        "server",
+        "task_finished",
+        json!({"operation":"sync", "job_id":task.job_id, "status":result["status"], "duration_ms":now().saturating_sub(result["started_at"].as_u64().unwrap_or(now())), "error_code":result.pointer("/error/code")}),
+    );
+    if wire::atomic_json(&active.directory.join("result.json"), &result).is_err() {
+        crate::logging::event("server", "persist_failed", json!({"job_id":task.job_id}));
     }
     let _ = std::fs::remove_file(data.join("active.json"));
     {

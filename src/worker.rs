@@ -53,7 +53,7 @@ pub async fn worker(opts: Options) -> Result<()> {
             )
             .await
         };
-        tokio::select! {r=attempt=>{if let Err(e)=r {eprintln!("worker connection: {e}");}},_=tokio::signal::ctrl_c()=>break}
+        tokio::select! {r=attempt=>{crate::logging::event("worker", "reconnecting", json!({"status":if r.is_err(){"disconnected"}else{"closed"},"retry_seconds":retry}));},_=tokio::signal::ctrl_c()=>break}
         tokio::select! {_=tokio::time::sleep(Duration::from_secs(retry))=>{},_=tokio::signal::ctrl_c()=>break}
         retry = (retry * 2).min(5);
     }
@@ -84,14 +84,18 @@ async fn session(
         Control::Welcome { protocol } if protocol == PROTOCOL => {}
         other => anyhow::bail!("registration refused: {other:?}"),
     }
-    eprintln!("worker connected to {}", opts.server);
+    crate::logging::event(
+        "worker",
+        "connected",
+        json!({"server":opts.server.to_string(),"instance":instance}),
+    );
     let mut rx = wire::read_channel::<_, Control>(input);
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     let mut last = now();
     loop {
         tokio::select! {
             m=rx.recv()=>{if let Control::Heartbeat{..}=m.ok_or_else(||anyhow::anyhow!("control closed"))?? {last=now();}},
-            stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();tokio::spawn(async move {if let Err(err)=handle(out,input,c,o,e,lock).await{eprintln!("request: {err}");}});},
+            stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();tokio::spawn(async move {if handle(out,input,c,o,e,lock).await.is_err(){crate::logging::event("worker", "request_error", json!({"reason":"request_decode_or_transport_failed"}));}});},
             _=tick.tick()=>{if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
             _=conn.closed()=>break,
         }
@@ -107,6 +111,8 @@ async fn handle(
     lock: Arc<Mutex<()>>,
 ) -> Result<()> {
     let task: Task = wire::recv(&mut input).await?;
+    let mut log = crate::logging::Operation::new("worker", &task.request.kind, &task.job_id);
+    log.context(&task.request.args);
     if task.request.kind != "sync" {
         let r = engine.handle(&task.request.kind, task.request.args).await;
         let reply = match r {
@@ -115,11 +121,12 @@ async fn handle(
                 error: Fault::new("operation_failed", e),
             },
         };
-        wire::send(&mut out, &reply).await?;
+        log.send(&mut out, &reply).await?;
         out.finish()?;
         return Ok(());
     }
     let Ok(_guard) = lock.try_lock() else {
+        log.status("busy");
         wire::send(
             &mut out,
             &Event::Done {
@@ -141,6 +148,7 @@ async fn handle(
     });
     let cancel = CancellationToken::new();
     let r = receive_sync(&task, &mut input, &conn, &opts, &cancel, &tx).await;
+    log.status(if r.is_ok() { "succeeded" } else { "failed" });
     let _ = tx.send(Event::Done { error: r.err() }).await;
     drop(tx);
     let _ = writer.await;

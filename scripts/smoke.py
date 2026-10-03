@@ -45,6 +45,9 @@ try:
  assert 'worker_offline' in cli('exec','--cwd','/tmp','true',ok=False)
  wrkargs=['worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config)]
  wrk=spawn(wrkargs);ready()
+ # Malformed IDs must return an actionable error without killing the CLI connection.
+ assert 'invalid_argument' in cli('call','sync.get','--args','{"job_id":"project-name"}',ok=False)
+
  first=json.loads(cli('sync'));assert first['sync']['files']==2
  assert not (mirror/'ignored').exists()
  assert json.loads(cli('sync'))['sync']['bytes']==0
@@ -118,6 +121,18 @@ try:
   time.sleep(.1)
  else:raise AssertionError('restart did not mark unknown')
  assert not (mirror/'restart-count').exists()
+ # Operational logs are JSON lines; request payloads never appear in them.
+ records=[json.loads(line) for path in root.glob('process-*.log') for line in path.read_text().splitlines() if line.startswith('{')]
+ operations=[r for r in records if r.get('event')=='operation']
+ assert operations and all(r['time'].endswith('Z') and r['duration_ms']>=0 for r in operations)
+ assert any(r.get('error_code')=='invalid_argument' for r in operations)
+ assert any(r.get('event')=='task_finished' and r.get('status')=='timed_out' for r in records)
+ assert any(r.get('event')=='task_recovered' for r in records)
+ server_ids={r['request_id'] for r in operations if r['component']=='server'}
+ assert any(r['request_id'] in server_ids for r in operations if r['component']=='worker')
+ encoded=json.dumps(records,ensure_ascii=False)
+ assert '中文测试' not in encoded and 'should-not-run' not in encoded
+ print('PASS: timestamped operational logs, correlated request IDs, task lifecycle, no command/env payloads')
  print('PASS: sync/increment/deletion/watch, command env/exit/cancel/timeout/dedup, binary transfer, MCP images/session/error, server reconnect, worker restart')
  print(f'Evidence: {root}')
 finally:

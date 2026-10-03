@@ -273,6 +273,10 @@ On Linux, native `make build` needs no Docker. For cross-platform builds, choose
 
 `make deps` does not install Xcode, Docker, Python or desktop tools. Python 3 is needed for smoke tests. On a Mac with Docker, `make cross-smoke` checks a Linux **amd64** container against the Mac worker; fixture tests are not real GUI acceptance tests.
 
+## View operational logs
+
+The server and worker log timestamped JSON lines to stderr by default: operation, request ID, duration and outcome, plus asynchronous task completion and MCP backend/tool names. Heartbeats and payloads are omitted. On Linux use `journalctl -u macrun-server -f`; on macOS follow the LaunchAgent’s `StandardErrorPath`. See [operational logs](docs/operations.md#operational-logs) for correlation and task status details.
+
 ## Documentation and contributing
 
 | Looking for… | Read… |

@@ -273,6 +273,10 @@ Linux 本机 `make build` 不需要 Docker。跨平台构建要按 **Linux 服�
 
 `make deps` 不安装 Xcode、Docker、Python 或桌面工具。冒烟测试需要 Python 3。Mac 有 Docker 时，`make cross-smoke` 可验证 Linux **amd64** 容器与 Mac worker 的连接；fixture 测试不等于真实 GUI 验收。
 
+## 查看运行日志
+
+服务端和 Worker 默认向 stderr 输出带 UTC 时间的 JSON 日志。每次操作记录名称、请求编号、耗时和结果；后台任务结束时另记一条完成日志，MCP 调用还会记录后端和工具名称。心跳、文件内容和命令输出不会刷入运行日志。Linux 使用 `journalctl -u macrun-server -f`，Mac 查看 LaunchAgent 配置中的 `StandardErrorPath`。详细说明见[运维手册](docs/operations.md#operational-logs)。
+
 ## 文档与参与贡献
 
 | 你想了解 | 对应文档 |

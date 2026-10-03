@@ -4,6 +4,21 @@
 
 Examples use a server at `$HOME/.local/share/macrun-server`, a worker at `$HOME/.local/share/macrun-worker`, and binaries in `$HOME/.local/bin`. Each home belongs to the user **on that machine**. Adapt paths to your deployment. Never recreate identity files as a routine restart step.
 
+## Operational logs
+
+Both server and worker write one JSON line to **stderr** per handled operation, with a UTC timestamp (`time`), component, operation, request ID, outcome and elapsed milliseconds. This is enabled by default; stdout remains reserved for CLI/MCP responses. Heartbeats and individual transfer chunks are not logged.
+
+```json
+{"time":"2026-10-03T08:30:00.125Z","component":"worker","event":"operation","operation":"exec.start","request_id":"…","task_id":"…","status":"succeeded","task_status":"accepted","duration_ms":2}
+{"time":"2026-10-03T08:30:02.540Z","component":"worker","event":"task_finished","operation":"exec.start","task_id":"…","status":"succeeded","duration_ms":2417,"exit_code":0}
+```
+
+`status=succeeded` on an operation means the API request succeeded. It does **not** mean an asynchronous task finished: inspect `task_status`, or find `task_finished` by `task_id`. Every explicit poll is an operation and therefore produces a line; polling less often reduces log volume. Forwarded requests share `request_id` across server and worker. Sync uses `job_id` on the server and that ID as the worker's `request_id`.
+
+Connection, reconnection, persistence failures and interrupted-task recovery are also logged. Command text, environment values, file contents, screenshots and MCP argument/result payloads are omitted. MCP server/tool names are included. Use `task.get` for full task output and error details. A malformed sync job ID returns `invalid_argument` rather than closing the request with a UUID parser error.
+
+Use `journalctl -u macrun-server -f` on Linux, and `tail -f` on the worker plist's `StandardErrorPath` on macOS (examples below). These logs require rebuilding and restarting **both** binaries after upgrading; editing source alone does not update running services. Configure retention through journald or your chosen file log rotation tool.
+
 ## Linux server: systemd
 
 Use [deploy/macrun-server.service](../deploy/macrun-server.service) as a template. Before installing, replace `REPLACE_USER` and all paths. Its original binary path is `/usr/local/bin/macrun` and socket is `/tmp/macrun.sock`; change them if using the README's user-local installation and data-directory socket. Choose the intended listen interface. Make sure the service user owns the data directory.
