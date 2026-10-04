@@ -208,3 +208,40 @@ async fn a_day_without_tasks_still_reports_zero_total() {
     assert_eq!(snapshot["total_tasks"], 1);
     assert_eq!(snapshot["today_summary"]["total"], 0);
 }
+
+#[tokio::test]
+async fn status_groups_cover_active_and_attention_records() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path().into(), WorkerConfig::default()).unwrap();
+    for (i, status) in [
+        "succeeded",
+        "failed",
+        "timed_out",
+        "unknown",
+        "denied",
+        "cancelled",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        record(data.path(), i as u128, 10 + i as u64, status);
+    }
+    let attention = engine
+        .local_task_list(json!({"status":"attention"}))
+        .await
+        .unwrap();
+    assert_eq!(attention["filtered_total"], 4);
+    assert!(attention["tasks"].as_array().unwrap().iter().all(|t| {
+        ["failed", "timed_out", "unknown", "denied"].contains(&t["status"].as_str().unwrap())
+    }));
+    // Counts stay per status so the UI can sum any group.
+    assert_eq!(attention["counts"]["succeeded"], 1);
+    // Startup recovery turns stale active records into unknown, so write an active one after opening.
+    record(data.path(), 9, 99, "awaiting_approval");
+    let active = engine
+        .local_task_list(json!({"status":"active"}))
+        .await
+        .unwrap();
+    assert_eq!(active["filtered_total"], 1);
+    assert_eq!(active["tasks"][0]["status"], "awaiting_approval");
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v3 · 任务</title>
+<link rel="stylesheet" href="v3.css">
+<link rel="stylesheet" href="window.css">
+<script>if (location.hash === "#dark") document.documentElement.classList.add("dark");</script>
+</head>
+<body>
+<style>
+.filters{display:flex;gap:6px;align-items:center;margin-bottom:12px}
+.seg{display:inline-flex;background:var(--chip);border-radius:7px;padding:2px}
+.seg span{font-size:12px;padding:3px 10px;border-radius:5px;color:var(--muted)}
+.seg span.on{background:var(--bg);color:var(--text);box-shadow:0 .5px 2px rgba(0,0,0,.15)}
+.search{height:26px;border-radius:7px;background:var(--chip);display:flex;align-items:center;gap:6px;padding:0 9px;color:var(--faint);font-size:12.5px;width:260px}
+.md{display:grid;grid-template-columns:400px minmax(0,1fr);gap:16px}
+.grp{font-size:11px;font-weight:600;color:var(--muted);padding:8px 13px 4px;background:var(--bg-sub)}
+.li{display:flex;gap:10px;align-items:flex-start;padding:8px 13px;border-top:.5px solid var(--line)}
+.li.sel{background:rgba(10,100,214,.09)}
+.li .t{font-size:12.5px}.li .s{font-size:11px;color:var(--faint)}
+.kv{display:grid;grid-template-columns:80px 1fr;gap:5px 10px;font-size:12.5px;margin:10px 0}
+.kv dt{color:var(--muted)}.kv dd{margin:0}
+</style>
+<div class="win"><aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg>现场<span class="badge">3</span></a>
+      <a class="on"><svg class="i" viewBox="0 0 16 16"><path d="M5 4h9M5 8h9M5 12h9M2 4h.01M2 8h.01M2 12h.01"/></svg>任务<span class="badge warn">2</span></a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg>桌面控制</a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7-3-1-5.5-3.5-5.5-7v-4z"/></svg>安全与设置</a>
+    </nav>
+    <div class="side-foot">
+      <div class="row"><span class="dot ok"></span><b>gulu-server</b><span class="grow"></span><span class="mono faint">34 ms</span></div>
+      <div class="faint" style="font-size:11px;margin-top:2px">QUIC · 已连接 2 小时 · v0.2.0</div>
+    </div>
+  </aside>
+<main>
+<header class="tb"><h1>任务</h1><span class="faint" style="font-size:12px">保留 30 天 · 共 1,500 条</span><span class="grow"></span><span class="search"><svg class="i" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>命令、目录、工具或任务编号</span><span class="btn stop">停止全部</span></header>
+<div class="content">
+<div class="filters">
+<span class="seg"><span class="on">全部</span><span>进行中 3</span><span>需关注 <b style="color:var(--warn)">2</b></span><span>失败 1</span><span>成功</span></span>
+<span class="seg" style="margin-left:6px"><span class="on">所有类型</span><span>命令</span><span>同步</span><span>桌面</span></span>
+<span class="grow"></span><span class="btn sm">更多状态 ▾</span>
+</div>
+<div class="note" style="max-width:none;margin:-4px 0 12px;background:var(--bg-sub);box-shadow:none;color:var(--muted)">10 个状态筹码换成两组分段控件：“需关注”= 失败 + 超时 + 未知 + 被拒绝/过期；其余状态放进“更多状态”。列表按日期分组，类型筛选独立。</div>
+<div class="md">
+<div class="card" style="overflow:hidden">
+<div class="grp">今天</div>
+<div class="li sel"><span class="dot warn" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="ell grow">click “Run” · Xcode</span><span style="color:var(--warn);font-size:11.5px">未知</span></div><div class="s">桌面 · computer · 22:12</div></div></div>
+<div class="li"><span class="dot err" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="mono ell grow">swift build -c release</span><span style="color:var(--err);font-size:11.5px">退出码 1</span></div><div class="s">~/work/Counter · 命令 · 22:19 · 0:41</div></div></div>
+<div class="li"><span class="dot off" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="mono ell grow">ps aux | grep -i -E "macrun" …</span><span class="muted" style="font-size:11.5px">已过期</span></div><div class="s">/tmp · 等待确认 60 秒无人处理 · 22:22</div></div></div>
+<div class="li"><span class="dot ok" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="ell grow">同步 → ~/work/Counter</span><span class="muted" style="font-size:11.5px">5 个文件</span></div><div class="s">同步 · 22:10 · 0:06</div></div></div>
+<div class="grp">昨天</div>
+<div class="li"><span class="dot ok" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="mono ell grow">xcodebuild test -scheme Counter</span><span class="muted" style="font-size:11.5px">3:12</span></div><div class="s">~/work/Counter · 命令 · 18:40</div></div></div>
+<div class="li"><span class="dot ok" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="ell grow">get_window_state · Simulator</span><span class="muted" style="font-size:11.5px">观察</span></div><div class="s">桌面 · computer · 18:38</div></div></div>
+<div class="li"><span class="dot ok" style="margin-top:6px"></span><div class="grow"><div class="t row"><span class="mono ell grow">git status --short</span><span class="muted" style="font-size:11.5px">0:00</span></div><div class="s">~/work/macrun · 命令 · 18:31</div></div></div>
+<div class="row" style="padding:8px 13px;border-top:.5px solid var(--line);font-size:12px"><span class="faint grow">第 1 页 · 每页 50 条</span><span class="btn sm">上一页</span><span class="btn sm">下一页</span></div>
+</div>
+<div class="card" style="padding:14px 16px">
+<div class="row"><span class="chip warn">未知 · 不会自动重放</span><span class="chip">桌面 · computer</span><span class="grow"></span><span class="mono faint">22:12:04</span></div>
+<div style="font-size:15px;font-weight:600;margin:10px 0 2px">click “Run” · Xcode</div>
+<div class="muted" style="font-size:12.5px">执行器在这次点击期间重启，点击可能已经生效。先看当前屏幕，再决定是否让 Agent 重试。</div>
+<div class="row" style="margin-top:12px;align-items:flex-start;gap:14px">
+<div style="flex:1"><div class="label" style="margin-bottom:5px">发出前的画面</div><div class="thumb" style="height:186px"><div class="win" style="left:6%;top:8%;width:88%;height:84%"></div><div class="click" style="left:22%;top:20%"></div></div></div>
+<div style="flex:1"><div class="label" style="margin-bottom:5px">现在的画面</div><div class="thumb" style="height:186px;display:grid;place-items:center"><span class="btn primary">截一张核对</span></div></div>
+</div>
+<dl class="kv"><dt>参数</dt><dd class="mono">{"pid": 7731, "element_token": "e:41", "action": "press"}</dd><dt>会话</dt><dd class="mono">ff1a00a2 · 第 7 代</dd><dt>任务编号</dt><dd class="mono">aabbccdd-1111-4111-8111-000000000044</dd></dl>
+<div class="row"><span class="btn sm">复制任务编号</span><span class="btn sm">复制为 macrun task get</span><span class="btn sm">打开完整日志</span></div>
+</div>
+</div>
+</div></main></div></body></html>

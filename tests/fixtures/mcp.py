@@ -12,7 +12,10 @@ for line in sys.stdin:
         names = ['observe']
         if os.environ.get('MACRUN_TEST_TOOLS_PAGINATED'):
             names = ['observe', 'last'] if args.get('cursor') == 'second-page' else ['observe', 'first']
-        result={'tools':[{'name':name,'description':'Stateful counter fixture','inputSchema':{'type':'object','properties':{}}} for name in names]}
+        if os.environ.get('MACRUN_TEST_TOOLS_TIERS'):
+            names = ['observe', 'click', 'kill']
+        meta = {'observe':{'annotations':{'readOnlyHint':True}}, 'kill':{'annotations':{'destructiveHint':True},'risk':{'class':'r3'}}}
+        result={'tools':[dict({'name':name,'description':'Stateful counter fixture','inputSchema':{'type':'object','properties':{}}}, **meta.get(name,{})) for name in names]}
         if os.environ.get('MACRUN_TEST_TOOLS_PAGINATED') and not args.get('cursor'):
             result['nextCursor']='second-page'
     elif method=='tools/call':

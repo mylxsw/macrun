@@ -1,6 +1,9 @@
 :root {
+  color-scheme: light dark;
   font:
-    13.5px/1.5 "Geist Variable",
+    13.5px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
     "PingFang SC",
     "Hiragino Sans GB",
     system-ui,
@@ -95,7 +98,7 @@ b {
 .mono,
 pre,
 kbd {
-  font-family: "Geist Mono Variable", "SF Mono", ui-monospace, monospace;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
 }
 .wrap {
   overflow-wrap: anywhere;
@@ -721,60 +724,6 @@ footer {
   background: #fafaf9;
   font-size: 13px;
 }
-.tray header {
-  padding: 10px 10px 8px;
-}
-.tray h2 {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  font-size: 14px;
-  margin: 0;
-}
-.tray header p {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 3px 0 0 17px;
-}
-.tray-task {
-  display: block;
-  width: calc(100% - 8px);
-  margin: 4px;
-  border-color: #e6e5e1;
-  text-align: left;
-  padding: 10px 12px;
-}
-.tray-task .mono {
-  font-size: 12px;
-}
-.menuitem {
-  display: flex;
-  width: 100%;
-  border: 0;
-  background: none;
-  text-align: left;
-  justify-content: flex-start;
-  min-height: 32px;
-  padding: 0 10px;
-}
-.menuitem svg {
-  width: 16px;
-  height: 16px;
-}
-.menuitem small {
-  margin-left: auto;
-  white-space: nowrap;
-}
-.menuitem:hover {
-  background: #2f5bea;
-  color: white;
-}
-.menuitem:hover small {
-  color: #eaf0ff;
-}
-.tray-content > small {
-  margin-left: 12px;
-}
 .tray hr {
   border: 0;
   border-top: 1px solid var(--line);
@@ -1078,27 +1027,6 @@ a:focus-visible {
   overflow: auto;
   height: auto;
   max-height: 100vh;
-}
-.tray-current {
-  margin: 2px 4px 6px;
-  padding: 2px 12px;
-  border-radius: 9px;
-}
-.tray-task {
-  width: 100%;
-  border: 0;
-  margin: 0;
-  padding: 8px 0;
-  border-radius: 0;
-}
-.tray-task.compact {
-  border-top: 1px solid #f0efeb;
-}
-.tray-task .mono {
-  font-size: 12.5px;
-}
-.tray-task > .mono {
-  margin-top: 3px;
 }
 .tray .approval {
   margin: 2px 4px 6px;

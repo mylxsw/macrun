@@ -1,0 +1,286 @@
+/* v3 additions: approval prompt, menu bar panel, desktop tiers, task filters.
+   Dark mode for these rules is generated into dark.css. */
+.dot.desktop-active,
+.tag.desktop-active {
+  background: #f05a1a;
+}
+.tag.desktop-active {
+  color: #fff;
+}
+
+/* Approval prompt */
+.approval-head {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.approval-ring {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex: none;
+  background: conic-gradient(#d08a0b var(--left, 100%), #f1ddb3 0);
+  -webkit-mask: radial-gradient(circle, transparent 5px, #000 6px);
+  mask: radial-gradient(circle, transparent 5px, #000 6px);
+}
+.approval-left {
+  color: #7a4b00;
+}
+.approval-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #7a4b00;
+}
+.approval-meta {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.approval-meta small {
+  overflow-wrap: anywhere;
+  color: #6b6a66;
+}
+.tag.approval-reason {
+  color: #7a4b00;
+  background: transparent;
+  border: 1px solid #f1ddb3;
+}
+.approval .actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.approval.compact .command {
+  max-height: 4.6em;
+  font-size: 12px;
+}
+
+/* Menu bar panel */
+.tray-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 8px;
+}
+.tray-head .dot {
+  flex: none;
+}
+.tray-head h2 {
+  display: block;
+  font-size: 13.5px;
+  margin: 0;
+}
+.tray-head p {
+  margin: 1px 0 0;
+  font-size: 11.5px;
+  color: #6b6a66;
+}
+.tray-head button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.tray-head .stop-all {
+  background: #c2361f;
+  border-color: #c2361f;
+  color: #fff;
+  font-weight: 600;
+}
+.tray-head .stop-all:hover {
+  background: #a12b17;
+}
+.tray-section {
+  border-top: 1px solid #e6e5e1;
+  padding: 6px 10px;
+}
+.tray-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b6a66;
+  margin: 2px 0;
+}
+.tray .tray-task {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: 0;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  justify-content: flex-start;
+}
+.tray .tray-task:hover {
+  background: none;
+}
+.tray .tray-task:hover .tray-task-title {
+  text-decoration: underline;
+}
+.tray-task .grow {
+  min-width: 0;
+  display: grid;
+}
+.tray-task small {
+  font-size: 11px;
+  color: #6b6a66;
+}
+.tray-kind {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: #f1f0ec;
+  color: #6b6a66;
+}
+.tray-kind.desktop {
+  color: #f05a1a;
+}
+.tray-more {
+  font-size: 12px;
+  padding: 2px 0;
+}
+.tray-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12.5px;
+}
+.tray-foot {
+  display: flex;
+  margin-top: 0;
+  border-top: 1px solid #e6e5e1;
+  padding: 4px 6px 0;
+}
+.tray-foot button {
+  flex: 1;
+  margin: 0;
+  justify-content: center;
+}
+.tray .approval {
+  margin: 0 6px 8px;
+}
+.tray .approval .actions button {
+  flex: none;
+}
+.tray .approval .actions .primary {
+  flex: 1;
+}
+
+/* Desktop tiers */
+.desktop-tiers {
+  margin-bottom: 22px;
+}
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.tier-card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.tier-card > small {
+  color: #6b6a66;
+}
+.tier-high {
+  border-color: #f1ddb3;
+}
+.tier-seg {
+  display: flex;
+}
+.tier-seg button {
+  flex: 1;
+}
+.tier-tools {
+  color: #8a8984;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 1000px) {
+  .tier-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Live page */
+.desktop-task .desktop-args {
+  display: block;
+  color: #6b6a66;
+  margin: 2px 0 8px;
+}
+
+/* Task filters */
+.v3-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.v3-filters .seg {
+  display: inline-flex;
+  background: #f1f0ec;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.v3-filters .seg button {
+  border: 0;
+  background: transparent;
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: #4a4945;
+  gap: 5px;
+}
+.v3-filters .seg button.on {
+  background: #fff;
+  color: #1a1a19;
+  box-shadow: 0 1px 2px #0002;
+}
+.v3-filters .seg button.attention small {
+  color: #b26a00;
+  font-weight: 600;
+}
+.more-status {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: #6b6a66;
+}
+
+/* Temporary approvals */
+.allow-rule-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.allow-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.allow-rule .mono {
+  flex: 1;
+  min-width: 0;
+}
+.allow-rule small {
+  color: #6b6a66;
+  white-space: nowrap;
+}
+.allow-rule button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}

@@ -73,12 +73,11 @@ function fallbackPage(
   status: string,
   query: string,
   index = 0,
+  kind = "",
 ): TaskPage {
-  const matches = selectTasks(
-    snapshot?.tasks || [],
-    "all",
-    query.trim(),
-  ) as Task[];
+  const matches = (
+    selectTasks(snapshot?.tasks || [], "all", query.trim()) as Task[]
+  ).filter((t) => !kind || t.kind === kind);
   const filtered = selectTasks(matches, status, "") as Task[];
   const rows = filtered.slice(
     index * TASK_PAGE_SIZE,
@@ -105,6 +104,7 @@ export function useTaskHistory({
   available,
   snapshot,
   filter,
+  kind = "",
   query,
   selected,
 }: {
@@ -112,6 +112,7 @@ export function useTaskHistory({
   available: boolean;
   snapshot: Snapshot | null;
   filter: string;
+  kind?: string;
   query: string;
   selected: string;
 }) {
@@ -137,9 +138,9 @@ export function useTaskHistory({
   useEffect(() => {
     setIndex(0);
     setCursors([null]);
-  }, [filter, search, available]);
+  }, [filter, kind, search, available]);
   const cursor = cursors[index];
-  const requestKey = JSON.stringify([filter, search, cursor]);
+  const requestKey = JSON.stringify([filter, kind, search, cursor]);
   useEffect(() => {
     list.current?.scrollTo?.({ top: 0 });
   }, [requestKey]);
@@ -152,6 +153,7 @@ export function useTaskHistory({
       limit: TASK_PAGE_SIZE,
       status: filter,
       query: search,
+      ...(kind ? { kind } : {}),
       cursor,
     })
       .then((result) => {
@@ -166,7 +168,7 @@ export function useTaskHistory({
     return () => {
       cancelled = true;
     };
-  }, [enabled, available, filter, search, cursor, signature, retry]);
+  }, [enabled, available, filter, kind, search, cursor, signature, retry]);
   const searchPending = search !== query.trim();
   const current = available
     ? page?.key === requestKey && !searchPending
@@ -178,7 +180,7 @@ export function useTaskHistory({
           counts: {},
           next_cursor: null,
         }
-    : fallbackPage(snapshot, filter, query, index);
+    : fallbackPage(snapshot, filter, query, index, kind);
   const selectedId = selected || current.tasks[0]?.task_id || "";
   const live = snapshot?.tasks.find((t) => t.task_id === selectedId);
   useEffect(() => {

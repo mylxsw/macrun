@@ -9,8 +9,20 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import type { Snapshot, Task, AppState } from "./types";
-import { statuses } from "./model.mjs";
+import type {
+  Snapshot,
+  Task,
+  AppState,
+  AllowRule,
+  DesktopTier,
+  TierPolicy,
+} from "./types";
+import {
+  statuses,
+  riskReasons,
+  tierLabels,
+  tierPolicyLabels,
+} from "./model.mjs";
 import "./features.css";
 export type Act = (
   c: string,
@@ -29,53 +41,147 @@ const terminalStatuses = new Set([
 const failureText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+/** Re-renders every second while `enabled`, for countdowns. */
+export function useNow(enabled: boolean) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [enabled]);
+  return now;
+}
+const APPROVAL_MS = 60_000;
 export function Approvals({
   tasks,
   act,
   disabled,
+  compact = false,
 }: {
   tasks: Task[];
   act: Act;
   disabled: boolean;
+  compact?: boolean;
 }) {
+  const waiting = tasks.filter((t) => t.status === "awaiting_approval");
+  const [index, setIndex] = useState(0);
+  const now = useNow(waiting.length > 0);
+  if (!waiting.length) return null;
+  const shown = compact
+    ? [waiting[Math.min(index, waiting.length - 1)]]
+    : waiting;
+  const decide = (t: Task, allow: boolean, scope = "once") =>
+    act(
+      "control",
+      { action: "approve", args: { task_id: t.task_id, allow, scope } },
+      allow
+        ? {
+            once: "已允许这一次",
+            similar: "已允许，15 分钟内同类请求不再询问",
+            session: "已允许，执行器重启前不再询问",
+          }[scope]
+        : "已拒绝，Agent 会收到 approval_rejected",
+    );
   return (
     <>
-      {tasks
-        .filter((t) => t.status === "awaiting_approval")
-        .map((t) => (
-          <section className="card approval" key={t.task_id}>
-            <strong>等待你确认 · 60 秒内处理</strong>
+      {shown.map((t) => {
+        const desktop = t.kind === "mcp.call";
+        const deadline = t.approval_deadline || t.started_at + APPROVAL_MS;
+        const left = Math.max(0, Math.ceil((deadline - now) / 1000));
+        const reasons = desktop
+          ? [`${tierLabels[t.desktop_tier || "control"]}类桌面操作`]
+          : riskReasons(t.arguments.command);
+        return (
+          <section
+            className={`card approval ${compact ? "compact" : ""}`}
+            key={t.task_id}
+            aria-label="等待你确认"
+          >
+            <div className="row approval-head">
+              <span
+                className="approval-ring"
+                style={{
+                  ["--left" as string]: `${(left / (APPROVAL_MS / 1000)) * 100}%`,
+                }}
+                aria-hidden
+              />
+              <strong>{desktop ? "桌面操作需要你确认" : "命令需要你确认"}</strong>
+              <small className="approval-left" role="timer">
+                {left} 秒后过期，Agent 会收到 approval_expired
+              </small>
+              {compact && waiting.length > 1 && (
+                <span className="approval-pager push">
+                  <button
+                    className="icon-button"
+                    aria-label="上一条待确认"
+                    onClick={() =>
+                      setIndex((i) => (i + waiting.length - 1) % waiting.length)
+                    }
+                  >
+                    ‹
+                  </button>
+                  {Math.min(index, waiting.length - 1) + 1} / {waiting.length}
+                  <button
+                    className="icon-button"
+                    aria-label="下一条待确认"
+                    onClick={() => setIndex((i) => (i + 1) % waiting.length)}
+                  >
+                    ›
+                  </button>
+                </span>
+              )}
+            </div>
             <pre className="command">
-              {t.arguments.command || t.arguments.tool}
+              {t.arguments.command ||
+                `${t.arguments.server} · ${t.arguments.tool}`}
             </pre>
-            <small>{t.arguments.cwd}</small>
+            <div className="row approval-meta">
+              {reasons.map((r) => (
+                <span className="tag approval-reason" key={r}>
+                  {r}
+                </span>
+              ))}
+              {t.arguments.cwd && <small className="mono">{t.arguments.cwd}</small>}
+            </div>
             <div className="actions">
+              <button disabled={disabled} onClick={() => decide(t, false)}>
+                拒绝
+              </button>
+              <span className="push" />
+              <button
+                disabled={disabled}
+                title={
+                  desktop
+                    ? "15 分钟内，同一后端的同一工具不再询问"
+                    : "15 分钟内，同一程序在这个目录及子目录中不再询问"
+                }
+                onClick={() => decide(t, true, "similar")}
+              >
+                15 分钟内允许同类
+              </button>
+              {!compact && (
+                <button
+                  disabled={disabled}
+                  title="执行器重启后失效，可在设置与安全中撤销"
+                  onClick={() => decide(t, true, "session")}
+                >
+                  {desktop
+                    ? `本次运行允许${tierLabels[t.desktop_tier || "control"]}类`
+                    : "本次运行允许此目录"}
+                </button>
+              )}
               <button
                 disabled={disabled}
                 className="primary"
-                onClick={() =>
-                  act("control", {
-                    action: "approve",
-                    args: { task_id: t.task_id, allow: true },
-                  })
-                }
+                onClick={() => decide(t, true)}
               >
                 允许一次
               </button>
-              <button
-                disabled={disabled}
-                onClick={() =>
-                  act("control", {
-                    action: "approve",
-                    args: { task_id: t.task_id, allow: false },
-                  })
-                }
-              >
-                拒绝
-              </button>
             </div>
           </section>
-        ))}
+        );
+      })}
     </>
   );
 }
@@ -387,6 +493,153 @@ export function Pairing({
   );
 }
 
+const tierCopy: Record<DesktopTier, { title: string; detail: string }> = {
+  observe: {
+    title: "观察 · 看屏幕和窗口",
+    detail: "截图、读取窗口和可访问性树。可能看到其他应用里的内容。",
+  },
+  control: {
+    title: "操作 · 点击和输入",
+    detail: "点击、输入、按键、滚动、拖动和切换窗口。操作时显示屏幕提示。",
+  },
+  high: {
+    title: "高风险 · 不可撤回",
+    detail: "结束进程、下载文件、回放录制等后端标为最高风险的工具。",
+  },
+};
+const tierOrder: DesktopTier[] = ["observe", "control", "high"];
+const policyOrder: TierPolicy[] = ["deny", "confirm", "allow"];
+/** Desktop tool tiers. Defaults allow everything; each tier can be tightened. */
+export function DesktopTiers({
+  snapshot,
+  act,
+  disabled,
+}: {
+  snapshot: Snapshot | null;
+  act: Act;
+  disabled: boolean;
+}) {
+  const policy = snapshot?.safety.desktop;
+  const tools: Record<DesktopTier, string[]> = {
+    observe: [],
+    control: [],
+    high: [],
+  };
+  for (const backend of snapshot?.backends || [])
+    for (const [name, tier] of Object.entries(backend.tiers || {}))
+      tools[tier]?.push(name);
+  const known = Object.values(tools).some((list) => list.length);
+  const save = (tier: DesktopTier, value: TierPolicy) =>
+    snapshot &&
+    policy &&
+    act(
+      "control",
+      {
+        action: "safety",
+        args: { ...snapshot.safety, desktop: { ...policy, [tier]: value } },
+      },
+      `${tierLabels[tier]}类桌面工具已设为“${tierPolicyLabels[value]}”`,
+    );
+  return (
+    <section className="desktop-tiers" aria-label="桌面工具分级">
+      <div className="row between section-heading">
+        <h2>Agent 能对这台 Mac 做什么</h2>
+        <small className="muted">
+          按后端声明的只读与风险等级归类
+          {known ? "" : "；读取工具列表后显示每类包含的工具"}
+        </small>
+      </div>
+      <div className="tier-grid">
+        {tierOrder.map((tier) => (
+          <article className={`card tier-card tier-${tier}`} key={tier}>
+            <b>{tierCopy[tier].title}</b>
+            <small>{tierCopy[tier].detail}</small>
+            <div
+              className="feature-seg tier-seg"
+              role="group"
+              aria-label={`${tierLabels[tier]}类桌面工具`}
+            >
+              {policyOrder.map((value) => (
+                <button
+                  key={value}
+                  className={policy?.[tier] === value ? "on" : ""}
+                  aria-pressed={policy?.[tier] === value}
+                  disabled={disabled || !policy}
+                  onClick={() => save(tier, value)}
+                >
+                  {tierPolicyLabels[value]}
+                </button>
+              ))}
+            </div>
+            {tools[tier].length > 0 && (
+              <small className="mono tier-tools" title={tools[tier].join(" · ")}>
+                {tools[tier].slice(0, 5).join(" · ")}
+                {tools[tier].length > 5 ? ` · 共 ${tools[tier].length} 个` : ""}
+              </small>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+function ruleText(rule: AllowRule) {
+  if (rule.kind === "mcp.call")
+    return rule.scope === "similar"
+      ? `${rule.server} · ${rule.tool}`
+      : `${rule.server} · 全部${tierLabels[rule.tier || "control"]}类工具`;
+  return rule.scope === "similar"
+    ? `${rule.program} · ${rule.cwd} 及子目录`
+    : `所有命令 · ${rule.cwd} 及子目录`;
+}
+/** Temporary approvals granted from prompts; held in worker memory only. */
+export function AllowRules({
+  rules,
+  act,
+  disabled,
+}: {
+  rules: AllowRule[];
+  act: Act;
+  disabled: boolean;
+}) {
+  return (
+    <div className="feature-line settings-split allow-rules">
+      <div className="feature-copy">
+        <b>临时允许</b>
+        <small>
+          在确认弹窗中选择“15 分钟内允许同类”或“本次运行允许”后生成；执行器重启后全部失效。
+        </small>
+      </div>
+      <div className="allow-rule-list">
+        {rules.map((rule) => (
+          <div className="allow-rule" key={rule.id}>
+            <span className="mono ellipsis" title={ruleText(rule)}>
+              {ruleText(rule)}
+            </span>
+            <small>
+              {rule.expires_at
+                ? `${new Date(rule.expires_at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })} 前`
+                : "直到执行器重启"}
+            </small>
+            <button
+              disabled={disabled}
+              onClick={() =>
+                act(
+                  "control",
+                  { action: "revoke_rule", args: { rule_id: rule.id } },
+                  "已撤销临时允许",
+                )
+              }
+            >
+              撤销
+            </button>
+          </div>
+        ))}
+        {!rules.length && <small className="muted">暂无临时允许</small>}
+      </div>
+    </div>
+  );
+}
 const approvalModes = [
   {
     key: "direct",
@@ -401,7 +654,7 @@ const approvalModes = [
   {
     key: "all",
     label: "每条都确认",
-    hint: "每条命令都需要你点“允许”；桌面调用由桌面控制开关管理。",
+    hint: "每条命令都需要你点“允许”；桌面调用按桌面控制页的分级管理。",
   },
 ];
 export function SafetyPanel({
@@ -555,6 +808,11 @@ export function SafetyPanel({
           </div>
         </div>
       )}
+      <AllowRules
+        rules={snapshot?.allow_rules || []}
+        act={act}
+        disabled={disabled}
+      />
       <label className="feature-line">
         <div className="grow">
           <b>环境变量值不写入记录</b>

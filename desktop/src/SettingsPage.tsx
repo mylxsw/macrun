@@ -378,8 +378,8 @@ export function SettingsPage({
           </div>
           <label className="feature-line">
             <div className="grow">
-              <b>任务失败或结果未知时发送通知</b>
-              <small>成功不打扰；失败、超时、未知各发一次。</small>
+              <b>需要确认、失败或结果未知时发送通知</b>
+              <small>成功不打扰；待确认、失败、超时、未知各发一次。</small>
             </div>
             <input
               type="checkbox"
