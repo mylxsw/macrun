@@ -279,6 +279,8 @@ The server and worker log timestamped JSON lines to stderr by default: operation
 
 ## Documentation and contributing
 
+Desktop client planning and interactive prototype (not shipped): [design documents](docs/desktop/README.md).
+
 | Looking for… | Read… |
 | --- | --- |
 | An agent to install and configure Macrun | [Agent installation guide](docs/agent-install.md) |

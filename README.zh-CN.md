@@ -279,6 +279,8 @@ Linux 本机 `make build` 不需要 Docker。跨平台构建要按 **Linux 服�
 
 ## 文档与参与贡献
 
+桌面客户端规划与交互原型（尚未实现）：[设计与执行方案](docs/desktop/README.md)。
+
 | 你想了解 | 对应文档 |
 | --- | --- |
 | 让 Agent 安装配置 Macrun | [Agent 安装手册](docs/agent-install.md) |
