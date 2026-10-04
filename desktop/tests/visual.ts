@@ -68,6 +68,10 @@ const history: Task[] = Array.from({ length: requestedTasks }, (_, index) => {
     started_at: Date.now() - index * 1000,
     output_tail: `fixture-task-${index + 1}\nNo real command was executed.\n`,
   };
+  if (task.kind === "mcp.call")
+    task.desktop_tier = index % 2 ? "observe" : "control";
+  if (status === "awaiting_approval")
+    task.approval_deadline = Date.now() + 41_000;
   if (!isActive(task)) task.ended_at = task.started_at + 500;
   if (["failed", "timed_out", "unknown"].includes(status))
     task.error = {
@@ -104,7 +108,9 @@ const snapshot: Snapshot = {
     approval: "risk",
     retention_days: 30,
     yield_until: 0,
+    desktop: { observe: "allow", control: "allow", high: "allow" },
   },
+  allow_rules: [],
   workspaces: requestedTasks
     ? Array.from({ length: 24 }, (_, index) => ({
         root: `/tmp/macrun-visual-fixture/project-${index}`,
@@ -119,7 +125,13 @@ const snapshot: Snapshot = {
           state: "ready",
           session: "fixture-session",
           command: "/tmp/macrun-visual-fixture/mock-backend",
-          tool_count: 2,
+          tool_count: 4,
+          tiers: {
+            "computer.screenshot": "observe",
+            "computer.windows": "observe",
+            "computer.click": "control",
+            "computer.kill_app": "high",
+          },
         },
       ]
     : [],
@@ -360,11 +372,17 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       const counts: Record<string, number> = {};
       for (const task of matches)
         counts[task.status] = (counts[task.status] || 0) + 1;
+      const groups: Record<string, string[]> = {
+        active: ["accepted", "running", "awaiting_approval"],
+        attention: ["failed", "timed_out", "unknown", "denied"],
+      };
       const filtered = matches.filter(
         (task) =>
           !payload.status ||
           payload.status === "all" ||
-          task.status === payload.status,
+          (groups[payload.status]
+            ? groups[payload.status].includes(task.status)
+            : task.status === payload.status),
       );
       const cursor = payload.cursor;
       const remaining = filtered.filter(
@@ -440,9 +458,30 @@ async function invoke(command: string, args: Record<string, any> = {}) {
         task.status = "cancelled";
         task.ended_at = Date.now();
       }
+    } else if (args.action === "revoke_rule") {
+      snapshot.allow_rules = (snapshot.allow_rules || []).filter(
+        (rule) => rule.id !== payload.rule_id,
+      );
     } else if (["cancel", "approve"].includes(args.action)) {
       const task = history.find((task) => task.task_id === payload.task_id);
       if (!task) throw new Error("测试任务不存在");
+      if (args.action === "approve" && payload.allow && payload.scope !== "once")
+        snapshot.allow_rules = [
+          ...(snapshot.allow_rules || []),
+          {
+            id: `fixture-rule-${task.task_id}`,
+            kind: task.kind,
+            scope: payload.scope,
+            program: String(task.arguments.command || "").split(/\s+/)[0],
+            cwd: task.arguments.cwd,
+            server: task.arguments.server,
+            tool: payload.scope === "similar" ? task.arguments.tool : null,
+            tier: payload.scope === "session" ? task.desktop_tier : null,
+            created_at: Date.now(),
+            expires_at:
+              payload.scope === "similar" ? Date.now() + 15 * 60_000 : null,
+          },
+        ];
       task.status =
         args.action === "approve" && payload.allow
           ? "succeeded"
@@ -553,5 +592,12 @@ const frame = () =>
 await frame();
 await frame();
 await document.fonts.ready;
+// ?page=tasks|desktop|settings opens a page the way a native route does.
+const page = query.get("page");
+if (page) {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  emit("navigate", page);
+  await frame();
+}
 await frame();
 document.documentElement.dataset.visualReady = "true";

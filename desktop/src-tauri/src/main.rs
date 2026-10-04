@@ -2,6 +2,7 @@
 mod migration;
 mod native;
 mod supervisor;
+mod tray;
 use anyhow::{Context, Result};
 use macrun::{local, wire};
 use serde::{Deserialize, Serialize};
@@ -133,47 +134,20 @@ fn resize_panel(window: tauri::WebviewWindow, height: f64) -> std::result::Resul
         ))
         .map_err(|e| e.to_string())
 }
-fn tray_image(color: [u8; 3], dark: bool) -> tauri::image::Image<'static> {
-    // Retina terminal mark plus a separate state dot, matching the menu-bar design.
-    let mut rgba = vec![0u8; 52 * 44 * 4];
-    let ink = if dark { [245, 245, 244] } else { [26, 26, 25] };
-    for y in 0i32..44 {
-        for x in 0i32..52 {
-            let chevron =
-                (6..=16).contains(&x) && ((y - x - 6).abs() <= 1 || (y + x - 38).abs() <= 1);
-            let baseline = (20..=30).contains(&x) && (30..=32).contains(&y);
-            let dot = (x - 43).pow(2) + (y - 22).pow(2) <= 6 * 6;
-            if chevron || baseline || dot {
-                let i = ((y * 52 + x) * 4) as usize;
-                rgba[i..i + 3].copy_from_slice(if dot { &color } else { &ink });
-                rgba[i + 3] = 255;
-            }
-        }
-    }
-    tauri::image::Image::new_owned(rgba, 52, 44)
+fn tray_image(state: tray::TrayState) -> tauri::image::Image<'static> {
+    tauri::image::Image::new_owned(tray::pixels(state), tray::WIDTH, tray::HEIGHT)
 }
 
 fn tray_status(app: &tauri::AppHandle, v: &Value) {
-    let (color, label) = if v["connection"]["state"] != "connected" {
-        ([194, 54, 31], "断线")
-    } else if v["tasks"]
-        .as_array()
-        .is_some_and(|t| t.iter().any(|t| t["status"] == "awaiting_approval"))
-    {
-        ([208, 138, 11], "待确认")
-    } else if v["policy"]["paused"] == true {
-        ([138, 137, 132], "暂停")
-    } else if v["active_count"].as_u64().unwrap_or(0) > 0 {
-        ([47, 91, 234], "工作中")
-    } else {
-        ([31, 157, 92], "空闲")
-    };
+    let state = tray::TrayState::from_snapshot(v);
     if let Some(icon) = app.tray_by_id("macrun") {
-        let dark =
-            app.get_webview_window("main").and_then(|w| w.theme().ok()) == Some(tauri::Theme::Dark);
-        let _ = icon.set_icon_as_template(false);
-        let _ = icon.set_icon(Some(tray_image(color, dark)));
-        let _ = icon.set_tooltip(Some(format!("Macrun · {label}")));
+        // Set the template flag together with the image so macOS tints calm
+        // states for the menu bar and leaves coloured capsules untouched.
+        let _ = icon.set_icon(Some(tray_image(state)));
+        let _ = icon.set_icon_as_template(state.template());
+        let count = tray::approval_count(v);
+        let _ = icon.set_title((count > 0).then(|| count.to_string()));
+        let _ = icon.set_tooltip(Some(format!("Macrun · {}", state.label())));
     }
 }
 fn overlay_visible(app: &tauri::AppHandle, visible: bool) {
@@ -666,16 +640,15 @@ async fn start_worker(
         if !worker_data.join("desktop-policy.json").exists() {
             wire::atomic_json(
                 &worker_data.join("desktop-policy.json"),
-                &json!({"paused":false,"desktop_enabled":false}),
+                // Phase one favours a working setup: desktop control starts enabled
+                // and every desktop tier is allowed; users tighten it locally.
+                &json!({"paused":false,"desktop_enabled":true}),
             )?;
         }
         if !worker_data.join("safety.json").exists() {
             wire::atomic_json(
                 &worker_data.join("safety.json"),
-                &macrun::safety::Safety {
-                    approval: "risk".into(),
-                    ..Default::default()
-                },
+                &macrun::safety::Safety::default(),
             )?;
         }
         let log = std::fs::OpenOptions::new()
@@ -765,6 +738,7 @@ async fn control(
         "prune",
         "observe",
         "self_test",
+        "revoke_rule",
     ]
     .contains(&action.as_str())
     {
@@ -965,8 +939,8 @@ fn main() {
             let handle = app.handle().clone();
             app.global_shortcut().register("Control+Alt+Super+Period")?;
             tauri::tray::TrayIconBuilder::with_id("macrun")
-                .icon(tray_image([138, 137, 132], false))
-                .icon_as_template(false)
+                .icon(tray_image(tray::TrayState::Offline))
+                .icon_as_template(true)
                 .tooltip("Macrun · 本机执行器")
                 .on_tray_icon_event(|icon, event| {
                     if let tauri::tray::TrayIconEvent::Click {

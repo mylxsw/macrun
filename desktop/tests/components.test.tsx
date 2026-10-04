@@ -81,15 +81,23 @@ test("approval buttons only send the selected task decision", async () => {
     />,
   );
   await user.click(screen.getByRole("button", { name: "允许一次" }));
-  expect(act).toHaveBeenLastCalledWith("control", {
-    action: "approve",
-    args: { task_id: "one", allow: true },
-  });
+  expect(act).toHaveBeenLastCalledWith(
+    "control",
+    {
+      action: "approve",
+      args: { task_id: "one", allow: true, scope: "once" },
+    },
+    "已允许这一次",
+  );
   await user.click(screen.getByRole("button", { name: "拒绝" }));
-  expect(act).toHaveBeenLastCalledWith("control", {
-    action: "approve",
-    args: { task_id: "one", allow: false },
-  });
+  expect(act).toHaveBeenLastCalledWith(
+    "control",
+    {
+      action: "approve",
+      args: { task_id: "one", allow: false, scope: "once" },
+    },
+    "已拒绝，Agent 会收到 approval_rejected",
+  );
 });
 
 test("unsaved safety edits survive incoming snapshots and save failure", async () => {
@@ -288,7 +296,7 @@ test("settings disable disconnect with active tasks and retain all other prefere
     screen.getByRole("button", { name: "断开连接" }).hasAttribute("disabled"),
   ).toBe(true);
   await user.click(
-    screen.getByRole("checkbox", { name: /任务失败或结果未知时发送通知/ }),
+    screen.getByRole("checkbox", { name: /需要确认、失败或结果未知时发送通知/ }),
   );
   expect(act).toHaveBeenCalledWith("save_preferences", {
     preferences: { ...app.preferences, notifications: false },

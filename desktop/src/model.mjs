@@ -11,6 +11,44 @@ export const statuses = {
 };
 export const active = (t) =>
   ["accepted", "running", "awaiting_approval"].includes(t.status);
+// Status groups shared with the worker's task_list filter.
+export const statusGroups = {
+  active: ["accepted", "running", "awaiting_approval"],
+  attention: ["failed", "timed_out", "unknown", "denied"],
+};
+export const statusMatches = (filter, status) =>
+  filter === "all" ||
+  (statusGroups[filter] ? statusGroups[filter].includes(status) : status === filter);
+export const tierLabels = {
+  observe: "观察",
+  control: "操作",
+  high: "高风险",
+};
+export const tierPolicyLabels = {
+  allow: "允许并提示",
+  confirm: "先确认",
+  deny: "禁止",
+};
+const readOnlyPrograms = [
+  "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "which", "whoami",
+  "uname", "date", "echo", "printf",
+];
+export const program = (command = "") => {
+  const first = command.trim().split(/\s+/)[0] || "";
+  return first.split("/").pop() || first;
+};
+// Mirrors the worker's risk filter so the prompt can say why it asked.
+export function riskReasons(command = "") {
+  const reasons = [];
+  if (/[|]/.test(command)) reasons.push("管道");
+  if (/[><]/.test(command)) reasons.push("重定向");
+  if (/[;&\n]/.test(command)) reasons.push("组合命令");
+  if (/[`$()]/.test(command)) reasons.push("命令替换");
+  const first = command.trim().split(/\s+/)[0] || "";
+  if (first && !readOnlyPrograms.includes(first))
+    reasons.push(`未知程序 ${program(command)}`);
+  return reasons;
+}
 export const title = (t) =>
   t.arguments?.command ||
   (t.kind === "sync"
@@ -20,7 +58,7 @@ export function selectTasks(tasks, filter, query) {
   const q = query.toLowerCase();
   return tasks.filter(
     (t) =>
-      (filter === "all" || t.status === filter) &&
+      statusMatches(filter, t.status) &&
       `${title(t)} ${t.arguments?.cwd || ""} ${t.arguments?.remote_root || ""} ${t.arguments?.path || ""} ${t.task_id}`
         .toLowerCase()
         .includes(q),

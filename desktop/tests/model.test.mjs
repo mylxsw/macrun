@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { selectTasks, todaySummary, active, statuses } from "../src/model.mjs";
+import {
+  selectTasks,
+  todaySummary,
+  active,
+  statuses,
+  riskReasons,
+  program,
+  statusMatches,
+} from "../src/model.mjs";
 const now = new Date(2026, 9, 4, 12);
 const tasks = Object.keys(statuses).map((status, i) => ({
   status,
@@ -54,4 +62,24 @@ test("today summary uses local received date; active includes accepted", () => {
     9,
   );
   assert.equal(tasks.filter(active).length, 3);
+});
+test("status groups match the worker's active and attention filters", () => {
+  assert.deepEqual(
+    selectTasks(tasks, "attention", "").map((t) => t.status).sort(),
+    ["denied", "failed", "timed_out", "unknown"],
+  );
+  assert.deepEqual(
+    selectTasks(tasks, "active", "").map((t) => t.status).sort(),
+    ["accepted", "awaiting_approval", "running"],
+  );
+  assert.equal(statusMatches("all", "anything"), true);
+  assert.equal(statusMatches("failed", "denied"), false);
+});
+test("risk reasons explain why a command waits for approval", () => {
+  assert.deepEqual(riskReasons("ls -la"), []);
+  assert.deepEqual(riskReasons("ps aux | grep macrun"), ["管道", "未知程序 ps"]);
+  assert.deepEqual(riskReasons("echo hi > out; ls"), ["重定向", "组合命令"]);
+  assert.deepEqual(riskReasons("echo $(id)"), ["命令替换"]);
+  assert.equal(program("/usr/bin/git status"), "git");
+  assert.equal(program(""), "");
 });

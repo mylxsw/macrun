@@ -6,9 +6,26 @@ export type Task = {
   started_at: number;
   ended_at?: number;
   result?: { exit_code?: number };
-  error?: { message: string };
+  error?: { message: string; code?: string };
   output_tail?: string;
+  approval_deadline?: number;
+  desktop_tier?: DesktopTier;
+  approved_by_rule?: string;
   progress?: { received: number; total: number; bytes: number };
+};
+export type DesktopTier = "observe" | "control" | "high";
+export type TierPolicy = "allow" | "confirm" | "deny";
+export type AllowRule = {
+  id: string;
+  kind: string;
+  scope: "similar" | "session";
+  program?: string | null;
+  cwd?: string | null;
+  server?: string | null;
+  tool?: string | null;
+  tier?: DesktopTier | null;
+  created_at: number;
+  expires_at?: number | null;
 };
 export type Settings = {
   server: string;
@@ -26,7 +43,9 @@ export type Snapshot = {
     approval: string;
     retention_days: number;
     yield_until: number;
+    desktop?: Record<DesktopTier, TierPolicy>;
   };
+  allow_rules?: AllowRule[];
   workspaces: {
     root: string;
     time: number;
@@ -43,6 +62,7 @@ export type Snapshot = {
     session?: string;
     command: string;
     tool_count?: number;
+    tiers?: Record<string, DesktopTier> | null;
   }[];
   version: string;
   protocol: number;

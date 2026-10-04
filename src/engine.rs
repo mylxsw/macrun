@@ -29,7 +29,8 @@ pub struct Engine {
     backends: BTreeMap<String, Slot>,
     policy: Mutex<Policy>,
     safety: Mutex<crate::safety::Safety>,
-    approvals: Mutex<BTreeMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    approvals: Mutex<BTreeMap<String, Pending>>,
+    rules: Mutex<Vec<crate::safety::AllowRule>>,
     backend_stop: Mutex<CancellationToken>,
     tool_counts: Mutex<BTreeMap<String, DiscoveredTools>>,
     changes: watch::Sender<u64>,
@@ -39,6 +40,14 @@ pub struct Engine {
 struct DiscoveredTools {
     session: String,
     names: BTreeSet<String>,
+    tiers: BTreeMap<String, &'static str>,
+}
+/// A request waiting for a local decision, kept so an approval can grant a rule.
+struct Pending {
+    sender: tokio::sync::oneshot::Sender<bool>,
+    kind: String,
+    args: Value,
+    tier: Option<&'static str>,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Policy {
@@ -51,6 +60,15 @@ impl Default for Policy {
             paused: false,
             desktop_enabled: true,
         }
+    }
+}
+fn denial_code(text: &str) -> Option<&'static str> {
+    if text.starts_with("denied: approval expired") {
+        Some("approval_expired")
+    } else if text.starts_with("denied: approval rejected") {
+        Some("approval_rejected")
+    } else {
+        None
     }
 }
 fn redact_arguments(a: &Value) -> Value {
@@ -96,7 +114,7 @@ impl Engine {
             if v["status"] == "awaiting_approval" {
                 v["status"] = json!("denied");
                 v["ended_at"] = json!(now());
-                v["error"] = json!({"message":"Approval interrupted by restart; command was not dispatched."});
+                v["error"] = json!({"code":"approval_interrupted","message":"Approval interrupted by restart; command was not dispatched."});
                 wire::atomic_json(&p, &v)?;
             }
             if ["accepted", "running"].contains(&v["status"].as_str().unwrap_or("")) {
@@ -141,6 +159,7 @@ impl Engine {
             policy: Mutex::new(policy),
             safety: Mutex::new(safety),
             approvals: Mutex::new(BTreeMap::new()),
+            rules: Mutex::new(Vec::new()),
             backend_stop: Mutex::new(CancellationToken::new()),
             tool_counts: Mutex::new(BTreeMap::new()),
             changes,
@@ -230,16 +249,64 @@ impl Engine {
         Ok(json!(safety))
     }
     pub async fn approve(&self, ident: &str, allow: bool) -> Result<Value> {
-        let sender = self
-            .approvals
-            .lock()
-            .await
-            .remove(ident)
+        self.approve_scoped(ident, allow, "once").await
+    }
+    /// `scope` is "once", or "similar"/"session" to also grant a temporary rule.
+    pub async fn approve_scoped(&self, ident: &str, allow: bool, scope: &str) -> Result<Value> {
+        anyhow::ensure!(
+            ["once", "similar", "session"].contains(&scope),
+            "invalid approval scope"
+        );
+        let mut approvals = self.approvals.lock().await;
+        let pending = approvals
+            .get(ident)
             .ok_or_else(|| anyhow::anyhow!("approval expired or already handled"))?;
-        sender
+        let rule = if allow && scope != "once" {
+            Some(crate::safety::AllowRule::from_request(
+                &pending.kind,
+                scope,
+                &pending.args,
+                pending.tier,
+                now(),
+            )?)
+        } else {
+            None
+        };
+        let pending = approvals.remove(ident).expect("checked above");
+        drop(approvals);
+        pending
+            .sender
             .send(allow)
             .map_err(|_| anyhow::anyhow!("approval no longer active"))?;
-        Ok(json!({"handled":true}))
+        let rule_id = rule.as_ref().map(|r| r.id.clone());
+        if let Some(rule) = rule {
+            self.rules.lock().await.push(rule);
+            self.changed();
+        }
+        Ok(json!({"handled":true,"rule_id":rule_id}))
+    }
+    pub async fn revoke_rule(&self, ident: &str) -> Result<Value> {
+        let mut rules = self.rules.lock().await;
+        let before = rules.len();
+        rules.retain(|r| r.id != ident);
+        let removed = before != rules.len();
+        drop(rules);
+        self.changed();
+        Ok(json!({"removed":removed}))
+    }
+    pub async fn allow_rules(&self) -> Vec<crate::safety::AllowRule> {
+        let now = now();
+        let mut rules = self.rules.lock().await;
+        rules.retain(|r| r.active(now));
+        rules.clone()
+    }
+    async fn tool_tier(&self, server: &str, tool: &str) -> &'static str {
+        self.tool_counts
+            .lock()
+            .await
+            .get(server)
+            .and_then(|known| known.tiers.get(tool).copied())
+            .unwrap_or("control")
     }
     pub async fn yield_desktop(&self) -> Result<Value> {
         let mut s = self.safety.lock().await;
@@ -517,10 +584,17 @@ impl Engine {
                     state == "busy" || session.as_deref() == Some(known.session.as_str())
                 })
                 .map(|known| known.names.len());
-            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":tool_count}));
+            let tiers = self
+                .tool_counts
+                .lock()
+                .await
+                .get(name)
+                .filter(|known| tool_count.is_some() && !known.tiers.is_empty())
+                .map(|known| known.tiers.clone());
+            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":tool_count,"tiers":tiers}));
         }
         Ok(
-            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"allow_rules":self.allow_rules().await,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
         )
     }
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
@@ -532,7 +606,7 @@ impl Engine {
     }
     pub async fn handle(self: &Arc<Self>, kind: &str, a: Value) -> Result<Value> {
         match kind {
-            "exec.start" | "mcp.call" => self.submit(kind, a).await,
+            "exec.start" | "mcp.call" => self.submit(kind, a, false).await,
             "task.get" => {
                 // Keep the record and its output alive for the whole read while
                 // retention cleanup moves completed tasks into dedup records.
@@ -598,7 +672,18 @@ impl Engine {
             _ => bail!("unknown operation: {kind}"),
         }
     }
-    async fn submit(self: &Arc<Self>, kind: &str, mut a: Value) -> Result<Value> {
+    /// The desktop app's own observation, sent over the private control socket.
+    /// Only this path may carry `local_observation`; it never waits for approval.
+    pub async fn observe_locally(self: &Arc<Self>, mut a: Value) -> Result<Value> {
+        a["local_observation"] = json!(true);
+        self.submit("mcp.call", a, true).await
+    }
+    async fn submit(self: &Arc<Self>, kind: &str, mut a: Value, local: bool) -> Result<Value> {
+        // Remote requests must not impersonate the local app: the flag skips
+        // approval and hides the on-screen overlay.
+        if !local && a.get("local_observation").is_some() {
+            bail!("local_observation is reserved for the local desktop app");
+        }
         let task_id = a["request_id"]
             .as_str()
             .map(str::to_owned)
@@ -641,18 +726,63 @@ impl Engine {
         }
         self.check_admission(kind).await?;
         self.check_paths(kind, &a).await?;
-        let needs_approval = kind == "exec.start"
-            && self
-                .safety
+        let tier = if kind == "mcp.call" {
+            Some(
+                self.tool_tier(string(&a, "server")?, string(&a, "tool")?)
+                    .await,
+            )
+        } else {
+            None
+        };
+        let needs_approval = {
+            let safety = self.safety.lock().await;
+            match tier {
+                None => safety.approval_required(string(&a, "command")?),
+                Some(tier) => {
+                    if safety.desktop.policy(tier) == "deny" {
+                        return Err(crate::model::Fault::new(
+                            "desktop_denied",
+                            format!("{tier} desktop tools are disabled by local user"),
+                        )
+                        .into());
+                    }
+                    // The local app's own observation is a direct user action.
+                    safety.desktop.policy(tier) == "confirm" && !local
+                }
+            }
+        };
+        let rule = if needs_approval {
+            let now = now();
+            self.rules
                 .lock()
                 .await
-                .approval_required(string(&a, "command")?);
-        let initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
+                .iter()
+                .find(|r| r.matches(kind, &a, tier, now))
+                .map(|r| r.id.clone())
+        } else {
+            None
+        };
+        let needs_approval = needs_approval && rule.is_none();
+        let mut initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
+        if let Some(tier) = tier {
+            initial["desktop_tier"] = json!(tier);
+        }
+        if let Some(rule) = rule {
+            initial["approved_by_rule"] = json!(rule);
+        }
         wire::atomic_json(&path, &initial)?;
         let cancel = CancellationToken::new();
         let approval = if needs_approval {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            self.approvals.lock().await.insert(task_id.clone(), tx);
+            let (sender, rx) = tokio::sync::oneshot::channel();
+            self.approvals.lock().await.insert(
+                task_id.clone(),
+                Pending {
+                    sender,
+                    kind: kind.to_owned(),
+                    args: a.clone(),
+                    tier,
+                },
+            );
             Some(rx)
         } else {
             None
@@ -671,12 +801,16 @@ impl Engine {
                 if let Some(approval)=approval {
                     result["status"]=json!("awaiting_approval");result["approval_deadline"]=json!(now()+60_000);
                     wire::atomic_json(&path,&result)?;engine.changed();
-                    let allowed=tokio::select! {
-                        v=tokio::time::timeout(Duration::from_secs(60),approval)=>matches!(v,Ok(Ok(true))),
+                    let decision=tokio::select! {
+                        v=tokio::time::timeout(Duration::from_secs(60),approval)=>v,
                         _=cancel.cancelled()=>{bail!("cancelled before approval");}
                     };
                     engine.approvals.lock().await.remove(&ident);
-                    if !allowed {bail!("denied: approval rejected or expired");}
+                    match decision {
+                        Ok(Ok(true)) => {}
+                        Ok(_) => bail!("denied: approval rejected by local user"),
+                        Err(_) => bail!("denied: approval expired after 60 seconds without a local decision; the user may be away, retry later or ask them"),
+                    }
                 }
                 engine.check_paths(&kind,&a).await?;
                 result["status"] = json!("running");
@@ -721,6 +855,9 @@ impl Engine {
                         "failed"
                     });
                     result["error"] = json!({"message":text});
+                    if let Some(code) = denial_code(&text) {
+                        result["error"]["code"] = json!(code);
+                    }
                 }
             }
             result["ended_at"] = json!(now());
@@ -838,14 +975,18 @@ impl Engine {
                 let known = discovered.entry(name.to_owned()).or_default();
                 if known.session != c.generation || a["cursor"].as_str().is_none_or(str::is_empty) {
                     known.names.clear();
+                    known.tiers.clear();
                 }
                 known.session.clone_from(&c.generation);
                 if let Some(tools) = result["tools"].as_array() {
-                    known.names.extend(
-                        tools
-                            .iter()
-                            .filter_map(|tool| tool["name"].as_str().map(str::to_owned)),
-                    );
+                    for tool in tools {
+                        if let Some(name) = tool["name"].as_str() {
+                            known.names.insert(name.to_owned());
+                            known
+                                .tiers
+                                .insert(name.to_owned(), crate::safety::classify_tool(tool));
+                        }
+                    }
                 }
             }
             Ok::<Value, anyhow::Error>(

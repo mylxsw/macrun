@@ -130,20 +130,22 @@ async fn handle(
         match req["action"].as_str().unwrap_or("") {
             "self_test" => engine.self_test().await,
             "prune" => engine.prune_history().await,
-            "observe" => {
-                let mut args = a.clone();
-                args["local_observation"] = json!(true);
-                engine.handle("mcp.call", args).await
-            }
+            "observe" => engine.observe_locally(a.clone()).await,
             "safety" => engine.set_safety(serde_json::from_value(a.clone())?).await,
             "approve" => {
                 engine
-                    .approve(
+                    .approve_scoped(
                         crate::files::string(a, "task_id")?,
                         a["allow"]
                             .as_bool()
                             .ok_or_else(|| anyhow::anyhow!("allow required"))?,
+                        a["scope"].as_str().unwrap_or("once"),
                     )
+                    .await
+            }
+            "revoke_rule" => {
+                engine
+                    .revoke_rule(crate::files::string(a, "rule_id")?)
                     .await
             }
             "yield" => engine.yield_desktop().await,

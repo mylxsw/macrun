@@ -4,12 +4,11 @@ import {
   WorkspaceList,
   BackendPanel,
   Replay,
+  DesktopTiers,
 } from "./Features";
 import { SettingsPage } from "./SettingsPage";
 import { useTaskHistory, useReplayHistory } from "./taskHistory";
 import "./task-history.css";
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -31,9 +30,19 @@ import {
   Info,
   LogOut,
 } from "lucide-react";
-import { statuses, active, title, todaySummary } from "./model.mjs";
+import {
+  statuses,
+  active,
+  title,
+  todaySummary,
+  statusGroups,
+  tierLabels,
+  tierPolicyLabels,
+} from "./model.mjs";
 import type { Task, Snapshot, AppState } from "./types";
 import "./style.css";
+import "./v3.css";
+import "./dark.css";
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
 const border = new URLSearchParams(location.search).has("border");
 const overlay = new URLSearchParams(location.search).has("overlay");
@@ -171,6 +180,7 @@ function App() {
     [refreshWarning, setRefreshWarning] = useState(""),
     [busy, setBusy] = useState(false),
     [filter, setFilter] = useState("all"),
+    [kind, setKind] = useState(""),
     [query, setQuery] = useState(""),
     [selected, setSelected] = useState(""),
     [quit, setQuit] = useState(false),
@@ -275,6 +285,7 @@ function App() {
       if (taskId) {
         setSelected(taskId);
         setFilter("all");
+        setKind("");
         setQuery("");
       }
     });
@@ -324,8 +335,9 @@ function App() {
     try {
       seen = JSON.parse(sessionStorage.getItem(key) || "[]");
     } catch {}
+    // Approvals notify too: the panel is often closed while a request waits.
     const current = tasks.filter((t) =>
-      ["failed", "unknown", "timed_out"].includes(t.status),
+      ["failed", "unknown", "timed_out", "awaiting_approval"].includes(t.status),
     );
     if (sessionStorage.getItem(key))
       current
@@ -354,6 +366,7 @@ function App() {
   const choose = (t: Task) => {
     setSelected(t.task_id);
     setFilter("all");
+    setKind("");
     setQuery("");
     jump(tray ? `tasks:${t.task_id}` : "tasks");
   };
@@ -383,13 +396,23 @@ function App() {
         : running.length
           ? "running"
           : "succeeded";
-  const recent = tasks.slice(0, 6);
+  // Waiting requests appear once, in the approval area, not in activity lists.
+  const working = running.filter((t) => t.status !== "awaiting_approval");
+  const recent = tasks.filter((t) => !active(t)).slice(0, 6);
   const approvals = tasks.filter((t) => t.status === "awaiting_approval");
+  const desktopBusy = working.some((t) => t.kind === "mcp.call");
+  const tiers = snapshot?.safety.desktop;
+  const tierSummary = tiers
+    ? (["observe", "control", "high"] as const)
+        .map((k) => `${tierLabels[k]}${tierPolicyLabels[tiers[k]]}`)
+        .join(" · ")
+    : "";
   const history = useTaskHistory({
     enabled: page === "tasks" && !tray,
     available,
     snapshot,
     filter,
+    kind,
     query,
     selected,
   });
@@ -500,117 +523,162 @@ function App() {
         {feedback}
       </div>
     );
-  if (tray)
+  if (tray) {
+    const headline = approvals.length
+      ? `需要你确认 ${approvals.length} 个请求`
+      : !available
+        ? "执行器未连接"
+        : !connected
+          ? "未连接服务器"
+          : paused
+            ? "已暂停接收新任务"
+            : desktopBusy
+              ? "正在操作桌面"
+              : working.length
+                ? "Agent 正在工作"
+                : "空闲 · 等待 Agent";
+    const sub = [
+      approvals.length && working.length
+        ? `另有 ${working.length} 个任务在运行`
+        : working.length
+          ? `${working.length} 个任务在运行`
+          : !approvals.length && connected
+            ? `今天 ${summary.total || 0} 个任务${summary.failed ? `，${summary.failed} 个失败` : ""}`
+            : "",
+      connected && snapshot?.connection.rtt_ms != null
+        ? `已连接 ${snapshot.connection.rtt_ms} ms`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const dotClass = approvals.length
+      ? "awaiting_approval"
+      : desktopBusy
+        ? "desktop-active"
+        : stateClass;
     return (
       <div className="tray">
         <div ref={trayContent} className="tray-content">
-          <header>
-            <h2>
-              <span
-                className={`dot ${approvals.length ? "awaiting_approval" : stateClass}`}
-              />
-              {approvals.length ? "需要你确认" : stateText}
-            </h2>
-            <p>
-              {running.length} 个任务进行中 ·{" "}
-              {snapshot?.connection.server || "尚未配置服务器"}
-            </p>
-          </header>
-          <Approvals tasks={tasks} act={act} disabled={busy || !available} />
-          {!!running.filter((t) => t.status !== "awaiting_approval").length && (
-            <div className="tray-current card">
-              {running
-                .filter((t) => t.status !== "awaiting_approval")
-                .slice(0, 2)
-                .map((t, i) => (
-                  <button
-                    className={`tray-task ${i ? "compact" : ""}`}
-                    key={t.task_id}
-                    onClick={() => choose(t)}
-                  >
-                    <div className="row between">
-                      <small>
-                        {kindLabel(t)} · {label(t.status)}
-                      </small>
-                      <span className="mono">
-                        {t.progress
-                          ? `${t.progress.received} / ${t.progress.total} 个文件`
-                          : duration(t)}
-                      </span>
-                    </div>
-                    {!i && <div className="mono ellipsis">{title(t)}</div>}
-                  </button>
-                ))}
+          <header className="tray-head">
+            <span className={`dot ${dotClass}`} />
+            <div className="grow">
+              <h2>{headline}</h2>
+              {sub && <p>{sub}</p>}
             </div>
-          )}
-          {!connected && (
+            {(running.length > 0 || approvals.length > 0) && (
+              <button
+                className="stop-all"
+                disabled={!available || busy}
+                onClick={stop}
+                title="取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）"
+              >
+                全部停止
+              </button>
+            )}
+            {!available && (
+              <button className="primary" onClick={() => jump("settings")}>
+                检查连接
+              </button>
+            )}
+            {paused && available && (
+              <button disabled={busy} onClick={pause}>
+                恢复
+              </button>
+            )}
+          </header>
+          <Approvals
+            tasks={tasks}
+            act={act}
+            disabled={busy || !available}
+            compact
+          />
+          {available && !connected && (
             <div className="alert error tray-connection">
               {snapshot?.connection.error ||
                 "尚未连接服务器，请打开设置检查连接。"}
             </div>
           )}
-          <button
-            className="menuitem"
-            disabled={!available || busy}
-            onClick={pause}
-          >
-            {paused ? <Play /> : <Pause />}
-            {paused ? "恢复接收任务" : "暂停接收新任务"}
-          </button>
-          <button
-            className="menuitem"
-            disabled={!available || busy}
-            onClick={stop}
-          >
-            <Square />
-            全部停止<small>⌃⌥⌘.</small>
-          </button>
-          <button
-            className="menuitem"
-            disabled={!available || busy}
-            onClick={desktopToggle}
-          >
-            <MousePointer2 />
-            允许桌面控制
-            <small>{snapshot?.policy.desktop_enabled ? "✓" : ""}</small>
-          </button>
-          <hr />
-          <small>最近</small>
-          {tasks
-            .filter((t) => !active(t))
-            .slice(0, 3)
-            .map((t) => (
-              <button
-                className="menuitem"
-                onClick={() => choose(t)}
-                key={t.task_id}
-              >
-                <span className={`dot ${t.status}`} />
-                <span className="ellipsis">{title(t)}</span>
-                <small>{time(t).slice(0, 5)}</small>
-              </button>
-            ))}
-          {!recent.length && <p className="muted">暂无任务记录</p>}
-          <hr />
-          <button className="menuitem" onClick={() => jump("live")}>
-            打开 Macrun<small>⌘O</small>
-          </button>
-          <button className="menuitem" onClick={() => jump("settings")}>
-            设置…<small>⌘,</small>
-          </button>
-          <button
-            className="menuitem"
-            onClick={() => {
-              act("request_quit");
-            }}
-          >
-            退出 Macrun<small>⌘Q</small>
-          </button>
+          {working.length > 0 && (
+            <section className="tray-section" aria-label="正在进行">
+              <small className="tray-label">正在进行</small>
+              {working.slice(0, 3).map((t) => (
+                <button
+                  className="tray-task"
+                  key={t.task_id}
+                  onClick={() => choose(t)}
+                >
+                  <span className={`tray-kind ${t.kind === "mcp.call" ? "desktop" : ""}`}>
+                    {t.kind === "mcp.call" ? (
+                      <MousePointer2 size={13} />
+                    ) : t.kind === "sync" ? (
+                      <RefreshCw size={13} />
+                    ) : (
+                      <Terminal size={13} />
+                    )}
+                  </span>
+                  <span className="grow">
+                    <span className="mono ellipsis tray-task-title">
+                      {t.kind === "mcp.call" ? `桌面 · ${t.arguments.tool}` : title(t)}
+                    </span>
+                    <small className="ellipsis">
+                      {t.progress
+                        ? `已收到 ${t.progress.received} / ${t.progress.total} 个文件`
+                        : t.kind === "mcp.call"
+                          ? `${t.arguments.server} · ${tierLabels[t.desktop_tier || "control"]}`
+                          : t.arguments.cwd || label(t.status)}{" "}
+                      · {duration(t)}
+                    </small>
+                  </span>
+                </button>
+              ))}
+              {working.length > 3 && (
+                <button className="link tray-more" onClick={() => jump("live")}>
+                  还有 {working.length - 3} 个任务
+                </button>
+              )}
+            </section>
+          )}
+          <section className="tray-section tray-switches">
+            <label className="tray-switch">
+              <span className="grow">接收新任务</span>
+              <input
+                className="switch"
+                type="checkbox"
+                aria-label="接收新任务"
+                checked={!paused}
+                disabled={!available || busy}
+                onChange={pause}
+              />
+            </label>
+            <label className="tray-switch">
+              <span className="grow">允许 Agent 操作桌面</span>
+              <input
+                className="switch"
+                type="checkbox"
+                aria-label="允许 Agent 操作桌面"
+                checked={snapshot?.policy.desktop_enabled || false}
+                disabled={!available || busy}
+                onChange={desktopToggle}
+              />
+            </label>
+          </section>
+          <footer className="tray-foot">
+            <button className="link" onClick={() => jump("live")}>
+              打开 Macrun
+            </button>
+            <button className="link" onClick={() => jump("settings")}>
+              设置…
+            </button>
+            <button className="link" onClick={() => act("request_quit")}>
+              退出
+            </button>
+          </footer>
           {feedback}
           {exitDialog}
         </div>
       </div>
     );
+  }
   if (pairing)
     return (
       <div className="pairing-window">
@@ -676,8 +744,14 @@ function App() {
                 : ""}
             </span>
           </div>
-          <small className="mono">
-            {snapshot?.connection.server || app?.settings.server || "尚未连接"}
+          <small
+            title={snapshot?.connection.server || app?.settings.server || ""}
+          >
+            {connected
+              ? `QUIC · 已连接 ${Math.floor((Date.now() - (snapshot?.connection.since || Date.now())) / 60000)} 分钟`
+              : app?.settings.server
+                ? "服务器地址见设置与安全"
+                : "尚未配置服务器"}
           </small>
         </div>
       </aside>
@@ -772,7 +846,8 @@ function App() {
                 }
                 detail={
                   snapshot?.backends.length
-                    ? `${snapshot.backends.length} 个后端已配置，权限须实测`
+                    ? tierSummary ||
+                      `${snapshot.backends.length} 个后端已配置，权限须实测`
                     : "尚未配置后端；命令和文件能力独立可用"
                 }
               />
@@ -780,9 +855,9 @@ function App() {
             <div className="live-grid">
               <section>
                 <h2>
-                  正在进行 <span className="tag">{running.length}</span>
+                  正在进行 <span className="tag">{working.length}</span>
                 </h2>
-                {running.map((t) => (
+                {working.map((t) => (
                   <TaskCard
                     key={t.task_id}
                     task={t}
@@ -798,11 +873,13 @@ function App() {
                     }
                   />
                 ))}
-                {!running.length && (
+                {!working.length && (
                   <div className="card empty">
                     <Activity size={28} />
                     <h3>
-                      {available
+                      {available && approvals.length
+                        ? "请先处理上方的确认请求"
+                        : available
                         ? "等待 Agent 发起任务"
                         : app?.worker_starting
                           ? "正在启动执行器"
@@ -829,7 +906,7 @@ function App() {
               <aside>
                 <WorkspaceList snapshot={snapshot} act={act} />
                 <div className="row between section-heading">
-                  <h2>刚刚</h2>
+                  <h2>刚完成</h2>
                   <button className="link" onClick={() => setPage("tasks")}>
                     全部任务
                   </button>
@@ -849,7 +926,8 @@ function App() {
                 </div>
                 <p className="muted foot">
                   今天 {summary.total} 个任务：成功 {summary.succeeded || 0} ·
-                  失败 {summary.failed || 0} · 未知 {summary.unknown || 0}
+                  失败 {summary.failed || 0} · 未知 {summary.unknown || 0} ·
+                  拒绝或过期 {summary.denied || 0}
                 </p>
                 {(snapshot?.total_tasks || 0) > 200 && (
                   <p className="muted">
@@ -880,29 +958,90 @@ function App() {
                 />
               </label>
             </header>
-            <div className="filters">
-              {[["all", "全部"], ...Object.entries(statuses)].map(([k, v]) => (
-                <button
-                  aria-pressed={filter === k}
-                  key={k}
-                  className={filter === k ? "on" : ""}
-                  onClick={() => {
-                    setFilter(k);
+            <div className="filters v3-filters">
+              <div className="seg" role="group" aria-label="按状态筛选">
+                {(
+                  [
+                    ["all", "全部"],
+                    ["active", "进行中"],
+                    ["attention", "需关注"],
+                    ["failed", "失败"],
+                    ["succeeded", "成功"],
+                  ] as const
+                ).map(([k, v]) => (
+                  <button
+                    aria-pressed={filter === k}
+                    key={k}
+                    className={`${filter === k ? "on" : ""} ${k === "attention" ? "attention" : ""}`}
+                    onClick={() => {
+                      setFilter(k);
+                      setSelected("");
+                    }}
+                  >
+                    {v}
+                    <small>
+                      {k === "all"
+                        ? Object.values(history.counts).reduce(
+                            (sum, count) => sum + count,
+                            0,
+                          )
+                        : k in statusGroups
+                          ? statusGroups[k as keyof typeof statusGroups].reduce(
+                              (sum, st) => sum + (history.counts[st] || 0),
+                              0,
+                            )
+                          : history.counts[k] || 0}
+                    </small>
+                  </button>
+                ))}
+              </div>
+              <div className="seg" role="group" aria-label="按类型筛选">
+                {(
+                  [
+                    ["", "所有类型"],
+                    ["exec.start", "命令"],
+                    ["sync", "同步"],
+                    ["mcp.call", "桌面"],
+                  ] as const
+                ).map(([k, v]) => (
+                  <button
+                    aria-pressed={kind === k}
+                    key={k || "all-kinds"}
+                    className={kind === k ? "on" : ""}
+                    onClick={() => {
+                      setKind(k);
+                      setSelected("");
+                    }}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <label className="more-status push">
+                <span>更多状态</span>
+                <select
+                  aria-label="更多状态"
+                  value={
+                    Object.keys(statuses).includes(filter) &&
+                    !["failed", "succeeded"].includes(filter)
+                      ? filter
+                      : ""
+                  }
+                  onChange={(e) => {
+                    setFilter(e.target.value || "all");
                     setSelected("");
                   }}
                 >
-                  <span className={`dot ${k}`} />
-                  {v}
-                  <small>
-                    {k === "all"
-                      ? Object.values(history.counts).reduce(
-                          (sum, count) => sum + count,
-                          0,
-                        )
-                      : history.counts[k] || 0}
-                  </small>
-                </button>
-              ))}
+                  <option value="">—</option>
+                  {Object.entries(statuses)
+                    .filter(([k]) => !["failed", "succeeded"].includes(k))
+                    .map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v} {history.counts[k] || 0}
+                      </option>
+                    ))}
+                </select>
+              </label>
             </div>
             <div className="task-grid">
               <div className="task-history-list">
@@ -1027,6 +1166,15 @@ function App() {
                         </span>
                       </div>
                     )}
+                    {sel.error?.code === "approval_expired" && (
+                      <div className="alert task-explanation">
+                        <Info size={16} />
+                        <span>
+                          60 秒内没有人处理这个确认请求，命令没有执行。Agent
+                          收到 approval_expired，可以稍后重试或询问你。
+                        </span>
+                      </div>
+                    )}
                     {sel.error && sel.status !== "unknown" && (
                       <p className="error-text wrap">{sel.error.message}</p>
                     )}
@@ -1041,6 +1189,18 @@ function App() {
                       <dd className="mono">{sel.result?.exit_code ?? "—"}</dd>
                       <dt>任务编号</dt>
                       <dd className="mono">{sel.task_id}</dd>
+                      {sel.desktop_tier && (
+                        <>
+                          <dt>桌面分级</dt>
+                          <dd>{tierLabels[sel.desktop_tier]}</dd>
+                        </>
+                      )}
+                      {sel.approved_by_rule && (
+                        <>
+                          <dt>确认方式</dt>
+                          <dd>按临时允许规则自动放行</dd>
+                        </>
+                      )}
                       {sel.arguments.env && (
                         <>
                           <dt>环境变量</dt>
@@ -1117,6 +1277,11 @@ function App() {
               </label>
             </header>
 
+            <DesktopTiers
+              snapshot={snapshot}
+              act={act}
+              disabled={!available || busy}
+            />
             <div className="desktop-grid">
               <section>
                 <h2>后端</h2>
@@ -1419,6 +1584,35 @@ function TaskCard({
   openDirectory: () => void;
 }) {
   const sync = t.kind === "sync";
+  if (t.kind === "mcp.call") {
+    const args = JSON.stringify(t.arguments.arguments ?? {});
+    return (
+      <article className="card active-task desktop-task">
+        <div className="row task-meta">
+          <span className={`dot ${t.status}`} />
+          <span className="tag desktop-active">桌面</span>
+          <span className="tag">
+            {tierLabels[t.desktop_tier || "control"]}
+          </span>
+          <small>
+            {label(t.status)} · 已用时 <span className="mono">{duration(t)}</span>
+          </small>
+        </div>
+        <h3 className="mono command">
+          {t.arguments.server} · {t.arguments.tool}
+        </h3>
+        <small className="mono wrap desktop-args" title={args}>
+          {args.length > 160 ? `${args.slice(0, 160)}…` : args}
+        </small>
+        <div className="actions">
+          <button onClick={view}>查看任务详情</button>
+          <button disabled={disabled} className="danger push" onClick={cancel}>
+            取消任务
+          </button>
+        </div>
+      </article>
+    );
+  }
   return (
     <article className={`card active-task ${sync ? "sync-task" : ""}`}>
       <div className="row task-meta">
@@ -1456,8 +1650,12 @@ function TaskCard({
       ) : (
         <>
           <small className="mono wrap">
-            {t.arguments.cwd || t.arguments.remote_root || ""} · task{" "}
-            {t.task_id.slice(0, 8)}…
+            {[
+              t.arguments.cwd || t.arguments.remote_root,
+              `task ${t.task_id.slice(0, 8)}…`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </small>
           <TerminalTail text={t.output_tail || "等待任务输出…"} />
         </>

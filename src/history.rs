@@ -35,6 +35,15 @@ struct Query {
     cursor: Option<Cursor>,
 }
 
+/// Filter groups: "active" is still running or waiting; "attention" needs a human look.
+fn status_matches(filter: &str, status: &str) -> bool {
+    match filter {
+        "" | "all" => true,
+        "active" => matches!(status, "accepted" | "running" | "awaiting_approval"),
+        "attention" => matches!(status, "failed" | "timed_out" | "unknown" | "denied"),
+        _ => status == filter,
+    }
+}
 pub fn active(task: &Value) -> bool {
     matches!(
         task["status"].as_str(),
@@ -54,6 +63,8 @@ fn summary(task: &Value) -> Value {
         "error",
         "progress",
         "approval_deadline",
+        "desktop_tier",
+        "approved_by_rule",
     ] {
         if let Some(value) = task.get(field) {
             row[field] = value.clone();
@@ -140,6 +151,8 @@ impl TaskHistory {
         if ![
             "",
             "all",
+            "active",
+            "attention",
             "accepted",
             "running",
             "awaiting_approval",
@@ -188,7 +201,7 @@ impl TaskHistory {
             }
             let status = task["status"].as_str().unwrap_or("unknown");
             *counts.entry(status.to_owned()).or_default() += 1;
-            if query.status.is_empty() || query.status == "all" || status == query.status {
+            if status_matches(&query.status, status) {
                 matches.push(task);
             }
         }

@@ -11,7 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Root } from "react-dom/client";
 import type { Snapshot, Task } from "../src/types";
-import { statuses, selectTasks } from "../src/model.mjs";
+import { statuses, selectTasks, statusMatches } from "../src/model.mjs";
 
 const bridge = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -149,8 +149,7 @@ function historyPage(args: any) {
     return result;
   }, {});
   const filtered = all.filter(
-    (task) =>
-      !args.status || args.status === "all" || task.status === args.status,
+    (task) => !args.status || statusMatches(args.status, task.status),
   );
   const after = filtered.filter(
     (task) =>
@@ -274,19 +273,52 @@ function detail() {
   return within(screen.getByRole("region", { name: "任务详情" }));
 }
 
+async function chooseStatus(
+  user: ReturnType<typeof userEvent.setup>,
+  status: string,
+) {
+  if (status === "failed" || status === "succeeded")
+    await user.click(
+      screen.getByRole("button", {
+        name: new RegExp(`^${statuses[status]}\\s*1$`),
+      }),
+    );
+  else
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "更多状态" }),
+      status,
+    );
+}
+
 test("navigation keeps all nine task states independently usable", async () => {
   const user = userEvent.setup();
   await mount();
   await user.click(navigation().getByRole("button", { name: "任务" }));
-  for (const [status, label] of Object.entries(statuses)) {
-    await user.click(
-      screen.getByRole("button", { name: new RegExp(`^${label}\\s*1$`) }),
-    );
+  for (const status of Object.keys(statuses)) {
+    await chooseStatus(user, status);
     await waitFor(() =>
       expect(detail().getByText(`task-${status}`)).toBeTruthy(),
     );
     expect(taskList().getAllByRole("button")).toHaveLength(1);
   }
+  // Groups: in progress and needs attention sum their statuses.
+  await user.click(screen.getByRole("button", { name: /^进行中\s*3$/ }));
+  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(3));
+  await user.click(screen.getByRole("button", { name: /^需关注\s*4$/ }));
+  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(4));
+  // Type filter is independent of status and reaches the worker query.
+  await user.click(screen.getByRole("button", { name: /^全部\s*9$/ }));
+  await user.click(screen.getByRole("button", { name: "桌面" }));
+  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(1));
+  expect(detail().getByText("task-unknown")).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(
+      ([command, args]) =>
+        command === "control" &&
+        args.action === "task_list" &&
+        args.args.kind === "mcp.call",
+    ),
+  ).toBe(true);
   await user.click(navigation().getByRole("button", { name: "桌面控制" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "桌面控制" }),
@@ -365,8 +397,8 @@ test("unknown results explain possible effects and offer observation without rep
   const user = userEvent.setup();
   await mount();
   await user.click(navigation().getByRole("button", { name: "任务" }));
-  await user.click(screen.getByRole("button", { name: /^未知\s*1$/ }));
-  expect(detail().getByText(/不会自动重放/)).toBeTruthy();
+  await chooseStatus(user, "unknown");
+  await waitFor(() => expect(detail().getByText(/不会自动重放/)).toBeTruthy());
   expect(
     detail().queryByRole("button", { name: /取消任务|重试|重新执行|重放/ }),
   ).toBeNull();
@@ -513,11 +545,11 @@ test("closing quit restores an underlying tools dialog before its original trigg
 test("a tray task opens its own detail and clears stale task filters in the main window", async () => {
   const user = userEvent.setup();
   await mount("?tray=1");
-  await user.click(screen.getByRole("button", { name: /command-denied/ }));
+  await user.click(screen.getByRole("button", { name: /command-running/ }));
   const open = bridge.invoke.mock.calls.find(
     ([command]) => command === "open_main",
   );
-  expect(open).toEqual(["open_main", { route: "tasks:task-denied" }]);
+  expect(open).toEqual(["open_main", { route: "tasks:task-running" }]);
   await act(async () => {
     bridge.roots.splice(0).forEach((root) => root.unmount());
   });
@@ -525,13 +557,14 @@ test("a tray task opens its own detail and clears stale task filters in the main
   document.body.innerHTML = '<div id="root"></div>';
   await mount();
   await user.click(navigation().getByRole("button", { name: "任务" }));
-  await user.click(screen.getByRole("button", { name: /^未知\s*1$/ }));
+  await chooseStatus(user, "unknown");
+  await user.click(screen.getByRole("button", { name: "命令" }));
   await user.type(
     screen.getByRole("textbox", { name: "搜索任务" }),
     "no match",
   );
   await emit("navigate", open![1].route);
-  expect(detail().getByText("task-denied")).toBeTruthy();
+  await waitFor(() => expect(detail().getByText("task-running")).toBeTruthy());
   expect(taskList().getAllByRole("button")).toHaveLength(9);
   expect(
     (screen.getByRole("textbox", { name: "搜索任务" }) as HTMLInputElement)
@@ -886,3 +919,98 @@ test.each([
     ).toBe(false);
   },
 );
+
+test("menu bar puts stop first, hides the server address and uses real switches", async () => {
+  const user = userEvent.setup();
+  await mount("?tray=1");
+  expect(screen.getByRole("heading", { name: "需要你确认 1 个请求" })).toBeTruthy();
+  expect(screen.queryByText(/127\.0\.0\.1/)).toBeNull();
+  expect(screen.queryByText("最近")).toBeNull();
+  // Running work is listed once; the waiting request is only in the prompt.
+  const working = within(screen.getByRole("region", { name: "正在进行" }));
+  expect(working.queryByText("command-awaiting_approval")).toBeNull();
+  expect(working.getByText("command-running")).toBeTruthy();
+  await user.click(screen.getByRole("checkbox", { name: "接收新任务" }));
+  await user.click(screen.getByRole("checkbox", { name: "允许 Agent 操作桌面" }));
+  await user.click(screen.getByRole("button", { name: "全部停止" }));
+  expect(
+    bridge.invoke.mock.calls
+      .filter(([command]) => command === "control")
+      .map(([, args]) => [args.action, args.args]),
+  ).toEqual([
+    ["pause", { paused: true }],
+    ["desktop", { enabled: true }],
+    ["stop_all", {}],
+  ]);
+});
+
+test("idle menu bar collapses to status and switches", async () => {
+  app.snapshot.tasks = app.snapshot.tasks.filter(
+    (task) => !["accepted", "running", "awaiting_approval"].includes(task.status),
+  );
+  app.snapshot.active_count = 0;
+  await mount("?tray=1");
+  expect(screen.getByRole("heading", { name: "空闲 · 等待 Agent" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "全部停止" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "正在进行" })).toBeNull();
+  expect(screen.getByText(/今天 9 个任务，1 个失败/)).toBeTruthy();
+});
+
+test("live page shows a waiting request once and desktop calls without a terminal", async () => {
+  app.snapshot.tasks.push({
+    task_id: "task-desktop",
+    kind: "mcp.call",
+    status: "running",
+    desktop_tier: "observe",
+    arguments: {
+      server: "computer",
+      tool: "get_window_state",
+      arguments: { pid: 1 },
+    },
+    started_at: Date.now(),
+  } as any);
+  await mount();
+  expect(screen.getAllByText("command-awaiting_approval")).toHaveLength(1);
+  const card = screen
+    .getByRole("heading", { name: "computer · get_window_state" })
+    .closest("article")!;
+  expect(within(card as HTMLElement).getByText("观察")).toBeTruthy();
+  expect(within(card as HTMLElement).getByText('{"pid":1}')).toBeTruthy();
+  expect(card.querySelector(".term")).toBeNull();
+  expect(screen.queryByText("127.0.0.1:7443")).toBeNull();
+});
+
+test("a new approval raises one notification when notifications are enabled", async () => {
+  app.preferences.notifications = true;
+  await mount();
+  // The first snapshot only records what is already visible.
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "notify_task"),
+  ).toHaveLength(0);
+  const next = structuredClone(app.snapshot);
+  next.tasks.unshift({
+    ...next.tasks.find((task) => task.status === "awaiting_approval")!,
+    task_id: "task-new-approval",
+  });
+  await emit("worker-state", next);
+  await emit("worker-state", structuredClone(next));
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "notify_task"),
+  ).toEqual([["notify_task", { status: "awaiting_approval" }]]);
+});
+
+test("expired approvals explain that nothing ran", async () => {
+  const user = userEvent.setup();
+  Object.assign(app.snapshot.tasks.find((task) => task.status === "denied")!, {
+    error: {
+      code: "approval_expired",
+      message: "denied: approval expired after 60 seconds without a local decision",
+    },
+  });
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await chooseStatus(user, "denied");
+  await waitFor(() =>
+    expect(detail().getByText(/60 秒内没有人处理这个确认请求/)).toBeTruthy(),
+  );
+});

@@ -413,6 +413,7 @@ pub fn notify_task(status: String, app: tauri::AppHandle) -> std::result::Result
         "failed" => "任务执行失败",
         "timed_out" => "任务已超时",
         "unknown" => "任务结果需要核对",
+        "awaiting_approval" => "有请求等待你确认，60 秒内未处理将过期",
         _ => return Ok(()),
     };
     app.notification()
