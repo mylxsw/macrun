@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 首次配对</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.55}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.row{display:flex;align-items:center;gap:10px}
+.btn{font:inherit;font-size:13px;min-height:34px;padding:0 14px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#F4F4F1}
+.btn.primary{background:#1A1A19;border-color:#1A1A19;color:#fff}
+.btn.primary:hover{background:#333331}
+.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7;white-space:pre;overflow-x:auto}
+</style>
+</helmet>
+<div class="app" style="width: 800px; height: 580px; box-sizing: border-box; background: #FBFBFA; border-radius: 12px; overflow: hidden; display: flex; box-shadow: 0 0 0 1px #E3E2DD">
+  <aside style="width: 230px; flex-shrink: 0; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 22px 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+    <div class="row" style="padding-bottom: 22px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg></div>
+      <span style="font-weight: 600; font-size: 15px">连接到服务器</span>
+    </div>
+    <sc-for list="{{steps}}" as="s" hint-placeholder-count="3">
+      <div class="row" style="padding: 8px 6px; color: {{s.color}}">
+        <span style="width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; background: {{s.bg}}; color: {{s.fg}}">{{s.n}}</span>
+        <span style="font-weight: {{s.weight}}">{{s.label}}</span>
+      </div>
+    </sc-for>
+    <div style="flex-grow: 1"></div>
+    <div class="label">还没有服务器？先在 Linux 上按 README 第 1–2 步安装 Macrun 服务端。</div>
+  </aside>
+
+  <main style="flex-grow: 1; padding: 28px 32px; display: flex; flex-direction: column; min-width: 0">
+    <sc-if value="{{s1}}" hint-placeholder-val="{{true}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">粘贴配对码</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">在服务器上运行下面这条命令，它会生成一个 10 分钟内有效、只能用一次的配对码。</p>
+      <div class="term mono">$ macrun invite
+macrun://203.0.113.10:7443/pair?code=K7QF-29XM&amp;fp=4FA19C07</div>
+      <label for="code" style="font-weight: 550; margin: 18px 0 6px">配对码</label>
+      <input id="code" class="mono" value="macrun://203.0.113.10:7443/pair?code=K7QF-29XM&amp;fp=4FA19C07" style="font-size: 13px; border: 1px solid #2F5BEA; box-shadow: 0 0 0 3px #DCE5FF; border-radius: 8px; padding: 9px 11px; outline: none">
+      <div class="label" style="margin-top: 6px">配对码包含服务器地址和证书指纹。令牌会通过加密连接下发，并存入钥匙串，不需要再用 scp 复制文件。</div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn">手动填写地址和证书</button><button class="btn primary" onClick="{{next}}">连接</button></div>
+    </sc-if>
+
+    <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">检查连接</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">逐项检查，任何一步失败都会说明原因和下一步怎么做。</p>
+      <div style="display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid #E6E5E1; border-radius: 10px; padding: 6px 0">
+        <sc-for list="{{checks}}" as="c" hint-placeholder-count="5">
+          <div class="row" style="padding: 9px 16px">
+            <span style="width: 20px; height: 20px; border-radius: 50%; background: #EAF6EF; color: #1F6B45; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 8.5l2.5 2.5L12 5.5"></path></svg></span>
+            <span style="flex-grow: 1">{{c.name}}</span>
+            <span class="label mono">{{c.v}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div class="label" style="margin-top: 12px">现在已经可以运行命令和同步文件。在服务器上试试：<span class="mono" style="color: #1A1A19">macrun exec 'hostname'</span></div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn" onClick="{{back}}">上一步</button><button class="btn primary" onClick="{{next}}">继续</button></div>
+    </sc-if>
+
+    <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">桌面控制（可选）</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">需要让 Agent 截图、点击应用时再开启。跳过不影响命令和文件。</p>
+      <div style="background: #fff; border: 1px solid #E6E5E1; border-radius: 10px">
+        <div class="row" style="padding: 12px 16px; border-bottom: 1px solid #F0EFEB">
+          <span style="flex-grow: 1"><span style="font-weight: 550">computer-use 工具</span><br><span class="label">已找到 /Applications/CuaDriver.app（0.26.0）</span></span>
+          <span class="label" style="color: #1F6B45">已检测到</span>
+        </div>
+        <div class="row" style="padding: 12px 16px; border-bottom: 1px solid #F0EFEB">
+          <span style="flex-grow: 1"><span style="font-weight: 550">辅助功能</span><br><span class="label">授予 CuaDriver，用于点击和输入</span></span>
+          <button class="btn">打开系统设置</button>
+        </div>
+        <div class="row" style="padding: 12px 16px">
+          <span style="flex-grow: 1"><span style="font-weight: 550">屏幕录制</span><br><span class="label">授予后会实拍一张截图验证，不只看权限标记</span></span>
+          <button class="btn">打开系统设置</button>
+        </div>
+      </div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn" onClick="{{reset}}">稍后再说</button><button class="btn primary" onClick="{{reset}}">完成</button></div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":800,"height":580}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const step = (this.state && this.state.step) || 1;
+    const names = ['配对码', '检查连接', '桌面控制'];
+    return {
+      s1: step === 1, s2: step === 2, s3: step === 3,
+      next: () => this.setState({ step: Math.min(3, step + 1) }),
+      back: () => this.setState({ step: Math.max(1, step - 1) }),
+      reset: () => this.setState({ step: 1 }),
+      steps: names.map((label, i) => {
+        const n = i + 1;
+        const done = n < step, cur = n === step;
+        return { n: done ? '✓' : String(n), label: label,
+          bg: cur ? '#1A1A19' : (done ? '#EAF6EF' : '#E6E5E1'), fg: cur ? '#fff' : (done ? '#1F6B45' : '#6B6A66'),
+          color: cur || done ? '#1A1A19' : '#6B6A66', weight: cur ? '600' : '400' };
+      }),
+      checks: [
+        { name: 'UDP 7443 可达', v: '38 ms' },
+        { name: '服务器证书与配对码指纹一致', v: '4F:A1:…:30' },
+        { name: '令牌已获取并存入钥匙串', v: 'Keychain' },
+        { name: '协议版本一致', v: 'v2 = v2' },
+        { name: '远程命令试运行', v: 'exit 0' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

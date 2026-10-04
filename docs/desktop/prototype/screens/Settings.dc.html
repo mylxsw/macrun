@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 设置与安全</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#FBFBFA}
+a{color:#2F5BEA}a:hover{color:#1F44C2}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}
+.nav a:hover{background:#E7E6E1;color:#1A1A19}
+.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}
+.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#F4F4F1}
+.btn.danger{color:#B4321C;border-color:#E9C3BA}
+.btn.primary{background:#1A1A19;border-color:#1A1A19;color:#fff}
+.btn.primary:hover{background:#333331}
+.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}
+.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}
+.row{display:flex;align-items:center;gap:10px}
+.sw{appearance:none;-webkit-appearance:none;width:36px;height:22px;border-radius:22px;background:#CFCEC8;position:relative;cursor:pointer;margin:0;flex-shrink:0}
+.sw:checked{background:#1A1A19}
+.sw::before{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw:checked::before{left:17px}
+.line{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid #F0EFEB;flex-wrap:wrap}
+.line:last-child{border-bottom:0}
+.seg{display:inline-flex;background:#EFEEEA;border-radius:8px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{font:inherit;font-size:12.5px;border:0;background:transparent;color:#4A4945;border-radius:6px;padding:6px 12px;cursor:pointer;min-height:30px}
+.seg button.on{background:#fff;color:#1A1A19;box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:550}
+.sub a{font-size:13px;color:#4A4945;text-decoration:none;padding:6px 10px;border-radius:6px}
+.sub a:hover{background:#EFEFEB;color:#1A1A19}
+.pathchip{display:inline-flex;align-items:center;gap:6px;border:1px solid #E1E0DB;background:#F7F7F4;border-radius:6px;padding:3px 6px 3px 9px}
+.x{font:inherit;border:0;background:transparent;color:#6B6A66;cursor:pointer;width:22px;height:22px;border-radius:4px;display:grid;place-items:center;padding:0}
+.x:hover{background:#E7E6E1}
+</style>
+</helmet>
+<div class="app" style="display: flex; flex-wrap: wrap; min-height: 1400px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 22px">
+    <header>
+      <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">设置与安全</h1>
+      <div class="sub row" style="gap: 2px; margin-top: 10px; flex-wrap: wrap">
+        <a href="#safety">安全边界</a><a href="#conn">连接</a><a href="#general">通用</a><a href="#diag">诊断</a>
+      </div>
+    </header>
+
+    <section id="safety" style="display: flex; flex-direction: column; gap: 10px">
+      <div><h2 style="margin: 0; font-size: 15px; font-weight: 600">安全边界</h2><p class="label" style="margin: 2px 0 0">远程 Agent 拥有和你一样的用户权限。这些规则在执行器内生效，Agent 绕不过去。</p></div>
+      <div class="card">
+        <div class="line" style="align-items: flex-start">
+          <div style="flex: 1 1 260px">
+            <div style="font-weight: 550">允许的工作目录</div>
+            <div class="label">命令的工作目录、文件读写和同步目标必须位于这些目录之内。</div>
+          </div>
+          <div style="flex: 1 1 300px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+            <span class="pathchip mono">~/work<button class="x" aria-label="移除 ~/work"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 4l8 8M12 4l-8 8"></path></svg></button></span>
+            <span class="pathchip mono">/tmp<button class="x" aria-label="移除 /tmp"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 4l8 8M12 4l-8 8"></path></svg></button></span>
+            <button class="btn ghost" style="min-height: 28px">+ 添加目录</button>
+          </div>
+        </div>
+        <div class="line" style="align-items: flex-start">
+          <div style="flex: 1 1 260px">
+            <div style="font-weight: 550">执行命令前</div>
+            <div class="label">{{modeHint}}</div>
+          </div>
+          <div class="seg" role="group" aria-label="命令确认方式">
+            <sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+              <button class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <sc-if value="{{showRules}}" hint-placeholder-val="{{true}}">
+          <div class="line" style="align-items: flex-start; background: #FAFAF8">
+            <div style="flex: 1 1 260px">
+              <div style="font-weight: 550">风险命令规则</div>
+              <div class="label">匹配时在菜单栏弹出确认，60 秒内未处理视为拒绝，任务以 <span class="mono">denied</span> 结束。</div>
+            </div>
+            <div class="mono" style="flex: 1 1 300px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px">
+              <span class="tag mono">sudo *</span><span class="tag mono">rm -rf *</span><span class="tag mono">git push *</span><span class="tag mono">security *</span><span class="tag mono">defaults write *</span><span class="tag mono">osascript *</span>
+              <button class="btn ghost" style="min-height: 26px; font-size: 12px">编辑规则</button>
+            </div>
+          </div>
+        </sc-if>
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">环境变量值不写入记录</div><div class="label">任务详情只显示变量名，例如 <span class="mono">GITHUB_TOKEN=••••</span>。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+      </div>
+    </section>
+
+    <section id="conn" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">连接</h2>
+      <div class="card">
+        <div class="line"><div class="label" style="width: 120px">服务器</div><div class="mono" style="flex-grow: 1">203.0.113.10:7443</div><span class="tag" style="background: #EAF6EF; color: #1F6B45">已连接 · QUIC</span></div>
+        <div class="line"><div class="label" style="width: 120px">服务器证书</div><div class="mono" style="flex: 1 1 260px; word-break: break-all">SHA256 4F:A1:9C:07:…:E2:5B:30</div><span class="label">配对时已固定</span></div>
+        <div class="line"><div class="label" style="width: 120px">访问令牌</div><div style="flex-grow: 1">保存在 macOS 钥匙串</div><button class="btn ghost">显示</button></div>
+        <div class="line"><div class="label" style="width: 120px">本机名称</div><div style="flex-grow: 1">Mac mini（M2 · arm64）</div><button class="btn ghost">重命名</button></div>
+        <div class="line" style="background: #FAFAF8">
+          <div style="flex-grow: 1" class="label">更换服务器或令牌失效时重新配对。现有任务记录会保留。</div>
+          <button class="btn">重新配对</button>
+          <button class="btn danger">断开连接</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="general" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">通用</h2>
+      <div class="row" style="align-items: flex-start; background: #FFF6E5; border: 1px solid #F1DDB3; color: #7A4B00; border-radius: 10px; padding: 12px 14px; flex-wrap: wrap">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px"><circle cx="8" cy="8" r="6"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+        <div style="flex: 1 1 300px">检测到旧的 LaunchAgent <span class="mono">dev.macrun.worker</span> 仍在运行。两个执行器同时连接会互相顶替。迁移后由 Macrun Desktop 统一管理，原 plist 会备份到 <span class="mono">~/Library/LaunchAgents/backup/</span>。</div>
+        <button class="btn primary">迁移</button>
+      </div>
+      <div class="card">
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">登录时启动</div><div class="label">在图形登录后启动；注销或重启到登录界面前不会运行。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">关闭窗口后继续在菜单栏运行</div><div class="label">只有“退出 Macrun”才会停止执行器；有任务在跑时会先询问。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">任务失败或结果未知时发送通知</div><div class="label">成功不打扰；失败、超时、未知各发一次。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <div class="line"><div style="flex-grow: 1"><div style="font-weight: 550">任务记录保留</div><div class="label">超过期限的输出和截图会被清理，去重编号另保留 90 天。</div></div>
+          <div class="seg" role="group" aria-label="保留时长"><button>7 天</button><button class="on">30 天</button><button>90 天</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="diag" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">诊断</h2>
+      <div class="card">
+        <div class="line"><div class="label" style="width: 120px">版本</div><div class="mono" style="flex-grow: 1">macrun 0.2.0 · 协议 2 · darwin-arm64</div><span class="label">服务器版本一致</span></div>
+        <div class="line"><div class="label" style="width: 120px">数据目录</div><div class="mono" style="flex: 1 1 260px; word-break: break-all">~/Library/Application Support/Macrun</div><span class="label">412 MB · 1,284 条任务</span></div>
+        <div class="line" style="background: #FAFAF8">
+          <div style="flex-grow: 1" class="label">诊断包包含运行日志、版本与连通性测试结果，不包含命令输出、文件内容、截图和令牌。</div>
+          <button class="btn">查看日志</button>
+          <button class="btn">测试连通性</button>
+          <button class="btn primary">导出诊断包</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mode = (this.state && this.state.mode) || 'risky';
+    const list = [
+      { key: 'auto', label: '直接执行', hint: '和现在的 CLI 行为一致，不做拦截。适合专门给 Agent 用的机器。' },
+      { key: 'risky', label: '风险命令先确认', hint: '普通命令直接执行，匹配下方规则的命令先在菜单栏请你确认。' },
+      { key: 'all', label: '每条都确认', hint: '每个命令和桌面操作都需要你点“允许”。适合第一次试用。' }
+    ];
+    const cur = list.find((m) => m.key === mode) || list[1];
+    return {
+      modes: list.map((m) => ({ label: m.label, cls: m.key === mode ? 'on' : '', pick: () => this.setState({ mode: m.key }) })),
+      modeHint: cur.hint,
+      showRules: mode === 'risky'
+    };
+  }
+}
+</script>
+</body>
+</html>

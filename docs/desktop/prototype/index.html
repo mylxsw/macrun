@@ -1,39 +1,1005 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Macrun · 桌面交互设计</title><style>
-:root{font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#23322e;--green:#26745d;--muted:#738078;--line:#e5eae6;--panel:#ffffff;--bg:#f7f9f6}*{box-sizing:border-box}body{margin:0;background:#dce6de}button,input,select{font:inherit}button{cursor:pointer;border:0;color:inherit;background:transparent;border-radius:8px;padding:8px 12px}button:hover{background:#e7eee8}button:active{transform:scale(.98)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #78b59b;outline-offset:2px}button:disabled{opacity:.5;cursor:default}h1,h2,h3,p{margin:0}h1{font-size:25px;letter-spacing:-.7px}h2{font-size:18px;letter-spacing:-.4px}h3{font-size:13px}small,.muted{color:var(--muted)}.row{display:flex;align-items:center;gap:10px}.between{justify-content:space-between}.pill{border-radius:20px;font-size:11px;padding:4px 9px;background:#e6f2eb;color:var(--green);white-space:nowrap}.dot{display:inline-block;width:7px;height:7px;background:currentColor;border-radius:100%;margin-right:5px}.amber{background:#fbefda;color:#99631d}.red{background:#f9e8e4;color:#ad5343}.primary{background:var(--green);color:white}.primary:hover{background:#205e4c}.secondary{background:#eff3ef;border:1px solid #e0e7df}.toolbar{padding:18px 32px;background:#f5f7f1;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #cdd8cd;gap:12px}.eyebrow{font-size:10px;letter-spacing:2px;color:#71816c;font-weight:650}.toolbar strong{font-size:16px}.switcher{display:flex;background:#e6ebe3;padding:3px;border-radius:9px}.switcher button{font-size:12px;padding:6px 13px}.switcher .selected{background:white;box-shadow:0 1px 4px #0001}.desktop{min-height:calc(100vh - 84px);position:relative;padding:80px 38px 68px;background:radial-gradient(ellipse at 9% 80%,#b0c2b4 0,transparent 55%),radial-gradient(ellipse at 95% 12%,#eae7d9 0,transparent 60%),#dbe4da}.systembar{position:absolute;top:0;left:0;right:0;height:33px;padding:0 27px;background:#f6f8ee60;backdrop-filter:blur(20px);display:flex;justify-content:space-between;align-items:center;font-size:12px}.systembar button{padding:3px 11px}.traytrigger{background:#ffffff60;border:1px solid #ffffff60;font-weight:700}.desktop.windows .systembar{top:auto;bottom:0;height:44px;background:#f6f8eef0}.workspace{max-width:1050px;margin:auto;display:grid;grid-template-columns:205px 1fr;min-height:618px;border:1px solid #fff9;border-radius:15px;overflow:hidden;box-shadow:0 26px 75px #344e3b25,0 3px 12px #25322610;background:white}.sidebar{background:#f0f4edda;padding:22px 14px;display:flex;flex-direction:column;border-right:1px solid var(--line)}.lights{display:flex;gap:7px;margin:0 0 30px 6px}.lights button{padding:0;height:12px;width:12px;border-radius:50%;background:#e6bd55}.lights button:first-child{background:#e58075}.lights button:last-child{background:#8eb481}.brand{padding:0 10px 24px;display:flex;gap:11px;align-items:center}.mark{background:#294f40;color:#fff;border-radius:12px;font-size:23px;width:40px;height:40px;display:grid;place-items:center;font-weight:600}.brand strong{font-size:18px;letter-spacing:-.5px}.nav{display:flex;flex-direction:column;gap:5px}.nav button{text-align:left;display:flex;gap:12px;padding:10px 12px;color:#657166}.nav button.active{background:#dee8dc;color:#2c5945;font-weight:600}.nav i{font-style:normal;width:18px;text-align:center}.device{margin-top:auto;background:#ffffff8c;padding:13px;border:1px solid #e0e7dc;border-radius:10px}.device small{font-size:11px}.main{padding:32px 34px;min-width:0;background:var(--bg)}.subtitle{font-size:12px;color:var(--muted);margin-top:5px}.section{margin-top:24px}.card{background:white;border:1px solid var(--line);border-radius:11px;padding:19px}.connection{display:flex;align-items:center;gap:15px}.connection .icon{width:45px;height:45px;border-radius:12px;background:#eaf1e8;display:grid;place-items:center;color:var(--green);font-size:21px}.connection .actions{margin-left:auto}.statgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:15px}.stat{padding:17px 19px}.stat strong{font-size:27px;font-weight:600;letter-spacing:-1px}.stat small{display:block;font-size:11px}.sectiontitle{margin-bottom:10px}.running{border-left:3px solid #6b9c72}.progress{height:4px;border-radius:4px;background:#ebf0e8;margin:14px 0 9px;overflow:hidden}.progress span{display:block;width:56%;height:100%;background:#83a783}.taskrow{display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:13px 5px;border-bottom:1px solid #edf0eb;border-radius:0}.taskrow:last-child{border:0}.taskrow .statusicon{background:#eaf3eb;color:#5a8661;width:28px;height:28px;border-radius:8px;display:grid;place-items:center}.taskrow .failed{color:#b5644e;background:#f8e9e2}.taskrow .taskmeta{margin-left:auto;text-align:right;color:var(--muted);font-size:11px}.taskrow strong{font-size:12px;font-weight:550}.taskrow small{font-size:11px}.tiny{font-size:11px}.filters{display:flex;gap:5px;flex-wrap:wrap;margin:18px 0 12px}.filters button{font-size:12px}.filters .active{background:#e1ebde;color:#315c40}.search{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:white}.field{margin-top:18px}.field label{display:block;font-size:12px;font-weight:600;margin-bottom:6px}.field input{width:100%;padding:10px 12px;border:1px solid #dbe2d8;border-radius:8px;background:#fff}.field small{display:block;margin-top:5px;font-size:11px}.settingrow{padding:16px 0;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line)}.settingrow:last-child{border:0}.toggle{appearance:none;width:34px;height:20px;border-radius:20px;background:#cdd5cd;position:relative;cursor:pointer;flex-shrink:0}.toggle:checked{background:var(--green)}.toggle:before{content:'';position:absolute;width:16px;height:16px;border-radius:100%;background:white;left:2px;top:2px;box-shadow:0 1px 3px #0002;transition:transform .15s}.toggle:checked:before{transform:translateX(14px)}.notice{padding:12px 14px;background:#f7ecdc;border-radius:8px;font-size:12px;color:#936827;margin-top:16px}.footnote{position:relative;text-align:center;margin:23px auto 0;font-size:11px;color:#53694e}.popover{position:absolute;z-index:4;right:130px;top:39px;width:355px;background:#f8faf6f5;backdrop-filter:blur(30px);border:1px solid white;border-radius:14px;box-shadow:0 18px 65px #19342635;padding:19px;max-height:calc(100vh - 155px);overflow:auto;transform-origin:top right}.windows .popover{top:auto;bottom:52px;transform-origin:bottom right}.popover .card{padding:12px}.popover .section{margin-top:16px}.popover h2{font-size:16px}.popover .statgrid{gap:6px}.popover .stat{padding:10px}.popover .stat strong{font-size:21px}.popoverfooter{border-top:1px solid var(--line);padding-top:10px;margin-top:12px}.overlay{position:fixed;inset:0;background:#1d342b40;backdrop-filter:blur(5px);z-index:10;display:grid;place-items:center;padding:20px}.dialog{background:var(--bg);border:1px solid #fff;border-radius:16px;padding:26px;width:540px;max-width:100%;max-height:85vh;overflow:auto;box-shadow:0 30px 100px #18312540}.dialog pre{padding:17px;background:#24362e;color:#dce9da;border-radius:9px;font:12px/1.8 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.details{display:grid;grid-template-columns:80px 1fr;gap:9px;font-size:12px;margin:20px 0}.details span:nth-child(odd){color:var(--muted)}.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#263e32;color:#fff;border:1px solid #ffffff30;padding:12px 20px;border-radius:10px;box-shadow:0 6px 24px #0002;z-index:20;font-size:12px;max-width:90vw}.empty{text-align:center;padding:70px 20px;color:var(--muted)}.hidden{display:none!important}.stagecontrols{display:flex;gap:10px;align-items:center}.stagecontrols select{padding:6px 10px;border:1px solid #d5ded1;background:#fff;border-radius:7px;font-size:12px}.onboard{max-width:460px;margin:22px auto}.onboard .mark{margin-bottom:20px}.badge{font-size:10px;border:1px solid #cdd9c7;padding:2px 7px;border-radius:4px;color:#697c5c}.error{color:#b35143;font-size:12px;margin-top:10px}.desktop.windows .lights{visibility:hidden}@media(max-width:800px){.toolbar{padding:13px 16px;flex-wrap:wrap}.desktop{padding:60px 16px}.workspace{grid-template-columns:155px 1fr}.main{padding:25px 20px}.sidebar{padding:18px 10px}.brand{padding-left:0;gap:7px}.popover{right:20px}.stagecontrols{flex-wrap:wrap}}@media(max-width:580px){.workspace{display:block;min-height:650px}.sidebar{padding:12px}.lights,.brand,.device{display:none}.nav{flex-direction:row}.nav button{flex:1;justify-content:center;padding:8px 2px;font-size:12px}.main{padding:22px 16px}.statgrid{gap:7px}.stat{padding:12px}.connection{flex-wrap:wrap}.connection .actions{margin-left:0}.systembar .sysleft span{display:none}.popover{right:12px;width:calc(100% - 24px)}.toolbar .muted{display:none}.stagecontrols{gap:5px}.desktop{padding:53px 10px 60px}.dialog{padding:20px}.footnote{padding:0 12px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}@media(prefers-reduced-transparency:reduce){.popover,.systembar{background:#f6f8f2;backdrop-filter:none}}</style>
-<body><header class="toolbar"><div><div class="eyebrow">MACRUN / DESKTOP STUDY 01</div><div class="row"><strong>让远端任务，在本机安心运行。</strong><span class="badge">交互设计稿</span></div></div><div class="stagecontrols"><div class="switcher"><button id="mac" class="selected" onclick="platform('mac')">macOS</button><button id="win" onclick="platform('win')">Windows</button></div><select aria-label="预览场景" id="scenario" onchange="scene(this.value)"><option value="connected">已连接 · 任务执行中</option><option value="offline">连接中断</option><option value="first">首次连接</option></select><button class="tiny" onclick="resetDemo()">重置演示</button></div></header>
-<div class="desktop" id="desktop"><div class="systembar"><div class="row sysleft"><b id="osmark">●</b><b>Macrun</b><span>文件　 编辑　 窗口　 帮助</span></div><div class="row"><button class="traytrigger" aria-label="打开 Macrun 托盘面板" aria-expanded="false" id="traybtn" onclick="toggleTray()">⌁ <span id="traydot">●</span></button><span>◒　▰</span><span>周日 10:24</span></div></div><div class="workspace" id="workspace"><aside class="sidebar"><div class="lights"><button aria-label="关闭窗口并保留托盘" onclick="hideWindow()"></button><button aria-label="最小化窗口" onclick="hideWindow()"></button><button aria-label="切换宽屏" onclick="document.getElementById('workspace').style.maxWidth=document.getElementById('workspace').style.maxWidth?'':'1200px'"></button></div><div class="brand"><div class="mark">⌁</div><div><strong>Macrun</strong><div class="tiny muted">你的本机执行伙伴</div></div></div><nav class="nav"><button id="nav-overview" onclick="nav('overview')"><i>▦</i>概览</button><button id="nav-activity" onclick="nav('activity')"><i>≡</i>活动记录</button><button id="nav-settings" onclick="nav('settings')"><i>⚙</i>设置</button></nav><div class="device"><div class="row"><span>▣</span><strong class="tiny" id="device">我的 Mac mini</strong></div><small>仅在此设备上执行任务</small><div style="margin-top:9px" class="tiny muted">设计预览 · 模拟数据</div></div></aside><main class="main" id="main"></main></div><p class="footnote">点击系统栏中的 ⌁ 打开快捷面板 · 所有连接、任务和权限均为演示，不会操作你的电脑</p><section class="popover hidden" id="popover" aria-label="Macrun 快捷面板"></section></div><div class="overlay hidden" id="overlay" role="dialog" aria-modal="true" aria-labelledby="dialogtitle"></div><div class="toast hidden" id="toast" role="status"></div>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Macrun Desktop · 设计稿 v2</title>
+<!-- Generated by build.cjs from screens/*.dc.html. Edit the sources, not index.html. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+:root{--ink:#1A1A19;--muted:#6B6A66;--line:#DAD9D4;--bg:#E9E8E4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.5 'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif}
+.bar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 16px;background:#FBFBFA;border-bottom:1px solid var(--line)}
+.bar strong{font-size:14px;font-weight:600;white-space:nowrap}
+.bar .note{color:var(--muted);font-size:12px;margin-left:auto}
+.tabs{display:flex;flex-wrap:wrap;gap:4px}
+.tabs button{font:inherit;font-size:13px;border:1px solid transparent;background:transparent;color:#4A4945;border-radius:7px;padding:5px 11px;cursor:pointer;min-height:32px}
+.tabs button:hover{background:#EFEFEB}
+.tabs button[aria-selected="true"]{background:var(--ink);color:#fff}
+.tabs button:focus-visible{outline:2px solid #2F5BEA;outline-offset:2px}
+.stage{min-height:calc(100vh - 54px)}
+.stage.fixed{display:flex;justify-content:center;align-items:flex-start;padding:40px 16px;overflow-x:auto}
+.stage.fixed .screen{box-shadow:0 0 0 1px rgba(0,0,0,.06),0 18px 50px rgba(0,0,0,.14);border-radius:12px;overflow:hidden;flex-shrink:0}
+.shot .bar{display:none}
+.shot .stage{min-height:0}
+.shot .stage.fixed{padding:0;display:block}
+.shot .stage.fixed .screen{box-shadow:none;border-radius:0}
+</style>
+</head>
+<body>
+<header class="bar">
+  <strong>Macrun Desktop · 设计稿 v2</strong>
+  <nav class="tabs" role="tablist" aria-label="画板" id="tabs"></nav>
+  <span class="note">所有数据均为示例，不连接服务器</span>
+</header>
+<main class="stage" id="stage"><div class="screen" id="screen"></div></main>
+<template id="t-Main"><div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 22px">
+
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 280px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">现场</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">服务器上的 Agent 正通过 Macrun 在这台 Mac 上做的事。</p>
+      </div>
+      <div class="row" style="flex-wrap: wrap">
+        <sc-if value="{{paused}}" hint-placeholder-val="{{false}}">
+          <button class="btn" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z"></path></svg>恢复接收</button>
+        </sc-if>
+        <sc-if value="{{notPaused}}" hint-placeholder-val="{{true}}">
+          <button class="btn" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5v9M10 3.5v9"></path></svg>暂停接收新任务</button>
+        </sc-if>
+        <button class="btn danger"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"></rect></svg>全部停止<span class="mono" style="font-size: 11px; color: #B4321C; opacity: .75">⌃⌥⌘.</span></button>
+      </div>
+    </header>
+
+    <sc-if value="{{paused}}" hint-placeholder-val="{{false}}">
+      <div class="row" style="background: #FFF6E5; border: 1px solid #F1DDB3; color: #7A4B00; border-radius: 9px; padding: 10px 14px">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5v9M10 3.5v9"></path></svg>
+        <span>已暂停接收新任务。正在运行的 1 个命令会继续完成；新请求会立即返回 <span class="mono">busy</span>，Agent 可稍后重试。</span>
+      </div>
+    </sc-if>
+
+    <section aria-label="三条状态" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px">
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span class="label">连接</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">已连接服务器</div>
+        <div class="label" style="margin-top: 2px">QUIC · 38 ms · 已稳定 3 小时 12 分</div>
+      </div>
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: {{workerDot}}"></span><span class="label">执行器</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">{{workerTitle}}</div>
+        <div class="label" style="margin-top: 2px">{{workerDetail}}</div>
+      </div>
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span class="label">桌面控制</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">CuaDriver 就绪</div>
+        <div class="label" style="margin-top: 2px">辅助功能、屏幕录制已授权 · 屏幕未锁定</div>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+
+      <section style="flex: 999 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+        <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">正在进行</h2><span class="tag">2</span></div>
+
+        <article class="card" style="padding: 16px">
+          <div class="row" style="flex-wrap: wrap">
+            <span class="dot pulse" style="background: #2F5BEA"></span>
+            <span class="tag" style="background: #EAF0FF; color: #2449C8">命令</span>
+            <span class="label">运行中 · 已用时 <span class="mono" style="color: #1A1A19">2:14</span></span>
+            <span class="label" style="margin-left: auto">阶段：编译测试目标</span>
+          </div>
+          <div class="mono" style="font-size: 14px; margin: 10px 0 4px; word-break: break-all">xcodebuild test -scheme Counter -destination 'platform=macOS'</div>
+          <div class="label mono">~/work/Counter · task 3f2a91c0…</div>
+          <div class="term mono" style="margin-top: 12px">CompileSwift normal arm64 CounterView.swift
+CompileSwift normal arm64 CounterModel.swift
+Ld Counter.app/Contents/MacOS/Counter
+Test Suite 'CounterTests' started
+  ✓ testIncrement (0.004s)
+  ✓ testReset (0.002s)
+  … testPersistence</div>
+          <div class="row" style="margin-top: 12px; flex-wrap: wrap">
+            <a href="Tasks.dc.html" class="btn" style="text-decoration: none">查看完整输出</a>
+            <button class="btn ghost">在终端打开目录</button>
+            <button class="btn danger" style="margin-left: auto">取消任务</button>
+          </div>
+        </article>
+
+        <article class="card" style="padding: 16px">
+          <div class="row" style="flex-wrap: wrap">
+            <span class="dot pulse" style="background: #2F5BEA"></span>
+            <span class="tag" style="background: #EEF6F0; color: #1F6B45">同步</span>
+            <span class="label">接收中 · 已用时 <span class="mono" style="color: #1A1A19">0:03</span></span>
+            <span class="label" style="margin-left: auto">5 个文件中已收到 3 个 · 18 KB</span>
+          </div>
+          <div style="font-size: 14px; margin: 10px 0 2px; font-weight: 550">Counter → <span class="mono" style="font-weight: 400">~/work/Counter</span></div>
+          <div class="label">同步只更新文件，不会自动触发构建。完成前请勿依赖这个目录的内容。</div>
+        </article>
+      </section>
+
+      <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+        <section style="display: flex; flex-direction: column; gap: 10px">
+          <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">工作区</h2><span class="label" style="margin-left: auto">由服务器同步过来的目录</span></div>
+          <div class="card">
+            <sc-for list="{{workspaces}}" as="w" hint-placeholder-count="3">
+              <div style="padding: 12px 14px; border-bottom: 1px solid #F0EFEB; display: flex; gap: 10px; align-items: flex-start">
+                <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: #6B6A66"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg>
+                <div style="min-width: 0; flex-grow: 1">
+                  <div style="font-weight: 550">{{w.name}}</div>
+                  <div class="label mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.path}}</div>
+                  <div class="label" style="margin-top: 2px">{{w.meta}}</div>
+                </div>
+                <span class="dot" style="background: {{w.dot}}; margin-top: 6px"></span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+
+        <section style="display: flex; flex-direction: column; gap: 10px">
+          <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">刚刚</h2><a href="Tasks.dc.html" style="margin-left: auto; font-size: 12.5px; text-decoration: none">全部任务</a></div>
+          <div class="card" style="padding: 6px 0">
+            <sc-for list="{{recent}}" as="r" hint-placeholder-count="6">
+              <div style="display: flex; gap: 10px; align-items: center; padding: 7px 14px">
+                <span class="mono label" style="width: 54px; flex-shrink: 0">{{r.time}}</span>
+                <span class="dot" style="background: {{r.dot}}"></span>
+                <span style="min-width: 0; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.text}}</span>
+                <span class="label mono">{{r.dur}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div class="label">今天 42 个任务：成功 38 · 失败 2 · 未知 1 · 取消 1</div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div></template>
+<template id="t-Tasks"><div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 280px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">任务</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">每个任务按编号只记一次。查询、心跳和重复请求不计数。</p>
+      </div>
+      <label style="flex: 0 1 300px; display: flex; align-items: center; gap: 8px; border: 1px solid #DAD9D4; background: #fff; border-radius: 8px; padding: 0 10px; min-height: 34px">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="color: #6B6A66"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5l3 3"></path></svg>
+        <span style="position: absolute; left: -9999px">搜索任务</span>
+        <input type="search" placeholder="命令、目录或任务编号" style="border: 0; outline: none; font: inherit; flex-grow: 1; min-width: 0; background: transparent">
+      </label>
+    </header>
+
+    <div role="group" aria-label="按状态筛选" style="display: flex; flex-wrap: wrap; gap: 6px">
+      <sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+        <button class="{{f.cls}}" onClick="{{f.pick}}"><span class="dot" style="background: {{f.dot}}"></span>{{f.label}}<span class="mono" style="opacity: .7">{{f.count}}</span></button>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+      <section aria-label="任务列表" class="card" style="flex: 1 1 360px; min-width: 0; overflow: hidden">
+        <sc-for list="{{list}}" as="t" hint-placeholder-count="8">
+          <button class="{{t.cls}}" onClick="{{t.pick}}">
+            <span class="dot" style="background: {{t.dot}}; margin-top: 6px"></span>
+            <span style="min-width: 0; flex-grow: 1">
+              <span class="mono" style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px">{{t.title}}</span>
+              <span class="label" style="display: block">{{t.kind}} · {{t.when}}</span>
+            </span>
+            <span style="text-align: right; flex-shrink: 0">
+              <span style="display: block; font-size: 12px; color: {{t.fg}}; font-weight: 550">{{t.stLabel}}</span>
+              <span class="label mono" style="display: block">{{t.dur}}</span>
+            </span>
+          </button>
+        </sc-for>
+        <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+          <div class="label" style="padding: 28px; text-align: center">这个状态下没有任务</div>
+        </sc-if>
+      </section>
+
+      <section aria-label="任务详情" class="card" style="flex: 999 1 420px; min-width: 0; padding: 20px">
+        <div class="row" style="flex-wrap: wrap">
+          <span class="tag" style="background: {{sel.bg}}; color: {{sel.fg}}; font-weight: 550">{{sel.stLabel}}</span>
+          <span class="tag">{{sel.kind}}</span>
+          <span class="label" style="margin-left: auto">{{sel.when}}</span>
+        </div>
+        <div class="mono" style="font-size: 15px; margin: 12px 0 16px; word-break: break-all">{{sel.title}}</div>
+
+        <div style="background: {{sel.bg}}; color: {{sel.fg}}; border-radius: 8px; padding: 11px 14px; display: flex; gap: 10px; align-items: flex-start">
+          <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px"><circle cx="8" cy="8" r="6"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+          <span>{{sel.explain}}</span>
+        </div>
+
+        <div class="kv" style="margin-top: 18px">
+          <span class="label">工作目录</span><span class="mono" style="word-break: break-all">{{sel.cwd}}</span>
+          <span class="label">耗时</span><span class="mono">{{sel.dur}}</span>
+          <span class="label">退出码</span><span class="mono">{{sel.exit}}</span>
+          <span class="label">任务编号</span><span class="mono" style="word-break: break-all">{{sel.taskId}}</span>
+        </div>
+
+        <div class="row" style="margin: 20px 0 8px"><span class="label">输出</span><span class="label" style="margin-left: auto">{{sel.outNote}}</span></div>
+        <div class="term mono">{{sel.output}}</div>
+
+        <div class="row" style="margin-top: 16px; flex-wrap: wrap">
+          <button class="btn">复制任务编号</button>
+          <button class="btn">打开完整日志</button>
+          <sc-if value="{{sel.isUnknown}}" hint-placeholder-val="{{false}}">
+            <button class="btn">截一张当前屏幕核对</button>
+          </sc-if>
+          <sc-if value="{{sel.isRunning}}" hint-placeholder-val="{{false}}">
+            <button class="btn danger" style="margin-left: auto">取消任务</button>
+          </sc-if>
+        </div>
+      </section>
+    </div>
+  </main>
+</div></template>
+<template id="t-Desktop"><div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 22px">
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 300px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">桌面控制</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">让 Agent 通过本机 computer-use 工具截图、点击和输入。命令与文件不受这里的开关影响。</p>
+      </div>
+      <label class="card row" style="padding: 8px 12px; cursor: pointer">
+        <span style="font-weight: 550">{{masterLabel}}</span>
+        <input type="checkbox" class="sw" checked="{{enabled}}" onChange="{{toggle}}">
+      </label>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+      <section style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">后端</h2>
+        <div class="card" style="padding: 16px">
+          <div class="row">
+            <div style="width: 36px; height: 36px; border-radius: 9px; background: #F1F0EC; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"></rect><path d="M6 13.5h4"></path></svg></div>
+            <div style="min-width: 0">
+              <div style="font-weight: 600">computer <span class="label" style="font-weight: 400">· CuaDriver 0.26.0</span></div>
+              <div class="label mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">/Applications/CuaDriver.app/…/cua-driver mcp</div>
+            </div>
+            <span class="tag" style="margin-left: auto; background: #EAF6EF; color: #1F6B45">运行中</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px">
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">会话</div><div class="mono" style="font-weight: 500">#7</div></div>
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">工具</div><div class="mono" style="font-weight: 500">23</div></div>
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">今天调用</div><div class="mono" style="font-weight: 500">64</div></div>
+          </div>
+          <div class="row" style="margin-top: 14px; flex-wrap: wrap">
+            <button class="btn">查看工具列表</button>
+            <button class="btn ghost">重启后端</button>
+          </div>
+          <div class="label" style="margin-top: 8px">重启会更换会话编号，Agent 需要重新发现工具并重新截图。</div>
+        </div>
+        <button class="btn" style="align-self: flex-start"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>添加 MCP 后端</button>
+      </section>
+
+      <section style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">这台 Mac 是否具备条件</h2>
+        <div class="card">
+          <sc-for list="{{checks}}" as="c" hint-placeholder-count="4">
+            <div class="line">
+              <span style="width: 22px; height: 22px; border-radius: 50%; background: {{c.bg}}; color: {{c.fg}}; display: grid; place-items: center; flex-shrink: 0">
+                <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 13px; height: 13px"><path d="{{c.icon}}"></path></svg>
+              </span>
+              <div style="min-width: 0; flex-grow: 1">
+                <div style="font-weight: 550">{{c.name}}</div>
+                <div class="label">{{c.detail}}</div>
+              </div>
+              <sc-if value="{{c.fix}}" hint-placeholder-val="{{false}}"><button class="btn">{{c.fixLabel}}</button></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">操作时</h2>
+      <div class="card">
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">显示屏幕边框和悬浮提示</div><div class="label">Agent 操作期间，屏幕四周显示橙色描边，顶部显示正在做什么和停止按钮。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">我动鼠标或键盘时让出</div><div class="label">检测到本地输入后暂停新的桌面操作 30 秒；已发出的点击不会撤回。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+        <div class="line" style="border-bottom: 0">
+          <div style="flex-grow: 1"><div style="font-weight: 550">紧急停止快捷键</div><div class="label">取消所有运行中的任务，暂停接收，并关闭桌面控制。</div></div>
+          <span class="mono" style="border: 1px solid #DAD9D4; border-radius: 6px; padding: 3px 9px; background: #F7F7F4">⌃ ⌥ ⌘ .</span>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">最近操作</h2><span class="label">13:58 · 打开计算器并计算 12 × 34</span><a href="Tasks.dc.html" style="margin-left: auto; font-size: 12.5px; text-decoration: none">在任务中查看</a></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+        <sc-for list="{{frames}}" as="f" hint-placeholder-count="4">
+          <figure class="card" style="margin: 0; overflow: hidden">
+            <div style="aspect-ratio: 16 / 10; background: #E9E8E3; position: relative; display: grid; place-items: center">
+              <div style="width: 38%; height: 62%; background: #2B2B29; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.18)"></div>
+              <span style="position: absolute; left: {{f.x}}; top: {{f.y}}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #E8590C; background: rgba(232,89,12,.18); display: {{f.mark}}"></span>
+              <span class="label" style="position: absolute; left: 8px; bottom: 6px; font-size: 11px">[截图]</span>
+            </div>
+            <figcaption style="padding: 9px 11px">
+              <div class="row" style="gap: 6px"><span class="mono label">{{f.n}}</span><span style="font-weight: 550">{{f.title}}</span></div>
+              <div class="label mono">{{f.detail}}</div>
+            </figcaption>
+          </figure>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+</div></template>
+<template id="t-Settings"><div class="app" style="display: flex; flex-wrap: wrap; min-height: 1400px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 22px">
+    <header>
+      <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">设置与安全</h1>
+      <div class="sub row" style="gap: 2px; margin-top: 10px; flex-wrap: wrap">
+        <a href="#safety">安全边界</a><a href="#conn">连接</a><a href="#general">通用</a><a href="#diag">诊断</a>
+      </div>
+    </header>
+
+    <section id="safety" style="display: flex; flex-direction: column; gap: 10px">
+      <div><h2 style="margin: 0; font-size: 15px; font-weight: 600">安全边界</h2><p class="label" style="margin: 2px 0 0">远程 Agent 拥有和你一样的用户权限。这些规则在执行器内生效，Agent 绕不过去。</p></div>
+      <div class="card">
+        <div class="line" style="align-items: flex-start">
+          <div style="flex: 1 1 260px">
+            <div style="font-weight: 550">允许的工作目录</div>
+            <div class="label">命令的工作目录、文件读写和同步目标必须位于这些目录之内。</div>
+          </div>
+          <div style="flex: 1 1 300px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+            <span class="pathchip mono">~/work<button class="x" aria-label="移除 ~/work"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 4l8 8M12 4l-8 8"></path></svg></button></span>
+            <span class="pathchip mono">/tmp<button class="x" aria-label="移除 /tmp"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 4l8 8M12 4l-8 8"></path></svg></button></span>
+            <button class="btn ghost" style="min-height: 28px">+ 添加目录</button>
+          </div>
+        </div>
+        <div class="line" style="align-items: flex-start">
+          <div style="flex: 1 1 260px">
+            <div style="font-weight: 550">执行命令前</div>
+            <div class="label">{{modeHint}}</div>
+          </div>
+          <div class="seg" role="group" aria-label="命令确认方式">
+            <sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+              <button class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button>
+            </sc-for>
+          </div>
+        </div>
+        <sc-if value="{{showRules}}" hint-placeholder-val="{{true}}">
+          <div class="line" style="align-items: flex-start; background: #FAFAF8">
+            <div style="flex: 1 1 260px">
+              <div style="font-weight: 550">风险命令规则</div>
+              <div class="label">匹配时在菜单栏弹出确认，60 秒内未处理视为拒绝，任务以 <span class="mono">denied</span> 结束。</div>
+            </div>
+            <div class="mono" style="flex: 1 1 300px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px">
+              <span class="tag mono">sudo *</span><span class="tag mono">rm -rf *</span><span class="tag mono">git push *</span><span class="tag mono">security *</span><span class="tag mono">defaults write *</span><span class="tag mono">osascript *</span>
+              <button class="btn ghost" style="min-height: 26px; font-size: 12px">编辑规则</button>
+            </div>
+          </div>
+        </sc-if>
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">环境变量值不写入记录</div><div class="label">任务详情只显示变量名，例如 <span class="mono">GITHUB_TOKEN=••••</span>。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+      </div>
+    </section>
+
+    <section id="conn" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">连接</h2>
+      <div class="card">
+        <div class="line"><div class="label" style="width: 120px">服务器</div><div class="mono" style="flex-grow: 1">203.0.113.10:7443</div><span class="tag" style="background: #EAF6EF; color: #1F6B45">已连接 · QUIC</span></div>
+        <div class="line"><div class="label" style="width: 120px">服务器证书</div><div class="mono" style="flex: 1 1 260px; word-break: break-all">SHA256 4F:A1:9C:07:…:E2:5B:30</div><span class="label">配对时已固定</span></div>
+        <div class="line"><div class="label" style="width: 120px">访问令牌</div><div style="flex-grow: 1">保存在 macOS 钥匙串</div><button class="btn ghost">显示</button></div>
+        <div class="line"><div class="label" style="width: 120px">本机名称</div><div style="flex-grow: 1">Mac mini（M2 · arm64）</div><button class="btn ghost">重命名</button></div>
+        <div class="line" style="background: #FAFAF8">
+          <div style="flex-grow: 1" class="label">更换服务器或令牌失效时重新配对。现有任务记录会保留。</div>
+          <button class="btn">重新配对</button>
+          <button class="btn danger">断开连接</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="general" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">通用</h2>
+      <div class="row" style="align-items: flex-start; background: #FFF6E5; border: 1px solid #F1DDB3; color: #7A4B00; border-radius: 10px; padding: 12px 14px; flex-wrap: wrap">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px"><circle cx="8" cy="8" r="6"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+        <div style="flex: 1 1 300px">检测到旧的 LaunchAgent <span class="mono">dev.macrun.worker</span> 仍在运行。两个执行器同时连接会互相顶替。迁移后由 Macrun Desktop 统一管理，原 plist 会备份到 <span class="mono">~/Library/LaunchAgents/backup/</span>。</div>
+        <button class="btn primary">迁移</button>
+      </div>
+      <div class="card">
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">登录时启动</div><div class="label">在图形登录后启动；注销或重启到登录界面前不会运行。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">关闭窗口后继续在菜单栏运行</div><div class="label">只有“退出 Macrun”才会停止执行器；有任务在跑时会先询问。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <label class="line" style="cursor: pointer"><div style="flex-grow: 1"><div style="font-weight: 550">任务失败或结果未知时发送通知</div><div class="label">成功不打扰；失败、超时、未知各发一次。</div></div><input type="checkbox" class="sw" defaultChecked="{{true}}"></label>
+        <div class="line"><div style="flex-grow: 1"><div style="font-weight: 550">任务记录保留</div><div class="label">超过期限的输出和截图会被清理，去重编号另保留 90 天。</div></div>
+          <div class="seg" role="group" aria-label="保留时长"><button>7 天</button><button class="on">30 天</button><button>90 天</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="diag" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">诊断</h2>
+      <div class="card">
+        <div class="line"><div class="label" style="width: 120px">版本</div><div class="mono" style="flex-grow: 1">macrun 0.2.0 · 协议 2 · darwin-arm64</div><span class="label">服务器版本一致</span></div>
+        <div class="line"><div class="label" style="width: 120px">数据目录</div><div class="mono" style="flex: 1 1 260px; word-break: break-all">~/Library/Application Support/Macrun</div><span class="label">412 MB · 1,284 条任务</span></div>
+        <div class="line" style="background: #FAFAF8">
+          <div style="flex-grow: 1" class="label">诊断包包含运行日志、版本与连通性测试结果，不包含命令输出、文件内容、截图和令牌。</div>
+          <button class="btn">查看日志</button>
+          <button class="btn">测试连通性</button>
+          <button class="btn primary">导出诊断包</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div></template>
+<template id="t-MenuBar"><div class="app" style="width: 400px; height: 640px; box-sizing: border-box; background: #D9DCE0; position: relative; overflow: hidden">
+  <div style="height: 28px; background: rgba(246,246,244,.9); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; font-size: 12.5px; font-weight: 500">
+    <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,.1); border-radius: 5px; padding: 1px 6px">
+      <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 15px; height: 15px"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      <span class="dot" style="width: 6px; height: 6px; background: {{iconDot}}"></span>
+    </span>
+    <span>周六 14:04</span>
+  </div>
+
+  <div style="position: absolute; right: 12px; top: 34px; width: 340px; background: rgba(250,250,249,.98); border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 12px 32px rgba(0,0,0,.18); padding: 6px">
+    <div style="padding: 10px 10px 8px">
+      <div class="row">
+        <span class="dot" style="background: {{dot}}"></span>
+        <span style="font-weight: 600; font-size: 14px">{{headline}}</span>
+      </div>
+      <div class="label" style="margin-top: 2px; padding-left: 18px">{{sub}}</div>
+    </div>
+
+    <sc-if value="{{working}}" hint-placeholder-val="{{true}}">
+      <div style="margin: 2px 4px 6px; background: #fff; border: 1px solid #E6E5E1; border-radius: 9px; padding: 10px 12px">
+        <div class="row"><span class="label">命令 · 运行中</span><span class="mono label" style="margin-left: auto; color: #1A1A19">2:14</span></div>
+        <div class="mono" style="font-size: 12.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">xcodebuild test -scheme Counter</div>
+        <div class="row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #F0EFEB"><span class="label">同步 · Counter</span><span class="label" style="margin-left: auto">3 / 5 个文件</span></div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{approval}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 2px 4px 6px; background: #FFF6E5; border: 1px solid #F1DDB3; border-radius: 9px; padding: 10px 12px">
+        <div class="label" style="color: #7A4B00">Agent 请求执行风险命令 · 剩余 52 秒</div>
+        <div class="mono" style="font-size: 12.5px; margin: 4px 0 2px; word-break: break-all">git push origin feature/menu-bar</div>
+        <div class="label">~/work/Counter · 匹配规则 <span class="mono">git push *</span></div>
+        <div class="row" style="margin-top: 10px">
+          <button onClick="{{deny}}" style="font: inherit; flex: 1; min-height: 30px; border: 1px solid #D5D4CE; background: #fff; border-radius: 7px; cursor: pointer">拒绝</button>
+          <button onClick="{{allow}}" style="font: inherit; flex: 1; min-height: 30px; border: 0; background: #1A1A19; color: #fff; border-radius: 7px; cursor: pointer">允许一次</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{offline}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 2px 4px 6px; background: #FCEDEA; border: 1px solid #F0CFC7; color: #A12B17; border-radius: 9px; padding: 10px 12px">
+        <div style="font-weight: 550">服务器 UDP 7443 无响应</div>
+        <div style="font-size: 12px; margin-top: 2px">每 5 秒自动重试 · 第 14 次。断线前在运行的 1 个任务仍在本机继续。</div>
+      </div>
+    </sc-if>
+
+    <button class="mi" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="{{pauseIcon}}"></path></svg>{{pauseLabel}}</button>
+    <button class="mi" style="color: inherit"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"></rect></svg>全部停止<span class="k mono">⌃⌥⌘.</span></button>
+    <button class="mi"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>允许桌面控制<span class="k">✓</span></button>
+    <div class="sep"></div>
+    <div style="padding: 4px 10px 2px" class="label">最近</div>
+    <sc-for list="{{recent}}" as="r" hint-placeholder-count="3">
+      <button class="mi"><span class="dot" style="background: {{r.dot}}"></span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.text}}</span><span class="k mono">{{r.t}}</span></button>
+    </sc-for>
+    <div class="sep"></div>
+    <a href="Main.dc.html" class="mi" style="text-decoration: none">打开 Macrun<span class="k mono">⌘O</span></a>
+    <button class="mi">设置…<span class="k mono">⌘,</span></button>
+    <button class="mi">退出 Macrun<span class="k mono">⌘Q</span></button>
+  </div>
+
+  <div role="group" aria-label="评审用：切换状态" style="position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+    <span class="label" style="color: #4A4945">评审用状态：</span>
+    <sc-for list="{{states}}" as="s" hint-placeholder-count="4">
+      <button class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button>
+    </sc-for>
+  </div>
+</div></template>
+<template id="t-Overlay"><div class="app" style="width: 640px; height: 400px; box-sizing: border-box; background: #C9CDD2; position: relative; overflow: hidden; box-shadow: inset 0 0 0 3px #E8590C">
+  <div style="position: absolute; left: 50%; top: 36%; transform: translate(-50%, -50%); width: 180px; height: 240px; background: #2B2B29; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25)">
+    <div class="mono" style="color: #fff; text-align: right; font-size: 30px; padding: 22px 16px 8px">408</div>
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 10px">
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37"></span>
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37"></span>
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37; box-shadow: 0 0 0 3px rgba(232,89,12,.55)"></span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: rgba(26,26,25,.92); color: #fff; border-radius: 999px; padding: 7px 8px 7px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.25); white-space: nowrap">
+    <span class="pulse" style="width: 9px; height: 9px; border-radius: 50%; background: #FF7A2F"></span>
+    <span><span style="font-weight: 600">Agent 正在操作这台 Mac</span><span style="color: #BDBCB6"> · 点击 “=”</span></span>
+    <span class="mono" style="color: #BDBCB6; font-size: 12px">⌃⌥⌘.</span>
+    <button style="font: inherit; border: 0; background: #fff; color: #1A1A19; border-radius: 999px; padding: 4px 12px; cursor: pointer; font-weight: 550">停止</button>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 14px; background: rgba(255,255,255,.9); border-radius: 10px; padding: 10px 14px; font-size: 12px; color: #4A4945">
+    屏幕四周的橙色描边和顶部悬浮条只在桌面操作期间出现，不会出现在截图里。点“停止”或按快捷键会取消运行中的任务并关闭桌面控制。你一动鼠标，后续操作自动让出 30 秒。
+  </div>
+</div></template>
+<template id="t-Pairing"><div class="app" style="width: 800px; height: 580px; box-sizing: border-box; background: #FBFBFA; border-radius: 12px; overflow: hidden; display: flex; box-shadow: 0 0 0 1px #E3E2DD">
+  <aside style="width: 230px; flex-shrink: 0; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 22px 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px">
+    <div class="row" style="padding-bottom: 22px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg></div>
+      <span style="font-weight: 600; font-size: 15px">连接到服务器</span>
+    </div>
+    <sc-for list="{{steps}}" as="s" hint-placeholder-count="3">
+      <div class="row" style="padding: 8px 6px; color: {{s.color}}">
+        <span style="width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; background: {{s.bg}}; color: {{s.fg}}">{{s.n}}</span>
+        <span style="font-weight: {{s.weight}}">{{s.label}}</span>
+      </div>
+    </sc-for>
+    <div style="flex-grow: 1"></div>
+    <div class="label">还没有服务器？先在 Linux 上按 README 第 1–2 步安装 Macrun 服务端。</div>
+  </aside>
+
+  <main style="flex-grow: 1; padding: 28px 32px; display: flex; flex-direction: column; min-width: 0">
+    <sc-if value="{{s1}}" hint-placeholder-val="{{true}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">粘贴配对码</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">在服务器上运行下面这条命令，它会生成一个 10 分钟内有效、只能用一次的配对码。</p>
+      <div class="term mono">$ macrun invite
+macrun://203.0.113.10:7443/pair?code=K7QF-29XM&amp;fp=4FA19C07</div>
+      <label for="code" style="font-weight: 550; margin: 18px 0 6px">配对码</label>
+      <input id="code" class="mono" value="macrun://203.0.113.10:7443/pair?code=K7QF-29XM&amp;fp=4FA19C07" style="font-size: 13px; border: 1px solid #2F5BEA; box-shadow: 0 0 0 3px #DCE5FF; border-radius: 8px; padding: 9px 11px; outline: none">
+      <div class="label" style="margin-top: 6px">配对码包含服务器地址和证书指纹。令牌会通过加密连接下发，并存入钥匙串，不需要再用 scp 复制文件。</div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn">手动填写地址和证书</button><button class="btn primary" onClick="{{next}}">连接</button></div>
+    </sc-if>
+
+    <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">检查连接</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">逐项检查，任何一步失败都会说明原因和下一步怎么做。</p>
+      <div style="display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid #E6E5E1; border-radius: 10px; padding: 6px 0">
+        <sc-for list="{{checks}}" as="c" hint-placeholder-count="5">
+          <div class="row" style="padding: 9px 16px">
+            <span style="width: 20px; height: 20px; border-radius: 50%; background: #EAF6EF; color: #1F6B45; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 12px; height: 12px"><path d="M4 8.5l2.5 2.5L12 5.5"></path></svg></span>
+            <span style="flex-grow: 1">{{c.name}}</span>
+            <span class="label mono">{{c.v}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div class="label" style="margin-top: 12px">现在已经可以运行命令和同步文件。在服务器上试试：<span class="mono" style="color: #1A1A19">macrun exec 'hostname'</span></div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn" onClick="{{back}}">上一步</button><button class="btn primary" onClick="{{next}}">继续</button></div>
+    </sc-if>
+
+    <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600">桌面控制（可选）</h1>
+      <p style="margin: 4px 0 16px; color: #6B6A66">需要让 Agent 截图、点击应用时再开启。跳过不影响命令和文件。</p>
+      <div style="background: #fff; border: 1px solid #E6E5E1; border-radius: 10px">
+        <div class="row" style="padding: 12px 16px; border-bottom: 1px solid #F0EFEB">
+          <span style="flex-grow: 1"><span style="font-weight: 550">computer-use 工具</span><br><span class="label">已找到 /Applications/CuaDriver.app（0.26.0）</span></span>
+          <span class="label" style="color: #1F6B45">已检测到</span>
+        </div>
+        <div class="row" style="padding: 12px 16px; border-bottom: 1px solid #F0EFEB">
+          <span style="flex-grow: 1"><span style="font-weight: 550">辅助功能</span><br><span class="label">授予 CuaDriver，用于点击和输入</span></span>
+          <button class="btn">打开系统设置</button>
+        </div>
+        <div class="row" style="padding: 12px 16px">
+          <span style="flex-grow: 1"><span style="font-weight: 550">屏幕录制</span><br><span class="label">授予后会实拍一张截图验证，不只看权限标记</span></span>
+          <button class="btn">打开系统设置</button>
+        </div>
+      </div>
+      <div style="flex-grow: 1"></div>
+      <div class="row" style="justify-content: flex-end"><button class="btn" onClick="{{reset}}">稍后再说</button><button class="btn primary" onClick="{{reset}}">完成</button></div>
+    </sc-if>
+  </main>
+</div></template>
 <script>
-let current='overview',paused=false,online=true,first=false,os='mac',filter='全部',query='',tray=false,modalTask=null,lastFocus=null;let config={server:'dev-server.example:7443',device:'我的 Mac mini',auto:true,connect:true};let tasks=[];function seed(){tasks=[{id:'mr-024',name:'运行项目测试',type:'命令',project:'notes-app',status:'执行中',time:'10:24',duration:'32 秒',cmd:'cargo test --workspace',log:'Running 18 tests…\ntest config::load ... ok\ntest sync::transfer ... ok\n等待其余测试完成。'},{id:'mr-023',name:'同步项目文件',type:'文件',project:'notes-app',status:'成功',time:'10:23',duration:'1.2 秒',cmd:'sync notes-app',log:'12 个文件已更新\n传输 248 KB\n同步完成。'},{id:'mr-022',name:'获取应用截图',type:'桌面',project:'notes-app',status:'成功',time:'10:21',duration:'0.8 秒',cmd:'computer.screenshot',log:'已返回截图（本设计稿不包含真实截图）。'},{id:'mr-021',name:'启动桌面应用',type:'桌面',project:'notes-app',status:'失败',time:'10:19',duration:'2.1 秒',cmd:'computer.launch',log:'桌面后端未获得辅助功能权限。\n请在本机系统设置中允许访问，再重新发起任务。'},{id:'mr-020',name:'读取构建结果',type:'文件',project:'notes-app',status:'成功',time:'10:18',duration:'0.2 秒',cmd:'file.read build/report.txt',log:'构建完成，共 0 个错误。'},{id:'mr-019',name:'检查运行环境',type:'命令',project:'notes-app',status:'成功',time:'10:16',duration:'0.4 秒',cmd:'hostname',log:'demo-device'}]};seed();
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const state=()=>!online?'连接已断开':paused?'已暂停接收':'已连接';const badge=()=>`<span class="pill ${!online?'red':paused?'amber':''}"><span class="dot"></span>${state()}</span>`;const running=()=>tasks.filter(t=>t.status==='执行中');function toast(s){let e=document.getElementById('toast');e.textContent=s;e.classList.remove('hidden');clearTimeout(window.tt);window.tt=setTimeout(()=>e.classList.add('hidden'),3200)}
-function taskRows(list){return list.map(t=>`<button class="taskrow" onclick="detail('${t.id}')"><span class="statusicon ${t.status==='失败'?'failed':''}">${t.status==='失败'?'!':t.status==='执行中'?'◷':'✓'}</span><span><strong>${esc(t.name)}</strong><br><small>${t.type} · ${t.project}</small></span><span class="taskmeta">${t.status} · ${t.duration}<br>${t.time}</span></button>`).join('')||'<div class="empty">没有匹配的任务</div>'}
-function stats(){let success=tasks.filter(t=>t.status==='成功').length,fail=tasks.filter(t=>t.status==='失败').length;return `<div class="statgrid"><div class="card stat"><small>今日任务</small><strong>${tasks.length}</strong></div><div class="card stat"><small>已成功</small><strong>${success}</strong></div><div class="card stat"><small>失败</small><strong style="color:#ae7058">${fail}</strong></div></div>`}
-function activeCard(){let t=running()[0];return t?`<div class="card running"><div class="row between"><div><h3>${esc(t.name)}</h3><small>${t.project} · ${t.type}</small></div><span class="pill ${!online?'amber':''}">${online?'执行中':'状态待确认'}</span></div><div class="progress"><span></span></div><div class="row between"><small>${online?'已运行 32 秒 · 等待执行结果':'连接恢复后查询结果，不自动重跑'}</small><button class="tiny" onclick="detail('${t.id}')">查看详情 ↗</button></div></div>`:`<div class="card"><h3>${paused?'已暂停接收新任务':'准备就绪'}</h3><small>${paused?'恢复后即可接收远端请求。':'新任务会自动显示在这里。'}</small></div>`}
-function overview(){return `<div class="row between"><div><h1>概览</h1><p class="subtitle">远端发起，本机执行。一切进展都在这里。</p></div>${badge()}</div><div class="card connection section"><div class="icon">⇄</div><div><h3>${online?'已连接到开发服务器':'暂时无法连接服务器'}</h3><small>${esc(config.server)}</small></div><div class="actions"><button class="secondary tiny" onclick="${online?'pause()':'reconnect()'}">${online?(paused?'恢复接收':'暂停接收'):'重新连接'}</button></div></div>${!online?'<div class="notice">演示：网络连接中断。正在执行的任务不会自动重新提交。</div>':paused?'<div class="notice">已暂停新任务。现有任务会继续执行。</div>':''}${stats()}<p class="tiny muted" style="margin-top:8px">按任务编号去重统计，不含心跳和进度查询。</p><div class="section"><div class="row between sectiontitle"><h3>当前任务</h3><small>${running().length} 个进行中</small></div>${activeCard()}</div><div class="section"><div class="row between sectiontitle"><h3>最近活动</h3><button class="tiny" onclick="nav('activity')">查看全部 →</button></div><div class="card" style="padding:2px 13px">${taskRows(tasks.slice(1,4))}</div></div>`}
-function activity(){return `<div class="row between"><div><h1>活动记录</h1><p class="subtitle">每次执行，都有迹可循。</p></div><span class="badge">今天 · ${tasks.length} 项</span></div><div class="filters">${['全部','执行中','成功','失败'].map(f=>`<button class="${filter===f?'active':''}" onclick="filter='${f}';render()">${f}</button>`).join('')}</div><input class="search" aria-label="搜索任务" placeholder="搜索任务、项目或类型…" value="${esc(query)}" oninput="query=this.value;updateRows()"><div class="card section" style="padding:3px 15px" id="tasklist">${filteredRows()}</div><p class="tiny muted section">点击任务查看命令、输出和错误原因。演示记录仅保留在当前页面。</p>`}
-function filteredRows(){return taskRows(tasks.filter(t=>(filter==='全部'||t.status===filter)&&(t.name+t.project+t.type).toLowerCase().includes(query.toLowerCase())))}function updateRows(){document.getElementById('tasklist').innerHTML=filteredRows()}
-function settings(){return `<h1>设置</h1><p class="subtitle">连接你的服务器，让 Macrun 随时就绪。</p><form onsubmit="save(event)" class="card section"><h3>服务器连接</h3><div class="field"><label for="server">服务器地址</label><input id="server" required value="${esc(config.server)}" placeholder="server.example:7443"><small>输入服务器域名或 IP，以及端口。</small></div><div class="field"><label for="name">设备名称</label><input id="name" required value="${esc(config.device)}"></div><div class="field"><label for="token">连接凭据</label><input id="token" type="password" autocomplete="off" placeholder="已配置 · 输入新凭据可替换"><small>本设计稿不保存凭据，请勿输入真实密钥。</small></div><div class="row" style="margin-top:18px"><button class="primary" type="submit">保存设置</button><button type="button" class="secondary" onclick="testConnection()">测试连接</button><small id="connection-result" aria-live="polite"></small></div></form><div class="card section"><h3>运行方式</h3><div class="settingrow"><div>登录时启动<small style="display:block">登录电脑后，自动在${os==='mac'?'菜单栏':'托盘'}运行</small></div><input class="toggle" type="checkbox" aria-label="登录时启动" ${config.auto?'checked':''} onchange="config.auto=this.checked;toast('已更新演示设置')"></div><div class="settingrow"><div>启动后自动连接<small style="display:block">使用已保存的服务器配置</small></div><input class="toggle" type="checkbox" aria-label="启动后自动连接" ${config.connect?'checked':''} onchange="config.connect=this.checked;toast('已更新演示设置')"></div></div><div class="card section"><div class="row between"><div><h3>桌面操作</h3><small>与命令执行分别检查</small></div><span class="pill">演示：可用</span></div><div class="settingrow"><small>${os==='mac'?'辅助功能、屏幕录制权限已配置':'桌面后端已连接，当前会话可用'}</small><button class="secondary tiny" onclick="toast('模拟检查完成：桌面后端及权限可用')">检查状态</button></div></div>`}
-function onboarding(){return `<div class="onboard"><div class="mark">⌁</div><span class="eyebrow">WELCOME TO MACRUN</span><h1 style="margin-top:9px">把这台电脑，连接到你的 Agent。</h1><p class="subtitle" style="line-height:1.8;margin-top:12px">连接已有的 Macrun 服务器后，远端 Agent 就能将任务交给这台电脑。你可以随时在菜单栏暂停接收。</p><form class="card section" onsubmit="pair(event)"><h3>连接你的服务器</h3><div class="field"><label for="pairserver">服务器地址</label><input id="pairserver" required placeholder="server.example:7443" value="dev-server.example:7443"></div><div class="field"><label for="pairtoken">连接凭据</label><input id="pairtoken" required type="password" placeholder="使用 demo 体验连接" value="demo"><small>模拟配对，不会连接网络。请勿输入真实凭据。</small></div><div class="field"><label>服务器证书</label><button type="button" class="secondary" onclick="document.getElementById('certname').textContent='demo-cert.der · 已选用示例证书'">选用示例证书</button><small id="certname">演示默认使用示例证书；正式版需校验服务器身份。</small></div><button class="primary" style="width:100%;margin-top:22px">连接并开始使用</button></form><p class="tiny muted section">需要已有的 Linux 服务端。本设计稿只演示本机客户端。</p></div>`}
-function render(){document.getElementById('main').innerHTML=first?onboarding():current==='overview'?overview():current==='activity'?activity():settings();for(let n of ['overview','activity','settings'])document.getElementById('nav-'+n).classList.toggle('active',n===current&&!first);document.getElementById('device').textContent=config.device;document.getElementById('traydot').style.color=first?'#859184':!online?'#b06451':paused?'#b4904e':'#41825e';if(tray)renderTray()}
-function nav(n){current=n;first=false;document.getElementById('workspace').classList.remove('hidden');closeTray();render()}
-function pause(){paused=!paused;render();toast(paused?'已暂停接收新任务，现有任务继续执行':'已恢复接收新任务')}
-function reconnect(){online=true;document.getElementById('scenario').value='connected';render();toast('模拟连接已恢复，未重新提交任何任务')}
-function toggleTray(){tray=!tray;document.getElementById('popover').classList.toggle('hidden',!tray);document.getElementById('traybtn').setAttribute('aria-expanded',tray);if(tray)renderTray()}
-function closeTray(){tray=false;document.getElementById('popover').classList.add('hidden');document.getElementById('traybtn').setAttribute('aria-expanded','false')}
-function renderTray(){document.getElementById('popover').innerHTML=first?`<div class="row between"><h2>Macrun</h2><span class="pill amber">尚未连接</span></div><p class="subtitle section">先连接服务器，开始接收任务。</p><button class="primary section" onclick="closeTray();document.getElementById('workspace').classList.remove('hidden')">配置连接</button>`:`<div class="row between"><div class="row"><div class="mark" style="width:29px;height:29px;font-size:18px;border-radius:8px">⌁</div><h2>Macrun</h2></div>${badge()}</div><p class="subtitle" style="margin:12px 0">${esc(config.device)} · ${online?'执行程序运行中':'等待服务器恢复'}</p>${paused?'<div class="notice">暂停接收中，现有任务继续执行。</div>':''}${activeCard()}${stats()}<div class="section"><div class="row between"><h3>最近活动</h3><button class="tiny" onclick="nav('activity')">全部 →</button></div>${taskRows(tasks.slice(1,3))}</div><button class="secondary" style="width:100%;margin-top:10px" onclick="${online?'pause()':'reconnect()'}">${online?(paused?'恢复接收新任务':'暂停接收新任务'):'重新连接'}</button><div class="row between popoverfooter"><button class="tiny" onclick="nav('settings')">⚙ 设置</button><button class="tiny" onclick="nav('overview')">打开主窗口</button><button class="tiny" onclick="quit()">退出</button></div>`}
-function showDialog(html){lastFocus=document.activeElement;let el=document.getElementById('overlay');el.innerHTML=`<div class="dialog">${html}</div>`;el.classList.remove('hidden');el.querySelector('button')?.focus()}
-function closeDialog(){document.getElementById('overlay').classList.add('hidden');lastFocus?.focus()}
-function detail(id){modalTask=tasks.find(t=>t.id===id);let t=modalTask;showDialog(`<div class="row between"><h2 id="dialogtitle">${t.name}</h2><button aria-label="关闭任务详情" onclick="closeDialog()">✕</button></div><div class="details"><span>任务状态</span><span>${!online&&t.status==='执行中'?'状态待确认':t.status}</span><span>任务编号</span><span>${t.id}</span><span>工作目录</span><span>${os==='mac'?'/Users/demo/Projects/notes-app':'C:\\Projects\\notes-app'}</span><span>时间 / 耗时</span><span>${t.time} / ${t.duration}</span><span>操作</span><span>${esc(t.cmd)}</span></div><h3>执行输出</h3><pre>${esc(t.log)}</pre>${t.status==='失败'?'<div class="notice">本次任务已结束。检查桌面权限后，由 Agent 决定是否重新发起。</div>':''}<div class="row between section"><button class="secondary" onclick="copyTask()">复制任务信息</button>${t.status==='执行中'?'<button class="primary" onclick="finishTask()">模拟任务完成</button>':'<button class="primary" onclick="closeDialog()">完成</button>'}</div>`)}
-async function copyTask(){let t=modalTask;try{await navigator.clipboard.writeText(`${t.id}\n${t.name}\n${t.status}\n${t.log}`);toast('已复制任务信息')}catch{toast('浏览器不允许复制，可在输出区域手动选择文本')}}
-function finishTask(){modalTask.status='成功';modalTask.duration='41 秒';modalTask.log='test result: ok. 18 passed; 0 failed\nexit code: 0';closeDialog();render();toast('演示任务已完成，统计和活动记录已更新')}
-function save(e){e.preventDefault();let s=document.getElementById('server').value.trim(),name=document.getElementById('name').value.trim();if(!validServer(s)||!name){toast('请填写设备名称及有效地址，例如 server.example:7443');return}config.server=s;config.device=name;render();toast('设置已保存到当前演示，不保存连接凭据')}
-function validServer(s){return /^\S+:\d{1,5}$/.test(s)&&Number(s.split(':').pop())>0&&Number(s.split(':').pop())<65536}
-function testConnection(){let s=document.getElementById('server').value.trim(),el=document.getElementById('connection-result');el.textContent=!validServer(s)?'请检查地址与端口':online?'模拟连接成功':'模拟连接失败：服务器不可达';el.style.color=online&&validServer(s)?'#26745d':'#ad5343'}
-function pair(e){e.preventDefault();let s=document.getElementById('pairserver').value.trim();if(!validServer(s)){toast('请输入有效的服务器地址和端口');return}config.server=s;first=false;online=true;paused=false;current='overview';document.getElementById('scenario').value='connected';render();toast('模拟连接成功，开始接收任务')}
-function platform(p){os=p;document.getElementById('desktop').classList.toggle('windows',p==='win');document.getElementById('mac').classList.toggle('selected',p==='mac');document.getElementById('win').classList.toggle('selected',p==='win');config.device=p==='mac'?'我的 Mac mini':'我的 Windows PC';document.getElementById('osmark').textContent=p==='mac'?'●':'⊞';render()}
-function scene(s){first=s==='first';online=s!=='offline';paused=false;current='overview';closeTray();document.getElementById('workspace').classList.remove('hidden');render()}
-function hideWindow(){document.getElementById('workspace').classList.add('hidden');if(!tray)toggleTray();toast('窗口已关闭，仍在菜单栏／托盘运行')}
-function quit(){showDialog(`<h2 id="dialogtitle">退出 Macrun？</h2><p class="subtitle section">${running().length?'仍有 1 个任务执行中。退出会停止本机执行程序，并可能中断任务。':'退出后，这台电脑将不再接收任务。'}</p><div class="row section" style="justify-content:flex-end"><button class="secondary" onclick="closeDialog()">继续运行</button><button class="primary" onclick="exitDemo()">退出演示应用</button></div>`)}
-function exitDemo(){closeDialog();closeTray();document.getElementById('workspace').classList.add('hidden');document.getElementById('traybtn').classList.add('hidden');toast('演示应用已退出，点击“重置演示”重新打开')}
-function resetDemo(){seed();paused=false;online=true;first=false;filter='全部';query='';config={server:'dev-server.example:7443',device:os==='mac'?'我的 Mac mini':'我的 Windows PC',auto:true,connect:true};document.getElementById('traybtn').classList.remove('hidden');closeDialog();document.getElementById('scenario').value='connected';scene('connected');toast('演示已重置')}
-document.addEventListener('click',e=>{if(tray&&!e.target.closest('#popover')&&!e.target.closest('#traybtn')&&!e.target.closest('#overlay')&&!e.target.closest('.lights'))closeTray()});document.addEventListener('keydown',e=>{let overlay=document.getElementById('overlay');if(e.key==='Escape'){if(!overlay.classList.contains('hidden'))closeDialog();else closeTray()}if(e.key==='Tab'&&!overlay.classList.contains('hidden')){let f=[...overlay.querySelectorAll('button,input,[tabindex="0"]')];if(e.shiftKey&&document.activeElement===f[0]){e.preventDefault();f.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===f.at(-1)){e.preventDefault();f[0].focus()}}});render();
-</script></body></html>
+const SCREENS = [{"id":"Main","label":"现场","kind":"page","file":"Main.dc.html","style":"\nbody{margin:0;background:#FBFBFA}\na{color:#2F5BEA}a:hover{color:#1F44C2}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}\n.nav a:hover{background:#E7E6E1;color:#1A1A19}\n.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}\n.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.btn:hover{background:#F4F4F1}\n.btn.danger{color:#B4321C;border-color:#E9C3BA}\n.btn.danger:hover{background:#FCF1EE}\n.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}\n.btn.ghost:hover{background:#EFEFEB}\n.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}\n.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}\n.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre}\n.row{display:flex;align-items:center;gap:10px}\n.pulse{animation:p 1.6s ease-in-out infinite}\n@keyframes p{0%,100%{opacity:1}50%{opacity:.35}}\n","defaults":{"paused":false}},{"id":"Tasks","label":"任务","kind":"page","file":"Tasks.dc.html","style":"\nbody{margin:0;background:#FBFBFA}\na{color:#2F5BEA}a:hover{color:#1F44C2}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}\n.nav a:hover{background:#E7E6E1;color:#1A1A19}\n.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}\n.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.btn:hover{background:#F4F4F1}\n.btn.danger{color:#B4321C;border-color:#E9C3BA}\n.btn.danger:hover{background:#FCF1EE}\n.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}\n.btn.ghost:hover{background:#EFEFEB}\n.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}\n.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}\n.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre}\n.row{display:flex;align-items:center;gap:10px}\n.chip{font:inherit;font-size:12.5px;min-height:30px;padding:0 11px;border-radius:999px;border:1px solid #E1E0DB;background:#fff;color:#4A4945;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.chip:hover{background:#F4F4F1}\n.chip.on{background:#1A1A19;border-color:#1A1A19;color:#fff}\n.item{font:inherit;text-align:left;width:100%;border:0;background:transparent;color:inherit;cursor:pointer;display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid #F0EFEB}\n.item:hover{background:#F7F7F4}\n.item.on{background:#F0F3FE}\n.kv{display:grid;grid-template-columns:88px minmax(0,1fr);row-gap:6px;column-gap:12px}\n","defaults":{}},{"id":"Desktop","label":"桌面控制","kind":"page","file":"Desktop.dc.html","style":"\nbody{margin:0;background:#FBFBFA}\na{color:#2F5BEA}a:hover{color:#1F44C2}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}\n.nav a:hover{background:#E7E6E1;color:#1A1A19}\n.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}\n.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.btn:hover{background:#F4F4F1}\n.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}\n.btn.ghost:hover{background:#EFEFEB}\n.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}\n.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}\n.row{display:flex;align-items:center;gap:10px}\n.sw{appearance:none;-webkit-appearance:none;width:36px;height:22px;border-radius:22px;background:#CFCEC8;position:relative;cursor:pointer;margin:0;flex-shrink:0}\n.sw:checked{background:#1A1A19}\n.sw::before{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}\n.sw:checked::before{left:17px}\n.sw:focus-visible{outline:2px solid #2F5BEA;outline-offset:2px}\n.line{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid #F0EFEB}\n","defaults":{}},{"id":"Settings","label":"设置与安全","kind":"page","file":"Settings.dc.html","style":"\nbody{margin:0;background:#FBFBFA}\na{color:#2F5BEA}a:hover{color:#1F44C2}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}\n.nav a:hover{background:#E7E6E1;color:#1A1A19}\n.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}\n.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.btn:hover{background:#F4F4F1}\n.btn.danger{color:#B4321C;border-color:#E9C3BA}\n.btn.primary{background:#1A1A19;border-color:#1A1A19;color:#fff}\n.btn.primary:hover{background:#333331}\n.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}\n.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}\n.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}\n.row{display:flex;align-items:center;gap:10px}\n.sw{appearance:none;-webkit-appearance:none;width:36px;height:22px;border-radius:22px;background:#CFCEC8;position:relative;cursor:pointer;margin:0;flex-shrink:0}\n.sw:checked{background:#1A1A19}\n.sw::before{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}\n.sw:checked::before{left:17px}\n.line{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid #F0EFEB;flex-wrap:wrap}\n.line:last-child{border-bottom:0}\n.seg{display:inline-flex;background:#EFEEEA;border-radius:8px;padding:3px;gap:2px;flex-wrap:wrap}\n.seg button{font:inherit;font-size:12.5px;border:0;background:transparent;color:#4A4945;border-radius:6px;padding:6px 12px;cursor:pointer;min-height:30px}\n.seg button.on{background:#fff;color:#1A1A19;box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:550}\n.sub a{font-size:13px;color:#4A4945;text-decoration:none;padding:6px 10px;border-radius:6px}\n.sub a:hover{background:#EFEFEB;color:#1A1A19}\n.pathchip{display:inline-flex;align-items:center;gap:6px;border:1px solid #E1E0DB;background:#F7F7F4;border-radius:6px;padding:3px 6px 3px 9px}\n.x{font:inherit;border:0;background:transparent;color:#6B6A66;cursor:pointer;width:22px;height:22px;border-radius:4px;display:grid;place-items:center;padding:0}\n.x:hover{background:#E7E6E1}\n","defaults":{}},{"id":"MenuBar","label":"菜单栏","kind":"fixed","file":"MenuBar.dc.html","style":"\nbody{margin:0}\na{color:#2F5BEA}a:hover{color:#1F44C2}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}\n.row{display:flex;align-items:center;gap:10px}\n.mi{font:inherit;box-sizing:border-box;width:100%;text-align:left;border:0;background:transparent;color:#1A1A19;border-radius:6px;padding:0 10px;min-height:32px;display:flex;align-items:center;gap:10px;cursor:pointer}\n.mi:hover{background:#2F5BEA;color:#fff}\n.mi:hover .k{color:#DCE5FF}\n.k{margin-left:auto;color:#8A8984;font-size:12px}\n.sep{height:1px;background:#E6E5E1;margin:5px 10px}\n.state{font:inherit;font-size:12px;border:1px solid #D5D4CE;background:#fff;border-radius:999px;padding:4px 10px;cursor:pointer;color:#4A4945}\n.state.on{background:#1A1A19;color:#fff;border-color:#1A1A19}\n","defaults":{"initial":"working"}},{"id":"Overlay","label":"屏幕提示","kind":"fixed","file":"Overlay.dc.html","style":"\nbody{margin:0}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13px;line-height:1.5}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.pulse{animation:p 1.4s ease-in-out infinite}\n@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}\n","defaults":{}},{"id":"Pairing","label":"首次配对","kind":"fixed","file":"Pairing.dc.html","style":"\nbody{margin:0}\n.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.55}\n.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}\n.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}\n.label{font-size:12px;color:#6B6A66;font-weight:500}\n.row{display:flex;align-items:center;gap:10px}\n.btn{font:inherit;font-size:13px;min-height:34px;padding:0 14px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}\n.btn:hover{background:#F4F4F1}\n.btn.primary{background:#1A1A19;border-color:#1A1A19;color:#fff}\n.btn.primary:hover{background:#333331}\n.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7;white-space:pre;overflow-x:auto}\n","defaults":{}}];
+const SVG = 'http://www.w3.org/2000/svg';
+const HOLE = /\{\{\s*([^}]+?)\s*\}\}/g;
+const WHOLE = /^\s*\{\{\s*([^}]+?)\s*\}\}\s*$/;
+
+class DCLogic {
+  constructor(props, update) { this.props = props; this.state = {}; this._update = update; }
+  setState(patch) { this.state = Object.assign({}, this.state, patch); this._update(); }
+  forceUpdate() { this._update(); }
+}
+const defs = {};
+defs["Main"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    const paused = (this.state && this.state.paused != null) ? this.state.paused : !!this.props.paused;
+    return {
+      paused: paused,
+      notPaused: !paused,
+      togglePause: () => this.setState({ paused: !paused }),
+      workerDot: paused ? '#C98A00' : '#1F9D5C',
+      workerTitle: paused ? '已暂停接收' : '运行中 · 接收任务',
+      workerDetail: paused ? '仍有 1 个命令在执行 · 协议 2' : 'v0.2.0 · 协议 2 · 由 Macrun Desktop 托管',
+      workspaces: [
+        { name: 'Counter', path: '~/work/Counter', meta: '同步中 · 上次完成 2 分钟前 · 128 个文件', dot: '#2F5BEA' },
+        { name: 'macrun-site', path: '~/work/macrun-site', meta: '3 小时前同步 · 412 个文件', dot: '#B7B6B0' },
+        { name: 'notes-api', path: '~/work/notes-api', meta: '昨天 22:41 同步失败：路径冲突', dot: '#C2361F' }
+      ],
+      recent: [
+        { time: '14:02:13', dot: '#2F5BEA', text: '开始 xcodebuild test -scheme Counter', dur: '2:14' },
+        { time: '14:02:11', dot: '#1F9D5C', text: '同步 Counter · 2 个文件', dur: '1.8s' },
+        { time: '13:58:40', dot: '#1F9D5C', text: '桌面 · 截图（计算器）', dur: '1.2s' },
+        { time: '13:58:37', dot: '#1F9D5C', text: '桌面 · 点击按钮 “=”', dur: '0.3s' },
+        { time: '13:51:02', dot: '#C2361F', text: 'make test · 退出码 2', dur: '1:03' },
+        { time: '13:40:19', dot: '#B26A00', text: '桌面 · 点击 · 结果未知（执行器重启）', dur: '—' }
+      ]
+    };
+  }
+}
+return Component;
+})();
+defs["Tasks"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      running:   { label: '运行中', dot: '#2F5BEA', bg: '#EAF0FF', fg: '#2449C8' },
+      succeeded: { label: '成功',   dot: '#1F9D5C', bg: '#EAF6EF', fg: '#1F6B45' },
+      failed:    { label: '失败',   dot: '#C2361F', bg: '#FCEDEA', fg: '#A12B17' },
+      unknown:   { label: '未知',   dot: '#D08A0B', bg: '#FFF3DC', fg: '#7A4B00' },
+      timed_out: { label: '超时',   dot: '#8A8984', bg: '#F1F0EC', fg: '#4A4945' },
+      cancelled: { label: '已取消', dot: '#8A8984', bg: '#F1F0EC', fg: '#4A4945' }
+    };
+    const tasks = [
+      { id: 'a', st: 'running', kind: '命令', title: "xcodebuild test -scheme Counter -destination 'platform=macOS'", when: '14:02:13 开始', dur: '2:14', exit: '—', cwd: '~/work/Counter', taskId: '3f2a91c0-5b7e-4d1a-9c2e-8a0f4b61c912',
+        explain: '正在运行。输出实时追加，阶段来自命令自身的输出，不估算百分比。', outNote: '实时',
+        output: "Test Suite 'CounterTests' started\n  ✓ testIncrement (0.004s)\n  ✓ testReset (0.002s)\n  … testPersistence" },
+      { id: 'b', st: 'unknown', kind: '桌面 · computer.click', title: 'click  x=412 y=288  (按钮 “=”)', when: '13:40:19', dur: '—', exit: '—', cwd: '—', taskId: 'c81d07aa-2f13-4b8e-a5d4-1e9b7f02d6c4',
+        explain: '执行器在这次点击进行中重启，点击可能已经发生，也可能没有。Macrun 不会自动重放。先截图确认界面，再决定是否用新的请求编号重新操作。', outNote: '无输出',
+        output: "error: worker_restarted\nExecution interrupted; effects may have occurred.\nNever automatically replay." },
+      { id: 'c', st: 'succeeded', kind: '命令', title: 'swift build -c release', when: '13:55:02', dur: '41s', exit: '0', cwd: '~/work/Counter', taskId: '9e4b2c11-0d7a-4f3e-b812-5c6a9d0e7f33',
+        explain: '命令正常结束，退出码 0。', outNote: '最后 4 行',
+        output: "Compiling Counter CounterModel.swift\nCompiling Counter CounterView.swift\nLinking Counter\nBuild complete! (40.86s)" },
+      { id: 'd', st: 'failed', kind: '命令', title: 'make test', when: '13:51:02', dur: '1:03', exit: '2', cwd: '~/work/notes-api', taskId: '41f0e9b3-8c25-4a6d-9e07-b3d2a1c84f50',
+        explain: '命令以退出码 2 结束。以下是输出的最后几行，完整日志可下载。', outNote: '最后 4 行',
+        output: "--- FAIL: TestCreateNote (0.02s)\n    store_test.go:48: expected 201, got 500\nFAIL\nmake: *** [test] Error 2" },
+      { id: 'e', st: 'succeeded', kind: '桌面 · computer.screenshot', title: 'screenshot  display=main', when: '13:58:40', dur: '1.2s', exit: '—', cwd: '—', taskId: '5a7c3e90-1b4d-4f2a-8e6c-0d9b2f71a3e8',
+        explain: '截图已作为图片返回给 Agent。', outNote: '图片 · 2560×1600 · 612 KB',
+        output: '[image/png 已返回，内容在“桌面控制 › 最近操作”中查看]' },
+      { id: 'f', st: 'timed_out', kind: '命令', title: 'npm run e2e', when: '12:20:47', dur: '10:00', exit: '—', cwd: '~/work/macrun-site', taskId: 'e2b6d4f8-7a1c-4e39-b05d-6f8c2a9e1d07',
+        explain: '超过请求设置的 600 秒上限，整个进程组已被终止。', outNote: '最后 3 行',
+        output: "Running 48 tests using 4 workers\n  [chromium] › checkout.spec.ts:12:3 › pays with card\n(no output for 540s)" },
+      { id: 'g', st: 'cancelled', kind: '命令', title: 'tail -f /tmp/app.log', when: '11:02:15', dur: '4:31', exit: '—', cwd: '/tmp', taskId: '07d9a3b1-6e5f-4c28-91ab-3f4e8d2c6b19',
+        explain: '由 Agent 调用 task_cancel 取消，进程组已停止。', outNote: '最后 2 行',
+        output: "[11:06:44] GET /health 200\n[11:06:46] GET /health 200" },
+      { id: 'h', st: 'succeeded', kind: '同步', title: 'Counter → ~/work/Counter', when: '14:02:11', dur: '1.8s', exit: '—', cwd: '~/work/Counter', taskId: 'job 6c1e8f42-…',
+        explain: '同步完成：2 个文件更新，0 个删除。同步不会自动触发构建。', outNote: '变更',
+        output: "M  Sources/CounterModel.swift\nM  Tests/CounterTests.swift" }
+    ];
+    const filter = (this.state && this.state.filter) || 'all';
+    const selId = (this.state && this.state.sel) || 'b';
+    const groups = [
+      { key: 'all', label: '全部', dot: '#1A1A19', test: () => true },
+      { key: 'running', label: '运行中', dot: S.running.dot, test: (t) => t.st === 'running' },
+      { key: 'succeeded', label: '成功', dot: S.succeeded.dot, test: (t) => t.st === 'succeeded' },
+      { key: 'failed', label: '失败', dot: S.failed.dot, test: (t) => t.st === 'failed' },
+      { key: 'unknown', label: '未知', dot: S.unknown.dot, test: (t) => t.st === 'unknown' },
+      { key: 'ended', label: '取消 / 超时', dot: '#8A8984', test: (t) => t.st === 'cancelled' || t.st === 'timed_out' }
+    ];
+    const g = groups.find((x) => x.key === filter) || groups[0];
+    const shown = tasks.filter(g.test);
+    const decorate = (t) => Object.assign({}, t, { stLabel: S[t.st].label, dot: S[t.st].dot, bg: S[t.st].bg, fg: S[t.st].fg,
+      isUnknown: t.st === 'unknown', isRunning: t.st === 'running' });
+    const selRaw = tasks.find((t) => t.id === selId) || tasks[0];
+    return {
+      filters: groups.map((x) => ({ label: x.label, dot: x.key === filter ? '#FFFFFF' : x.dot, count: tasks.filter(x.test).length,
+        cls: x.key === filter ? 'chip on' : 'chip', pick: () => this.setState({ filter: x.key }) })),
+      list: shown.map((t) => Object.assign(decorate(t), { cls: t.id === selRaw.id ? 'item on' : 'item', pick: () => this.setState({ sel: t.id }) })),
+      empty: shown.length === 0,
+      sel: decorate(selRaw)
+    };
+  }
+}
+return Component;
+})();
+defs["Desktop"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    const enabled = !(this.state && this.state.off);
+    const ok = { bg: '#EAF6EF', fg: '#1F6B45', icon: 'M4 8.5l2.5 2.5L12 5.5', fix: false };
+    const warn = { bg: '#FFF3DC', fg: '#7A4B00', icon: 'M8 4.5v4M8 11.5h.01', fix: true };
+    return {
+      enabled: enabled,
+      masterLabel: enabled ? '允许 Agent 操作桌面' : '桌面控制已关闭',
+      toggle: () => this.setState({ off: enabled }),
+      checks: [
+        Object.assign({ name: '辅助功能', detail: 'CuaDriver 已获授权，可以点击和输入' }, ok),
+        Object.assign({ name: '屏幕录制', detail: '已授权 · 上次实拍验证 13:58' }, ok),
+        Object.assign({ name: '图形登录会话', detail: '当前用户已登录，屏幕未锁定' }, ok),
+        Object.assign({ name: '防止自动休眠', detail: '睡眠后连接与桌面操作都会中断', fixLabel: '保持唤醒' }, warn)
+      ],
+      frames: [
+        { n: '01', title: '打开计算器', detail: 'open_app · 0.8s', x: '50%', y: '50%', mark: 'none' },
+        { n: '02', title: '点击 “1” “2”', detail: 'click ×2 · 0.6s', x: '41%', y: '58%', mark: 'block' },
+        { n: '03', title: '点击 “=”', detail: 'click (412, 288)', x: '58%', y: '70%', mark: 'block' },
+        { n: '04', title: '截图核对', detail: '结果 408 · 1.2s', x: '50%', y: '30%', mark: 'none' }
+      ]
+    };
+  }
+}
+return Component;
+})();
+defs["Settings"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    const mode = (this.state && this.state.mode) || 'risky';
+    const list = [
+      { key: 'auto', label: '直接执行', hint: '和现在的 CLI 行为一致，不做拦截。适合专门给 Agent 用的机器。' },
+      { key: 'risky', label: '风险命令先确认', hint: '普通命令直接执行，匹配下方规则的命令先在菜单栏请你确认。' },
+      { key: 'all', label: '每条都确认', hint: '每个命令和桌面操作都需要你点“允许”。适合第一次试用。' }
+    ];
+    const cur = list.find((m) => m.key === mode) || list[1];
+    return {
+      modes: list.map((m) => ({ label: m.label, cls: m.key === mode ? 'on' : '', pick: () => this.setState({ mode: m.key }) })),
+      modeHint: cur.hint,
+      showRules: mode === 'risky'
+    };
+  }
+}
+return Component;
+})();
+defs["MenuBar"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    let s = (this.state && this.state.s) || this.props.initial || 'working';
+    const paused = !!(this.state && this.state.paused);
+    const map = {
+      working: { dot: '#2F5BEA', headline: 'Agent 正在工作', sub: '2 个任务进行中 · 203.0.113.10' },
+      approval: { dot: '#D08A0B', headline: '需要你确认', sub: '1 个命令等待批准' },
+      idle: { dot: '#1F9D5C', headline: '已连接，空闲', sub: '今天 42 个任务 · 上次活动 6 分钟前' },
+      offline: { dot: '#C2361F', headline: '与服务器断开', sub: '已断开 1 分 10 秒' }
+    };
+    const m = map[s];
+    const labels = { working: '工作中', approval: '待确认', idle: '空闲', offline: '断线' };
+    return {
+      dot: paused ? '#8A8984' : m.dot,
+      iconDot: paused ? '#8A8984' : m.dot,
+      headline: paused ? '已暂停接收新任务' : m.headline,
+      sub: paused ? '运行中的任务会继续完成' : m.sub,
+      working: s === 'working', approval: s === 'approval', offline: s === 'offline',
+      pauseLabel: paused ? '恢复接收任务' : '暂停接收新任务',
+      pauseIcon: paused ? 'M5 3l8 5-8 5z' : 'M6 3.5v9M10 3.5v9',
+      togglePause: () => this.setState({ paused: !paused }),
+      allow: () => this.setState({ s: 'working' }),
+      deny: () => this.setState({ s: 'idle' }),
+      recent: [
+        { dot: '#1F9D5C', text: '同步 Counter · 2 个文件', t: '14:02' },
+        { dot: '#C2361F', text: 'make test · 退出码 2', t: '13:51' },
+        { dot: '#D08A0B', text: '桌面点击 · 结果未知', t: '13:40' }
+      ],
+      states: ['working', 'approval', 'idle', 'offline'].map((k) => ({ label: labels[k], cls: k === s ? 'state on' : 'state', pick: () => this.setState({ s: k }) }))
+    };
+  }
+}
+return Component;
+})();
+defs["Overlay"] = (function () {
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+return Component;
+})();
+defs["Pairing"] = (function () {
+class Component extends DCLogic {
+  renderVals() {
+    const step = (this.state && this.state.step) || 1;
+    const names = ['配对码', '检查连接', '桌面控制'];
+    return {
+      s1: step === 1, s2: step === 2, s3: step === 3,
+      next: () => this.setState({ step: Math.min(3, step + 1) }),
+      back: () => this.setState({ step: Math.max(1, step - 1) }),
+      reset: () => this.setState({ step: 1 }),
+      steps: names.map((label, i) => {
+        const n = i + 1;
+        const done = n < step, cur = n === step;
+        return { n: done ? '✓' : String(n), label: label,
+          bg: cur ? '#1A1A19' : (done ? '#EAF6EF' : '#E6E5E1'), fg: cur ? '#fff' : (done ? '#1F6B45' : '#6B6A66'),
+          color: cur || done ? '#1A1A19' : '#6B6A66', weight: cur ? '600' : '400' };
+      }),
+      checks: [
+        { name: 'UDP 7443 可达', v: '38 ms' },
+        { name: '服务器证书与配对码指纹一致', v: '4F:A1:…:30' },
+        { name: '令牌已获取并存入钥匙串', v: 'Keychain' },
+        { name: '协议版本一致', v: 'v2 = v2' },
+        { name: '远程命令试运行', v: 'exit 0' }
+      ]
+    };
+  }
+}
+return Component;
+})();
+
+function lookup(scope, expr) {
+  if (expr === 'true') return true;
+  if (expr === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(expr)) return Number(expr);
+  return expr.split('.').reduce((o, k) => (o == null ? undefined : o[k]), scope);
+}
+function interp(text, scope) {
+  return text.replace(HOLE, (_, p) => { const v = lookup(scope, p); return v == null ? '' : String(v); });
+}
+function renderChildren(src, dst, scope) { for (const n of src.childNodes) renderNode(n, dst, scope); }
+function renderNode(n, dst, scope) {
+  if (n.nodeType === 3) { dst.appendChild(document.createTextNode(interp(n.nodeValue, scope))); return; }
+  if (n.nodeType !== 1) return;
+  const tag = n.localName;
+  if (tag === 'sc-if') {
+    const m = (n.getAttribute('value') || '').match(WHOLE);
+    if (m && lookup(scope, m[1])) renderChildren(n, dst, scope);
+    return;
+  }
+  if (tag === 'sc-for') {
+    const m = (n.getAttribute('list') || '').match(WHOLE);
+    const list = (m && lookup(scope, m[1])) || [];
+    const as = n.getAttribute('as') || 'item';
+    list.forEach((item, i) => renderChildren(n, dst, Object.assign({}, scope, { [as]: item, $index: i })));
+    return;
+  }
+  const el = n.namespaceURI === SVG ? document.createElementNS(SVG, tag) : document.createElement(tag);
+  for (const a of n.attributes) {
+    const m = a.value.match(WHOLE);
+    if (a.name.startsWith('hint-')) continue;
+    if (/^on[a-z]+$/.test(a.name) && m) {
+      const fn = lookup(scope, m[1]);
+      if (typeof fn === 'function') el.addEventListener(a.name.slice(2), fn);
+      continue;
+    }
+    if (a.name === 'checked' || a.name === 'defaultchecked') { el.checked = m ? !!lookup(scope, m[1]) : true; continue; }
+    el.setAttributeNS(a.namespaceURI, a.name, interp(a.value, scope));
+  }
+  renderChildren(n, el, scope);
+  dst.appendChild(el);
+}
+
+const instances = {};
+const host = document.getElementById('screen');
+const root = host.attachShadow({ mode: 'open' });
+let current = null;
+
+function paint() {
+  const s = SCREENS.find((x) => x.id === current);
+  const inst = instances[s.id];
+  const frag = document.createDocumentFragment();
+  const style = document.createElement('style');
+  style.textContent = ':host{display:block}\n' + s.style;
+  frag.appendChild(style);
+  renderChildren(document.getElementById('t-' + s.id).content, frag, inst.renderVals());
+  root.replaceChildren(frag);
+}
+
+function show(id) {
+  const s = SCREENS.find((x) => x.id === id) || SCREENS[0];
+  current = s.id;
+  if (!instances[s.id]) instances[s.id] = new defs[s.id](Object.assign({}, s.defaults), () => { if (current === s.id) paint(); });
+  document.getElementById('stage').className = 'stage ' + s.kind;
+  for (const b of document.querySelectorAll('#tabs button')) b.setAttribute('aria-selected', String(b.dataset.id === s.id));
+  paint();
+  const shot = document.documentElement.classList.contains('shot');
+  history.replaceState(null, '', (shot ? '#shot/' : '#') + s.id);
+  window.scrollTo(0, 0);
+}
+
+root.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (href.endsWith('.dc.html')) { e.preventDefault(); show(href.replace('.dc.html', '')); }
+  else if (href.startsWith('#')) { e.preventDefault(); const t = root.getElementById(href.slice(1)); if (t) t.scrollIntoView({ behavior: 'smooth' }); }
+});
+
+const tabs = document.getElementById('tabs');
+for (const s of SCREENS) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.role = 'tab'; b.dataset.id = s.id; b.textContent = s.label;
+  b.addEventListener('click', () => show(s.id));
+  tabs.appendChild(b);
+}
+
+let start = location.hash.slice(1);
+if (start.startsWith('shot/')) { document.documentElement.classList.add('shot'); start = start.slice(5); }
+show(start);
+</script>
+</body>
+</html>
