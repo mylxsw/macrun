@@ -24,6 +24,13 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Cmd {
+    /// Generate a single-use invitation, valid for ten minutes.
+    Invite {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long)]
+        server: String,
+    },
     Init {
         #[arg(long)]
         data: PathBuf,
@@ -41,6 +48,9 @@ enum Cmd {
         cert: PathBuf,
         #[arg(long)]
         token_file: PathBuf,
+        /// Read credentials from the inherited pipe, never from process arguments.
+        #[arg(long)]
+        token_stdin: bool,
         #[arg(long)]
         data: PathBuf,
         #[arg(long)]
@@ -105,6 +115,10 @@ async fn entry() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let root = std::fs::canonicalize(&cli.workspace)?;
     let (kind, args) = match cli.command {
+        Cmd::Invite { data, server } => {
+            println!("{}", macrun::pairing::create(&data, server)?);
+            return Ok(());
+        }
         Cmd::Init { data } => {
             wire::init_tls(&data)?;
             println!("Created identity: {}", data.display());
@@ -117,11 +131,24 @@ async fn entry() -> anyhow::Result<()> {
             server,
             cert,
             token_file,
+            token_stdin,
             data,
             config,
             control_socket,
             parent_pipe,
         } => {
+            let injected = if token_stdin {
+                use std::io::Read;
+                let mut header = [0u8; 4];
+                std::io::stdin().read_exact(&mut header)?;
+                let n = u32::from_be_bytes(header) as usize;
+                anyhow::ensure!(n <= 4096, "credential frame too large");
+                let mut b = vec![0; n];
+                std::io::stdin().read_exact(&mut b)?;
+                Some(String::from_utf8(b)?)
+            } else {
+                None
+            };
             return macrun::worker::worker_managed(
                 macrun::worker::Options {
                     server,
@@ -131,7 +158,7 @@ async fn entry() -> anyhow::Result<()> {
                     config,
                 },
                 control_socket,
-                None,
+                injected,
                 parent_pipe,
             )
             .await;

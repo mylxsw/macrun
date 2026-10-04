@@ -72,7 +72,7 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
     );
     loop {
         tokio::select! {
-            incoming=endpoint.accept()=>{if let Some(incoming)=incoming {let s=state.clone();let t=token.clone();tokio::spawn(async move {if register(incoming,s,t).await.is_err() {crate::logging::event("server", "connection_error", json!({"status":"failed"}));}});}},
+            incoming=endpoint.accept()=>{if let Some(incoming)=incoming {let s=state.clone();let t=token.clone();let d=data.clone();tokio::spawn(async move {if register(incoming,s,t,d).await.is_err() {crate::logging::event("server", "connection_error", json!({"status":"failed"}));}});}},
             accepted=local.accept()=>{let (stream,_)=accepted?;let s=state.clone();let d=data.clone();tokio::spawn(async move {if handle_cli(stream,s,d).await.is_err(){crate::logging::event("server", "cli_error", json!({"status":"failed","reason":"request_decode_or_transport_failed"}));}});},
             _=tokio::signal::ctrl_c()=>break,
         }
@@ -80,12 +80,38 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
     endpoint.close(0u32.into(), b"server shutdown");
     Ok(())
 }
-async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Result<()> {
+async fn register(
+    incoming: quinn::Incoming,
+    state: Shared,
+    token: String,
+    data: PathBuf,
+) -> Result<()> {
     let conn = tokio::time::timeout(Duration::from_secs(5), incoming).await??;
     let (mut send, mut recv) =
         tokio::time::timeout(Duration::from_secs(5), conn.accept_bi()).await??;
     let hello: Control =
         tokio::time::timeout(Duration::from_secs(5), wire::recv(&mut recv)).await??;
+    if let Control::Pair { protocol, code } = &hello {
+        let response = if *protocol != PROTOCOL {
+            Control::Reject {
+                error: Fault::new("protocol_mismatch", "update server and desktop"),
+            }
+        } else {
+            match crate::pairing::redeem(&data, code) {
+                Ok(token) => Control::Paired {
+                    token,
+                    protocol: PROTOCOL,
+                },
+                Err(e) => Control::Reject {
+                    error: Fault::new("pairing_failed", e),
+                },
+            }
+        };
+        wire::send(&mut send, &response).await?;
+        send.finish()?;
+        let _ = tokio::time::timeout(Duration::from_secs(3), send.stopped()).await;
+        return Ok(());
+    }
     let Control::Hello {
         protocol,
         token: provided,
@@ -95,11 +121,16 @@ async fn register(incoming: quinn::Incoming, state: Shared, token: String) -> Re
     else {
         anyhow::bail!("expected hello");
     };
-    if protocol != PROTOCOL || provided != token {
+    if protocol != PROTOCOL || (provided != token && !crate::pairing::authorized(&data, &provided))
+    {
         wire::send(
             &mut send,
             &Control::Reject {
-                error: Fault::new("connection_auth_failed", "protocol or token mismatch"),
+                error: if protocol != PROTOCOL {
+                    Fault::new("protocol_mismatch", "server and worker protocol differ")
+                } else {
+                    Fault::new("connection_auth_failed", "invalid worker credential")
+                },
             },
         )
         .await?;

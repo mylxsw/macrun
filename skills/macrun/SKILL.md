@@ -45,11 +45,11 @@ There is no implicit synchronization before commands. Uncommitted source files a
 ## Handle async tasks and uncertain delivery
 
 - Generate a UUID `request_id` before each new `exec_start` or `mcp_call`. Record it with the arguments before sending. It equals the returned `task_id`.
-- The initial `accepted`/`running` response is not completion. Poll `task_get`; for long jobs use a reasonable interval (for example 1–3 seconds initially, then longer), bounded by the task deadline and user intent. Give progress updates rather than busy polling indefinitely.
+- The initial `accepted`/`running`/`awaiting_approval` response is not completion. Poll `task_get`; for long jobs use a reasonable interval (for example 1–3 seconds initially, then longer), bounded by the task deadline and user intent. Give progress updates rather than busy polling indefinitely.
 - Logs combine stdout/stderr. Use returned `output.next_offset` for incremental reads; offsets count **bytes**, not characters. Each read is bounded, so continue until the available output is consumed.
 - Inspect task `status`, command `result.exit_code`, and backend errors. A successful tool transport or CLI query is not proof the underlying job succeeded.
 - After a lost submission response, query the original UUID. If delivery must be retried, reuse that UUID and identical arguments. A new UUID can duplicate a click, command or other effect. Conflicting parameters with the same UUID are rejected.
-- Terminal task states include `succeeded`, `failed`, `cancelled`, `timed_out`, `unknown`. On `unknown`, inspect the actual files/process/UI before deciding whether a new operation is appropriate; do not automatically replay.
+- Terminal task states include `succeeded`, `failed`, `cancelled`, `timed_out`, `unknown`, `denied`. Awaiting approval expires after 60 seconds; do not bypass local approval or resubmit denied work without a new user instruction. On `unknown`, inspect the actual files/process/UI before deciding whether a new operation is appropriate; do not automatically replay.
 - Network loss does not cancel worker tasks or reset backend sessions. Worker restart marks unfinished tasks `unknown`; backend restart, cancellation or timeout can invalidate its session. Poll after reconnect rather than claiming the operation stopped.
 - `task_cancel` requests cancellation; query again to confirm state. Command process groups are terminated. Shell stdin is closed, and child processes are cleaned up when the command finishes: do not use `command &` as a persistent-service installation method.
 

@@ -788,3 +788,62 @@ footer {
     transition: none !important;
   }
 }
+textarea,
+select {
+  font: inherit;
+  width: 100%;
+  border: 1px solid #deded9;
+  background: #fff;
+  border-radius: 7px;
+  padding: 10px;
+  color: #1a1a19;
+}
+textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+.config-editor {
+  min-height: 260px;
+  font-family: monospace;
+}
+.schema {
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 300px;
+  font: 12px/1.6 monospace;
+  background: #f2f2ef;
+  padding: 12px;
+  border-radius: 6px;
+}
+.observation {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border: 1px solid #deded9;
+}
+.approval {
+  border-color: #cc9a38;
+  background: #fff9ed;
+}
+.overlay-bar {
+  height: 64px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  background: #fff8e8;
+  border: 2px solid #db8a2b;
+  font-size: 13px;
+}
+.card + .card {
+  margin-top: 16px;
+}
+.tag.awaiting_approval {
+  color: #936015;
+  background: #fff2cd;
+}
+.tag.denied {
+  color: #a5483d;
+  background: #fae9e6;
+}

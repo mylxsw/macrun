@@ -22,6 +22,10 @@ pub struct Engine {
     tasks: Mutex<BTreeMap<String, CancellationToken>>,
     backends: BTreeMap<String, Slot>,
     policy: Mutex<Policy>,
+    safety: Mutex<crate::safety::Safety>,
+    approvals: Mutex<BTreeMap<String, tokio::sync::oneshot::Sender<bool>>>,
+    backend_stop: Mutex<CancellationToken>,
+    tool_counts: Mutex<BTreeMap<String, usize>>,
     changes: watch::Sender<u64>,
     fingerprint_key: [u8; 32],
 }
@@ -78,6 +82,12 @@ impl Engine {
                 v["arguments"] = redact_arguments(&v["arguments"]);
                 wire::atomic_json(&p, &v)?;
             }
+            if v["status"] == "awaiting_approval" {
+                v["status"] = json!("denied");
+                v["ended_at"] = json!(now());
+                v["error"] = json!({"message":"Approval interrupted by restart; command was not dispatched."});
+                wire::atomic_json(&p, &v)?;
+            }
             if ["accepted", "running"].contains(&v["status"].as_str().unwrap_or("")) {
                 v["status"] = json!("unknown");
                 v["ended_at"] = json!(now());
@@ -104,6 +114,11 @@ impl Engine {
         } else {
             Policy::default()
         };
+        let safety = if data.join("safety.json").exists() {
+            serde_json::from_slice(&std::fs::read(data.join("safety.json"))?)?
+        } else {
+            crate::safety::Safety::default()
+        };
         let (changes, _) = watch::channel(0);
         Ok(Arc::new(Self {
             data,
@@ -112,6 +127,10 @@ impl Engine {
             tasks: Mutex::new(BTreeMap::new()),
             backends,
             policy: Mutex::new(policy),
+            safety: Mutex::new(safety),
+            approvals: Mutex::new(BTreeMap::new()),
+            backend_stop: Mutex::new(CancellationToken::new()),
+            tool_counts: Mutex::new(BTreeMap::new()),
             changes,
             fingerprint_key,
         }))
@@ -144,6 +163,14 @@ impl Engine {
             )
             .into());
         }
+        drop(p);
+        if kind == "mcp.call" && self.safety.lock().await.yield_until > now() {
+            return Err(crate::model::Fault::new(
+                "busy",
+                "desktop temporarily yielded to local input",
+            )
+            .into());
+        }
         Ok(())
     }
     /// Only the local control endpoint can change policy. Admission and stopping are serialized.
@@ -168,6 +195,9 @@ impl Engine {
         }
         // Fail closed in memory even if persisting an emergency stop fails.
         if stop {
+            let mut backend_stop = self.backend_stop.lock().await;
+            backend_stop.cancel();
+            *backend_stop = CancellationToken::new();
             *p = next.clone();
             for cancel in self.tasks.lock().await.values() {
                 cancel.cancel();
@@ -179,6 +209,60 @@ impl Engine {
         self.changed();
         Ok(json!({"policy":*p,"cancel_requested":stop}))
     }
+    pub async fn set_safety(&self, mut safety: crate::safety::Safety) -> Result<Value> {
+        let _guard = self.submissions.lock().await;
+        safety.validate()?;
+        wire::atomic_json(&self.data.join("safety.json"), &safety)?;
+        *self.safety.lock().await = safety.clone();
+        self.changed();
+        Ok(json!(safety))
+    }
+    pub async fn approve(&self, ident: &str, allow: bool) -> Result<Value> {
+        let sender = self
+            .approvals
+            .lock()
+            .await
+            .remove(ident)
+            .ok_or_else(|| anyhow::anyhow!("approval expired or already handled"))?;
+        sender
+            .send(allow)
+            .map_err(|_| anyhow::anyhow!("approval no longer active"))?;
+        Ok(json!({"handled":true}))
+    }
+    pub async fn yield_desktop(&self) -> Result<Value> {
+        let mut s = self.safety.lock().await;
+        s.yield_until = now() + 30_000;
+        self.changed();
+        Ok(json!({"until":s.yield_until}))
+    }
+    async fn check_paths(&self, kind: &str, args: &Value) -> Result<()> {
+        let safety = self.safety.lock().await;
+        for field in match kind {
+            "exec.start" => vec!["cwd"],
+            "sync" => vec!["remote_root"],
+            "file.move" => vec!["path", "destination"],
+            k if k.starts_with("file.") => vec!["path"],
+            _ => vec![],
+        } {
+            safety.check(&expand(string(args, field)?))?;
+        }
+        Ok(())
+    }
+    pub async fn restart_backend(&self, name: &str) -> Result<Value> {
+        let slot = self
+            .backends
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown backend"))?;
+        let mut c = tokio::time::timeout(Duration::from_secs(2), slot.lock())
+            .await
+            .map_err(|_| anyhow::anyhow!("backend busy; stop active calls first"))?;
+        if let Some(client) = c.as_mut() {
+            client.stop().await;
+        }
+        *c = None;
+        self.changed();
+        Ok(json!({"session_invalidated":true}))
+    }
     pub async fn begin_external(
         &self,
         kind: &str,
@@ -186,6 +270,7 @@ impl Engine {
     ) -> Result<(String, CancellationToken)> {
         let _guard = self.submissions.lock().await;
         self.check_admission(kind).await?;
+        self.check_paths(kind, &args).await?;
         let ident = id();
         let cancel = CancellationToken::new();
         let args = if kind.starts_with("file.") {
@@ -240,6 +325,23 @@ impl Engine {
         if let Some(message) = error {
             v["error"] = json!({"message":message});
         }
+        if v["kind"] == "sync" {
+            let index = self.data.join("workspaces.json");
+            let mut workspaces: BTreeMap<String, Value> = std::fs::read(&index)
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default();
+            if let Some(root) = v["arguments"]["remote_root"].as_str() {
+                workspaces.insert(root.into(),json!({"root":root,"time":v["started_at"],"status":v["status"],"error":v["error"]}));
+                if wire::atomic_json(&index, &workspaces).is_err() {
+                    crate::logging::event(
+                        "worker",
+                        "workspace_index_failed",
+                        json!({"task_id":ident}),
+                    );
+                }
+            }
+        }
         let result = wire::atomic_json(&p, &v);
         self.tasks.lock().await.remove(ident);
         self.changed();
@@ -249,6 +351,7 @@ impl Engine {
         self.tasks.lock().await.len()
     }
     pub async fn shutdown(&self) -> Result<()> {
+        self.backend_stop.lock().await.cancel();
         {
             let _admission = self.submissions.lock().await;
             self.policy.lock().await.paused = true;
@@ -273,6 +376,48 @@ impl Engine {
         }
         Ok(())
     }
+    pub async fn self_test(self: &Arc<Self>) -> Result<Value> {
+        let root = self
+            .safety
+            .lock()
+            .await
+            .roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.data.join("self-test"));
+        std::fs::create_dir_all(&root)?;
+        self.handle(
+            "exec.start",
+            json!({"command":"printf macrun-self-test","cwd":root,"timeout_seconds":10}),
+        )
+        .await
+    }
+    pub async fn prune_history(&self) -> Result<Value> {
+        let _guard = self.submissions.lock().await;
+        let days = self.safety.lock().await.retention_days as u64;
+        let cutoff = now().saturating_sub(days * 86_400_000);
+        let mut removed = 0;
+        for entry in std::fs::read_dir(self.data.join("tasks"))? {
+            let dir = entry?.path();
+            let p = dir.join("result.json");
+            if let Ok(bytes) = std::fs::read(&p) {
+                let v: Value = serde_json::from_slice(&bytes)?;
+                if v["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
+                    let ident = string(&v, "task_id")?;
+                    uuid::Uuid::parse_str(ident)?;
+                    let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
+                    wire::atomic_json(
+                        &self.data.join("dedup").join(format!("{ident}.json")),
+                        &tombstone,
+                    )?;
+                    std::fs::remove_dir_all(dir)?;
+                    removed += 1;
+                }
+            }
+        }
+        self.changed();
+        Ok(json!({"removed":removed,"dedup_preserved":true}))
+    }
     pub async fn local_snapshot(&self) -> Result<Value> {
         let mut tasks = Vec::new();
         for entry in std::fs::read_dir(self.data.join("tasks"))? {
@@ -282,6 +427,9 @@ impl Engine {
             {
                 v.as_object_mut().map(|m| m.remove("request_fingerprint"));
                 v["arguments"] = redact_arguments(&v["arguments"]);
+                if !v["arguments"].is_object() {
+                    v["arguments"] = json!({});
+                }
                 // Tool results can contain images and secrets; retrieve only on explicit request.
                 if v["kind"] == "mcp.call" {
                     v.as_object_mut().map(|m| m.remove("result"));
@@ -291,7 +439,45 @@ impl Engine {
         }
         tasks.sort_by_key(|v| std::cmp::Reverse(v["started_at"].as_u64().unwrap_or(0)));
         let total = tasks.len();
-        tasks.truncate(200);
+        let day = |ms: u64| {
+            let t = (ms / 1000) as libc::time_t;
+            let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+            unsafe {
+                libc::localtime_r(&t, tm.as_mut_ptr());
+                let tm = tm.assume_init();
+                (tm.tm_year, tm.tm_yday)
+            }
+        };
+        let today = day(now());
+        let mut summary: BTreeMap<String, u64> = BTreeMap::new();
+        for t in &tasks {
+            if day(t["started_at"].as_u64().unwrap_or(0)) == today {
+                *summary.entry("total".into()).or_default() += 1;
+                *summary
+                    .entry(t["status"].as_str().unwrap_or("unknown").into())
+                    .or_default() += 1;
+            }
+        }
+
+        let mut workspaces: BTreeMap<String, Value> =
+            std::fs::read(self.data.join("workspaces.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default();
+        for t in &tasks {
+            if t["kind"] == "sync"
+                && let Some(root) = t["arguments"]["remote_root"].as_str()
+            {
+                workspaces.entry(root.to_owned()).or_insert(json!({"root":root,"time":t["started_at"],"status":t["status"],"error":t["error"]}));
+            }
+        }
+        // Include all active tasks even when more than 200 newer tasks exist.
+        tasks = tasks
+            .into_iter()
+            .enumerate()
+            .filter(|(i, v)| *i < 200 || v.get("ended_at").is_none())
+            .map(|(_, v)| v)
+            .collect();
         for v in &mut tasks {
             let ident = v["task_id"].as_str().unwrap_or("");
             let p = self.directory(ident)?.join("output.log");
@@ -316,10 +502,10 @@ impl Engine {
                 ),
                 Err(_) => ("busy", None),
             };
-            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command}));
+            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":self.tool_counts.lock().await.get(name).copied()}));
         }
         Ok(
-            json!({"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+            json!({"today_summary":summary,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
         )
     }
     fn directory(&self, id: &str) -> Result<PathBuf> {
@@ -330,9 +516,20 @@ impl Engine {
         match kind {
             "exec.start" | "mcp.call" => self.submit(kind, a).await,
             "task.get" => {
+                // Keep the record and its output alive for the whole read while
+                // retention cleanup moves completed tasks into dedup records.
+                let _guard = self.submissions.lock().await;
                 let dir = self.directory(string(&a, "task_id")?)?;
-                let mut v: Value =
-                    serde_json::from_slice(&tokio::fs::read(dir.join("result.json")).await?)?;
+                let mut v: Value = serde_json::from_slice(
+                    &tokio::fs::read(if dir.join("result.json").exists() {
+                        dir.join("result.json")
+                    } else {
+                        self.data
+                            .join("dedup")
+                            .join(format!("{}.json", string(&a, "task_id")?))
+                    })
+                    .await?,
+                )?;
                 let log = dir.join("output.log");
                 if log.exists() {
                     let args = json!({"path":log,"offset":a["offset"].as_u64().unwrap_or(0),"length":65536,"text":true});
@@ -343,19 +540,30 @@ impl Engine {
                 Ok(v)
             }
             "task.cancel" => {
+                let _guard = self.submissions.lock().await;
                 let id = string(&a, "task_id")?;
-                let p = self.directory(id)?.join("result.json");
+                let mut p = self.directory(id)?.join("result.json");
                 if let Some(c) = self.tasks.lock().await.get(id) {
                     c.cancel();
                     return Ok(json!({"task_id":id,"cancel_requested":true}));
+                }
+                if !p.exists() {
+                    p = self.data.join("dedup").join(format!("{id}.json"));
                 }
                 let v: Value = serde_json::from_slice(&tokio::fs::read(p).await?)?;
                 Ok(json!({"task_id":id,"cancel_requested":false,"status":v["status"]}))
             }
             "mcp.servers" => Ok(json!({"servers":self.config.mcp.keys().collect::<Vec<_>>()})),
             "mcp.tools" => {
-                self.backend_request(&a, "tools/list", &CancellationToken::new())
-                    .await
+                let v = self
+                    .backend_request(&a, "tools/list", &CancellationToken::new())
+                    .await?;
+                self.tool_counts.lock().await.insert(
+                    string(&a, "server")?.into(),
+                    v["result"]["tools"].as_array().map_or(0, Vec::len),
+                );
+                self.changed();
+                Ok(v)
             }
             _ if kind.starts_with("file.") => {
                 let (ident, cancel) = self.begin_external(kind, a.clone()).await?;
@@ -396,17 +604,36 @@ impl Engine {
         }
         let _guard = self.submissions.lock().await;
         let path = dir.join("result.json");
-        if path.exists() {
-            let v: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let tombstone = self.data.join("dedup").join(format!("{task_id}.json"));
+        if path.exists() || tombstone.exists() {
+            let v: Value = serde_json::from_slice(&std::fs::read(if path.exists() {
+                &path
+            } else {
+                &tombstone
+            })?)?;
             if v["kind"] != kind || v["request_fingerprint"] != json!(self.fingerprint(&a)?) {
                 bail!("request_id already belongs to a different operation");
             }
             return Ok(json!({"task_id":task_id,"status":v["status"],"duplicate":true}));
         }
         self.check_admission(kind).await?;
+        self.check_paths(kind, &a).await?;
+        let needs_approval = kind == "exec.start"
+            && self
+                .safety
+                .lock()
+                .await
+                .approval_required(string(&a, "command")?);
         let initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
         wire::atomic_json(&path, &initial)?;
         let cancel = CancellationToken::new();
+        let approval = if needs_approval {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.approvals.lock().await.insert(task_id.clone(), tx);
+            Some(rx)
+        } else {
+            None
+        };
         self.tasks
             .lock()
             .await
@@ -417,8 +644,19 @@ impl Engine {
         let kind = kind.to_owned();
         tokio::spawn(async move {
             let mut result = initial;
-            result["status"] = json!("running");
             let outcome = async {
+                if let Some(approval)=approval {
+                    result["status"]=json!("awaiting_approval");result["approval_deadline"]=json!(now()+60_000);
+                    wire::atomic_json(&path,&result)?;engine.changed();
+                    let allowed=tokio::select! {
+                        v=tokio::time::timeout(Duration::from_secs(60),approval)=>matches!(v,Ok(Ok(true))),
+                        _=cancel.cancelled()=>{bail!("cancelled before approval");}
+                    };
+                    engine.approvals.lock().await.remove(&ident);
+                    if !allowed {bail!("denied: approval rejected or expired");}
+                }
+                engine.check_paths(&kind,&a).await?;
+                result["status"] = json!("running");
                 wire::atomic_json(&path, &result)?;
                 engine.changed();
                 if cancel.is_cancelled() {
@@ -444,7 +682,9 @@ impl Engine {
                 }
                 Err(e) => {
                     let text = e.to_string();
-                    result["status"] = json!(if kind == "mcp.call"
+                    result["status"] = json!(if text.starts_with("denied:") {
+                        "denied"
+                    } else if kind == "mcp.call"
                         && !text.starts_with("stale_session")
                         && !text.starts_with("desktop_disabled")
                         && !text.starts_with("cancelled before")
@@ -473,6 +713,7 @@ impl Engine {
                     "exit_code":result.pointer("/result/exit_code")
                 }),
             );
+            engine.approvals.lock().await.remove(&ident);
             engine.tasks.lock().await.remove(&ident);
             engine.changed();
         });
@@ -522,6 +763,7 @@ impl Engine {
         method: &str,
         cancel: &CancellationToken,
     ) -> Result<Value> {
+        let stop_all = self.backend_stop.lock().await.clone();
         let name = string(a, "server")?;
         let slot = self
             .backends
@@ -533,7 +775,7 @@ impl Engine {
                 .unwrap_or(if method == "tools/list" { 12 } else { 300 }),
         );
         // Waiting for the per-backend lock is cancellable, but never drops somebody else's client.
-        let mut guard = tokio::select! {v=tokio::time::timeout(timeout,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch")};
+        let mut guard = tokio::select! {v=tokio::time::timeout(timeout,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
         if let Some(expected) = a["session"].as_str() {
             if guard.as_ref().is_none_or(|c| c.generation != expected) {
                 bail!("stale_session: rediscover tools and observe the target again");
@@ -541,8 +783,11 @@ impl Engine {
         } else if method == "tools/call" {
             bail!("stale_session: mcp.call requires session from mcp.tools");
         }
-        if cancel.is_cancelled() {
+        if cancel.is_cancelled() || stop_all.is_cancelled() {
             bail!("cancelled before backend dispatch");
+        }
+        if method == "tools/call" && self.safety.lock().await.yield_until > now() {
+            bail!("desktop_disabled: local input yield active");
         }
         if method == "tools/call" && !self.policy.lock().await.desktop_enabled {
             bail!("desktop_disabled before backend dispatch");
@@ -567,7 +812,7 @@ impl Engine {
                 json!({"server":name,"session":c.generation,"result":result}),
             )
         };
-        let r = tokio::select! {v=tokio::time::timeout(timeout,operation)=>v.unwrap_or_else(|_|Err(anyhow::anyhow!("timed_out; backend session invalidated; effect may be unknown"))),_=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown"))};
+        let r = tokio::select! {v=tokio::time::timeout(timeout,operation)=>v.unwrap_or_else(|_|Err(anyhow::anyhow!("timed_out; backend session invalidated; effect may be unknown"))),_=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown")),_=stop_all.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown"))};
         if r.is_err() {
             if let Some(c) = guard.as_mut() {
                 c.stop().await;

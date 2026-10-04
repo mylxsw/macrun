@@ -15,8 +15,24 @@ export type Settings = {
   cert: string;
   token_file: string;
   backend_config: string;
+  keychain_account?: string;
+  certificate_fingerprint?: string;
 };
 export type Snapshot = {
+  today_summary: Record<string, number>;
+  safety: {
+    restrict_paths: boolean;
+    roots: string[];
+    approval: string;
+    retention_days: number;
+    yield_until: number;
+  };
+  workspaces: {
+    root: string;
+    time: number;
+    status: string;
+    error?: { message: string };
+  }[];
   policy: { paused: boolean; desktop_enabled: boolean };
   tasks: Task[];
   total_tasks: number;
@@ -26,6 +42,7 @@ export type Snapshot = {
     state: string;
     session?: string;
     command: string;
+    tool_count?: number;
   }[];
   version: string;
   protocol: number;
@@ -38,6 +55,13 @@ export type Snapshot = {
   };
 };
 export type AppState = {
+  preferences: {
+    show_overlay: boolean;
+    yield_input: boolean;
+    notifications: boolean;
+    keep_awake: boolean;
+    auto_connect: boolean;
+  };
   worker_running: boolean;
   snapshot: Snapshot | null;
   settings: Settings;

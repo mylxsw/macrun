@@ -151,7 +151,7 @@ pub fn content(v: &Value) -> Value {
     if let Some(Value::Array(c)) = embedded {
         items.extend(c);
     }
-    json!({"content":items,"isError":matches!(v["status"].as_str(),Some("failed"|"unknown"|"cancelled"|"timed_out"))})
+    json!({"content":items,"isError":matches!(v["status"].as_str(),Some("failed"|"unknown"|"cancelled"|"timed_out"|"denied"))})
 }
 pub async fn mcp(socket: PathBuf, workspace: PathBuf) -> Result<()> {
     let mut input = BufReader::new(tokio::io::stdin()).lines();

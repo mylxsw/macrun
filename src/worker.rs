@@ -37,6 +37,7 @@ pub async fn worker_managed(
         WorkerConfig::default()
     };
     let engine = Engine::open(opts.data.clone(), config)?;
+    engine.prune_history().await?;
     let sync_lock = Arc::new(Mutex::new(()));
     let endpoint = wire::client(&opts.cert)?;
     let token = if let Some(token) = injected_token {
@@ -72,15 +73,30 @@ pub async fn worker_managed(
             r
         })
     });
+    let cleanup_engine = engine.clone();
+    let cleanup_stop = shutdown.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _=cleanup_stop.cancelled()=>break,
+                _=tokio::time::sleep(Duration::from_secs(3600))=>{let _=cleanup_engine.prune_history().await;}
+            }
+        }
+    });
     let instance = id();
     let mut retry = 1;
     loop {
         let attempt = async {
+            connection.send_modify(|s|{s.state="connecting".into();s.checks=json!({"transport":false,"certificate":false,"authentication":false,"protocol":false});});
             let conn = tokio::time::timeout(
                 Duration::from_secs(5),
                 endpoint.connect(opts.server, "macrun")?,
             )
             .await??;
+            connection.send_modify(|s| {
+                s.checks["transport"] = json!(true);
+                s.checks["certificate"] = json!(true);
+            });
             session(
                 conn,
                 &opts,
@@ -126,7 +142,13 @@ async fn session(
     )
     .await?;
     match wire::recv::<_, Control>(&mut input).await? {
-        Control::Welcome { protocol } if protocol == PROTOCOL => {}
+        Control::Welcome { protocol } if protocol == PROTOCOL => {
+            connection.send_modify(|s| {
+                s.checks["authentication"] = json!(true);
+                s.checks["protocol"] = json!(true);
+            });
+        }
+        Control::Reject { error } => anyhow::bail!("{}", error),
         other => anyhow::bail!("registration refused: {other:?}"),
     }
     crate::logging::event(

@@ -66,6 +66,14 @@ pub struct Task {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
+    Pair {
+        protocol: u32,
+        code: String,
+    },
+    Paired {
+        protocol: u32,
+        token: String,
+    },
     Hello {
         protocol: u32,
         token: String,

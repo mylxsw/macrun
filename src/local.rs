@@ -22,6 +22,7 @@ pub struct ConnectionState {
     pub since: u64,
     pub rtt_ms: Option<u64>,
     pub error: Option<String>,
+    pub checks: Value,
 }
 impl ConnectionState {
     pub fn initial(server: String) -> Self {
@@ -31,6 +32,7 @@ impl ConnectionState {
             since: now(),
             rtt_ms: None,
             error: None,
+            checks: json!({"transport":false,"certificate":false,"authentication":false,"protocol":false}),
         }
     }
 }
@@ -124,6 +126,31 @@ async fn handle(
     }
     let r: Result<Value> = async {
         match req["action"].as_str().unwrap_or("") {
+            "self_test" => engine.self_test().await,
+            "prune" => engine.prune_history().await,
+            "observe" => {
+                let mut args = a.clone();
+                args["local_observation"] = json!(true);
+                engine.handle("mcp.call", args).await
+            }
+            "safety" => engine.set_safety(serde_json::from_value(a.clone())?).await,
+            "approve" => {
+                engine
+                    .approve(
+                        crate::files::string(a, "task_id")?,
+                        a["allow"]
+                            .as_bool()
+                            .ok_or_else(|| anyhow::anyhow!("allow required"))?,
+                    )
+                    .await
+            }
+            "yield" => engine.yield_desktop().await,
+            "restart_backend" => {
+                engine
+                    .restart_backend(crate::files::string(a, "server")?)
+                    .await
+            }
+            "task_detail" => engine.handle("task.get", a.clone()).await,
             "snapshot" => snapshot(&engine, &connection).await,
             "pause" => {
                 engine

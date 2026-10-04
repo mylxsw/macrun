@@ -51,6 +51,8 @@ Macrun 提供了完成这件事所需的工具：
 
 架构图展示的是常见的 Linux → Mac 场景，程序也支持 Linux worker。所有运行模式使用同一个 `macrun` 可执行文件。
 
+macOS 桌面端正在进行完整验收，构建、邀请配对、安全设置及验证边界见 [桌面说明](desktop/README.md) 和 [验收清单](docs/desktop/completion-checklist.md)。
+
 ## 开始使用
 
 最容易理解的起点是：**先连接两台机器，在 Mac 上成功执行一条命令**，再接入 Agent 和可选的桌面工具。

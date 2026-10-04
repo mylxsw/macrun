@@ -13,3 +13,25 @@ jobs:
           components: rustfmt, clippy
       - run: make check
       - run: make smoke PROFILE=debug
+  desktop:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --include=dev
+        working-directory: desktop
+      - run: npm test && npm run build && npm run prepare:worker
+        working-directory: desktop
+      - run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
+      - run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+      - run: python3 scripts/desktop-smoke.py
+      - run: npm run desktop:build -- --debug
+        working-directory: desktop

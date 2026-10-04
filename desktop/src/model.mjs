@@ -1,4 +1,6 @@
 export const statuses = {
+  awaiting_approval: "待确认",
+  denied: "已拒绝",
   accepted: "已接收",
   running: "运行中",
   succeeded: "成功",
@@ -7,7 +9,8 @@ export const statuses = {
   timed_out: "超时",
   unknown: "未知",
 };
-export const active = (t) => t.status === "accepted" || t.status === "running";
+export const active = (t) =>
+  ["accepted", "running", "awaiting_approval"].includes(t.status);
 export const title = (t) =>
   t.arguments?.command ||
   (t.kind === "sync"

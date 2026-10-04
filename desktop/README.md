@@ -1,52 +1,69 @@
-# Macrun Desktop（M0）
+# Macrun Desktop
 
-按照 `docs/desktop/` 的 v2 设计开发。Tauri 2 + React + TypeScript，托管现有 Rust worker。当前支持 macOS；Windows 尚需替换 Unix IPC、进程管理和系统集成。
+Tauri 2 + React + TypeScript，按 `docs/desktop/` v2 设计开发，托管现有 Rust worker。当前实现面向 macOS，Windows 仍是独立的平台适配任务。
 
-## 开发
+当前状态：功能实现和自动化联调已进入完整验收；原生 UI、系统权限与钥匙串流程尚待获准使用电脑操作工具后验收。不要把构建成功视为正式发布完成。
 
-需要 Node.js 22、npm、Rust 和 Xcode Command Line Tools。Rust 可使用项目 `scripts/deps.sh` 安装。
+## 构建与开发
+
+需要 Node.js 22、npm、Rust、Xcode Command Line Tools。
 
 ```sh
 cd desktop
 npm ci --include=dev
 npm run desktop:dev
-```
-
-在“设置与安全”填写已有服务器地址、证书文件、令牌文件和可选 worker TOML 配置；保存后启动连接。配置只保存文件路径。一次性邀请配对和钥匙串尚未接入，不要把真实配置或凭据提交到仓库。
-
-应用使用独立的应用数据目录。检测到旧 `dev.macrun.worker` LaunchAgent 时拒绝启动新 worker，不会停止或接管旧服务。开发版可用 `MACRUN_DESKTOP_DATA` 指定隔离数据目录。
-
-```sh
+# 开发安装包
 npm run desktop:build -- --debug
-# 产物：src-tauri/target/debug/bundle/macos/Macrun Desktop.app
-# 正式优化构建（仍需另外完成签名、公证和发布验收）：
+# 优化安装包；签名、公证仍需单独配置
 npm run desktop:build
 ```
 
-构建脚本会将对应 profile 的 worker 一起打包。关闭窗口隐藏到菜单栏；退出应用会请求停止 worker。应用崩溃后 worker 通过父进程管道关闭触发清理。此机制不承诺睡眠、注销或系统重启期间继续执行任务。
+应用与对应 profile 的 worker 一起打包。开发包位于 `src-tauri/target/debug/bundle/macos/Macrun Desktop.app`。开发隔离可设置 `MACRUN_DESKTOP_DATA`，此变量仅在 debug 构建使用。
+
+## 连接
+
+在服务器生成十分钟一次性邀请：
+
+```sh
+macrun invite --data /path/to/server-state --server server.example:7443
+```
+
+将 `macrun://pair/…` 粘贴到桌面端。邀请含公开证书、BLAKE3 指纹与一次性码，不含长期令牌。通过固定证书建立 QUIC 后兑换独立设备凭据；服务器只存设备凭据哈希，桌面凭据进入 macOS 钥匙串，经继承管道注入 worker，不放在进程参数或环境变量里。邀请已兑换或交换途中中断时，请生成新邀请。
+
+也可手动填写服务器、证书和令牌文件。保存时复制并固定证书，将凭据导入钥匙串；原文件不会被删除。后端配置在桌面控制页编辑，保存前断开连接，重新连接生效。
+
+新桌面数据目录默认关闭桌面控制，并对风险命令要求确认。原 CLI 默认行为不变。工作目录限制需要在设置中启用并配置允许目录。
+
+## 行为
+
+- 暂停只阻止新任务；全部停止同时暂停、关闭桌面控制、取消任务及后端调用。
+- 命令确认支持直接、风险、每条三档。等待确认 60 秒后拒绝。重启后未处理的确认直接拒绝，不执行。
+- 风险模式只放行少量简单只读命令，未知程序、解释器、脚本和 shell 操作符要求确认。它不是安全沙箱。
+- 目录检查覆盖 cwd、文件路径、同步目标、已有符号链接与 `..`。Shell 仍以本机用户权限运行，同用户进程可以访问本机资源。若需要强隔离，应使用独立执行用户或系统沙箱。
+- 任务列表显示最近 200 条及全部运行任务；今日计数覆盖全部今日记录。输出尾部为 8 KiB，可打开完整日志。
+- 保留策略为 7/30/90 天，启动及每小时清理过期任务，设置页也可手动清理。去重编号与指纹单独保留，过期任务不会因清理而再次执行。
+- 工作区索引独立保存。桌面结果保留后端图片与参数，支持按任务查看；unknown 不重放，可转至后端实拍核对。
+- 桌面操作时有屏幕提示、全部停止和防自动休眠；获准监听本机输入后让出 30 秒。程序合成事件不按本机输入处理。权限不可用时界面如实显示不可用。
+- 屏幕提示窗口设置为受保护内容，并在已识别截图／观察调用期间隐藏；是否被具体后端捕获仍需该后端实拍验收，不能仅凭窗口配置保证。
+- 配置可控制屏幕提示、输入让出、通知、防休眠及启动自动连接。失败、超时、未知结果可发不包含命令内容的通知。
+- 关闭主窗口隐藏到菜单栏。退出请求停止 worker，父进程异常退出由管道关闭触发清理。崩溃恢复最多连续三次，间隔至少五秒；稳定运行一分钟后恢复重试预算。不会重放未知任务。
+- 迁移前检查旧任务、备份 plist，停止并停用旧 LaunchAgent，导入连接凭据。旧任务目录保留；失败时尝试恢复旧配置和服务。不要用生产迁移代替测试。
+- 诊断导出为允许字段组成的 JSON，不包含命令、输出、截图、路径、服务器地址或凭据。
 
 ## 验证
 
 ```sh
+# 仓库根目录
+make check
+make smoke PROFILE=debug
+python3 scripts/desktop-smoke.py
+make cross-smoke PROFILE=debug
+# 桌面目录
 npm test
 npm run build
-cd ..
-make check
-./scripts/cargo-local.sh build --locked
-python3 scripts/desktop-smoke.py
+# 仓库根目录
 ./scripts/cargo-local.sh clippy --manifest-path desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+./scripts/cargo-local.sh test --manifest-path desktop/src-tauri/Cargo.toml --locked
 ```
 
-联调只使用隔离临时目录、本机临时端口及测试 MCP 后端，不连接生产服务。
-
-## 当前边界
-
-实现现场、任务、桌面控制、设置四页和菜单栏面板；数据来自 worker。浏览器单独运行仅显示未连接状态，不注入模拟任务。任务展示最近 200 条，输出展示末尾 8 KiB，可打开完整日志。
-
-暂停只阻止新任务，已运行任务继续；全部停止同时暂停接收、关闭桌面控制并取消任务。无法确认结果的桌面操作标记为 unknown，不自动重放。桌面开关不限制普通 shell 命令。
-
-私有 IPC 校验同用户且仅开放固定控制动作，但不是针对同用户 shell 的安全隔离。命令仍使用本机用户权限。环境变量值从任务参数中遮盖，命令输出或命令字符串里的秘密不会自动消除。
-
-未实现：邀请配对、钥匙串、实际系统权限自检、旧服务迁移、审批、目录限制、屏幕提示、操作回放、截图核对、自动恢复 worker。登录启动只启动应用，连接仍需手动启动。
-
-原生窗口、托盘、快捷键、登录启动和实际权限流程需要在允许电脑操作的环境中手动验收；编译成功不代表这些交互已验证。详见 [开发记录](../docs/desktop/development.md)。
+自动化使用隔离测试数据、本机端口或临时 Linux Docker 服务；MCP fixture 返回图片用于协议测试，不代表真实桌面截图已验收。具体状态见 [完整验收清单](../docs/desktop/completion-checklist.md)。

@@ -64,6 +64,17 @@ try:
     ipc('pause',paused=False)
     cli('sync');assert (mirror/'hello.txt').read_text()=='desktop sync'
     synced=[t for t in ipc('snapshot')['tasks'] if t['kind']=='sync' and t['status']=='succeeded'];assert synced and synced[0]['progress']['received']==synced[0]['progress']['total']
+    safety=dict(restrict_paths=True,roots=[str(source),str(mirror)],approval='all',retention_days=7,yield_until=0)
+    ipc('safety',**safety)
+    assert 'path_denied' in cli('call','file.read','--args',json.dumps({'path':'/etc/hosts'}),ok=False)
+    approved=remote('exec.start',command='echo approved',cwd=str(source))['task_id']
+    until(lambda:remote('task.get',task_id=approved)['status']=='awaiting_approval')
+    ipc('approve',task_id=approved,allow=True)
+    assert done(approved)['status']=='succeeded'
+    denied=remote('exec.start',command='touch forbidden',cwd=str(source))['task_id']
+    ipc('approve',task_id=denied,allow=False)
+    assert done(denied)['status']=='denied' and not (source/'forbidden').exists()
+    safety.update(restrict_paths=False,approval='direct');ipc('safety',**safety)
     session=remote('mcp.tools',server='fixture')['session']
     ipc('desktop',enabled=False)
     assert 'desktop_disabled' in cli('call','mcp.call','--args',json.dumps(dict(server='fixture',tool='observe',session=session)),ok=False)
@@ -83,10 +94,13 @@ try:
     assert not (source/'marker').exists()
     assert not control.exists()
     # Graceful shutdown is not a persistent pause; explicit emergency-stop policy is persistent.
-    wrk=spawn(args,True);until(lambda:cli('status')['connected']);assert not ipc('snapshot')['policy']['paused'];assert not ipc('snapshot')['policy']['desktop_enabled']
+    injected_args=args.copy();injected_args[injected_args.index('--token-file')+1]='/nonexistent-macrun-test-token'
+    wrk=spawn([*injected_args,'--token-stdin'],True)
+    token=(server/'token').read_text().strip().encode();wrk.stdin.write(struct.pack('!I',len(token))+token);wrk.stdin.flush()
+    until(lambda:cli('status')['connected']);assert not ipc('snapshot')['policy']['paused'];assert not ipc('snapshot')['policy']['desktop_enabled']
     assert remote('exec.start',**a)['duplicate']
     ipc('shutdown');wrk.wait(timeout=15)
-    print('PASS: real QUIC, private IPC and subscription, pause/dedup, sync progress, desktop gate, stop-all, parent EOF cleanup, restart policy')
+    print('PASS: real QUIC, private IPC and subscription, pause/dedup, sync progress, desktop gate, approval, path restrictions, stop-all, credential pipe, parent EOF cleanup, restart policy')
     print('Evidence:',root)
 finally:
     for p in reversed(children):

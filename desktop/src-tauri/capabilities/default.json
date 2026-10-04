@@ -1,6 +1,6 @@
 {
   "identifier": "desktop",
   "description": "Local Macrun windows only",
-  "windows": ["main", "tray"],
+  "windows": ["main", "tray", "overlay", "border-*"],
   "permissions": ["core:default"]
 }

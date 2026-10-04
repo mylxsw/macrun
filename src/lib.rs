@@ -14,3 +14,6 @@ pub mod frontend;
 pub mod logging;
 
 pub mod local;
+
+pub mod pairing;
+pub mod safety;

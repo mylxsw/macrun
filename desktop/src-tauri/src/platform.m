@@ -1,0 +1,41 @@
+#import <ApplicationServices/ApplicationServices.h>
+#import <IOKit/pwr_mgt/IOPMLib.h>
+#include <pthread.h>
+#include <stdatomic.h>
+static _Atomic unsigned long input_sequence=0;
+static _Atomic bool input_available=false;
+static CFMachPortRef input_tap=NULL;
+static CGEventRef on_input(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *context) {
+    (void)proxy; (void)context;
+    if(type==kCGEventTapDisabledByTimeout || type==kCGEventTapDisabledByUserInput) {
+        if(input_tap) CGEventTapEnable(input_tap,true);
+        return event;
+    }
+    // Ignore synthesized input from a process, including the desktop backend.
+    if(CGEventGetIntegerValueField(event,kCGEventSourceUnixProcessID)==0) atomic_fetch_add(&input_sequence,1);
+    return event;
+}
+static void *monitor(void *unused) {
+    (void)unused;
+    CGEventMask mask=CGEventMaskBit(kCGEventMouseMoved)|CGEventMaskBit(kCGEventLeftMouseDown)|CGEventMaskBit(kCGEventRightMouseDown)|CGEventMaskBit(kCGEventKeyDown)|CGEventMaskBit(kCGEventScrollWheel)|CGEventMaskBit(kCGEventLeftMouseDragged);
+    input_tap=CGEventTapCreate(kCGSessionEventTap,kCGHeadInsertEventTap,kCGEventTapOptionListenOnly,mask,on_input,NULL);
+    if(!input_tap) return NULL;
+    CFRunLoopSourceRef source=CFMachPortCreateRunLoopSource(kCFAllocatorDefault,input_tap,0);
+    CFRunLoopAddSource(CFRunLoopGetCurrent(),source,kCFRunLoopCommonModes);
+    atomic_store(&input_available,true);CGEventTapEnable(input_tap,true);CFRunLoopRun();return NULL;
+}
+void macrun_monitor_start(void){pthread_t thread;if(pthread_create(&thread,NULL,monitor,NULL)==0)pthread_detach(thread);}
+unsigned long macrun_input_sequence(void){return atomic_load(&input_sequence);}
+bool macrun_input_available(void){return atomic_load(&input_available);}
+static IOPMAssertionID sleep_assertion=0;
+bool macrun_keep_awake(bool enabled){
+    if(enabled && !sleep_assertion) return IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep,kIOPMAssertionLevelOn,CFSTR("Macrun active desktop operation"),&sleep_assertion)==kIOReturnSuccess;
+    if(!enabled && sleep_assertion){IOPMAssertionRelease(sleep_assertion);sleep_assertion=0;}
+    return true;
+}
+bool macrun_graphical_session(void){
+    CFDictionaryRef session=CGSessionCopyCurrentDictionary();if(!session)return false;
+    bool active=CFDictionaryGetValue(session,kCGSessionOnConsoleKey)==kCFBooleanTrue && CFDictionaryGetValue(session,kCGSessionLoginDoneKey)==kCFBooleanTrue;
+    CFRelease(session);return active;
+}
+bool macrun_awake_active(void){return sleep_assertion!=0;}
