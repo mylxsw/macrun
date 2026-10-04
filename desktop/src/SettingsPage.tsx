@@ -19,6 +19,7 @@ export function SettingsPage({
   setError,
   onPair,
   manualOpen = false,
+  actionError,
 }: {
   app: AppState | null;
   snapshot: Snapshot | null;
@@ -29,11 +30,16 @@ export function SettingsPage({
   setError: (s: string) => void;
   onPair: () => void;
   manualOpen?: boolean;
+  actionError?: string;
 }) {
   const [settings, setSettings] = useState(app?.settings || emptySettings),
     [dirty, setDirty] = useState(false),
     [manual, setManual] = useState(manualOpen),
-    [checks, setChecks] = useState<any>(null);
+    [checks, setChecks] = useState<any>(null),
+    [migrationOpen, setMigrationOpen] = useState(false);
+  const migrationTrigger = useRef<HTMLButtonElement>(null);
+  const connectionAction = useRef<HTMLButtonElement>(null);
+  const connectionHeading = useRef<HTMLHeadingElement>(null);
   const connection = useRef<HTMLElement>(null);
   useEffect(() => {
     if (app && !dirty) setSettings(app.settings);
@@ -96,7 +102,9 @@ export function SettingsPage({
         />
       </section>
       <section className="settings-section" id="conn" ref={connection}>
-        <h2>连接</h2>
+        <h2 ref={connectionHeading} tabIndex={-1}>
+          连接
+        </h2>
         <div className="card">
           <div className="feature-line">
             <span className="setting-key">服务器</span>
@@ -159,6 +167,7 @@ export function SettingsPage({
             </button>
             {app?.worker_running ? (
               <button
+                ref={connectionAction}
                 className="danger"
                 disabled={busy || !available || !!snapshot?.active_count}
                 onClick={() => act("stop_worker", {}, "已请求断开连接")}
@@ -167,6 +176,7 @@ export function SettingsPage({
               </button>
             ) : (
               <button
+                ref={connectionAction}
                 disabled={
                   busy || dirty || !app?.settings.server || app?.legacy_running
                 }
@@ -255,15 +265,12 @@ export function SettingsPage({
               Macrun Desktop 统一管理，原服务配置会备份，旧数据会保留。
             </span>
             <button
+              ref={migrationTrigger}
               className="primary"
               disabled={busy}
               onClick={() => {
-                if (
-                  window.confirm(
-                    "确认旧服务没有运行中的任务？迁移将备份并停止旧 LaunchAgent，旧数据会保留。",
-                  )
-                )
-                  act("migrate_legacy", {}, "迁移完成，可以启动桌面连接");
+                setError("");
+                setMigrationOpen(true);
               }}
             >
               迁移
@@ -423,6 +430,222 @@ export function SettingsPage({
           )}
         </div>
       </section>
+      {migrationOpen && (
+        <MigrationDialog
+          act={act}
+          actionError={actionError}
+          onClose={() => setMigrationOpen(false)}
+          returnFocus={() =>
+            [migrationTrigger.current, connectionAction.current].find(
+              (target) => target?.isConnected && !target.disabled,
+            ) || connectionHeading.current
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function MigrationDialog({
+  act,
+  actionError,
+  onClose,
+  returnFocus,
+}: {
+  act: Act;
+  actionError?: string;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
+}) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const pendingRef = useRef(false);
+  const closeRef = useRef(onClose);
+  const returnFocusRef = useRef(returnFocus);
+  closeRef.current = onClose;
+  returnFocusRef.current = returnFocus;
+  const [pending, setPending] = useState(false),
+    [failure, setFailure] = useState(""),
+    [result, setResult] = useState<any>(null),
+    [started, setStarted] = useState(false);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const element = dialog.current;
+    element?.querySelector<HTMLButtonElement>("button")?.focus();
+    const isTopDialog = () => {
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      return dialogs.item(dialogs.length - 1) === element;
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (!isTopDialog()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!pendingRef.current) closeRef.current();
+      }
+      if (event.key !== "Tab") return;
+      const controls = Array.from(
+        element?.querySelectorAll<HTMLElement>(
+          "button:not(:disabled), a[href], input:not(:disabled), [tabindex='0']",
+        ) || [],
+      );
+      const first = controls[0],
+        last = controls[controls.length - 1];
+      if (!first) {
+        event.preventDefault();
+        element?.focus();
+        return;
+      }
+      if (
+        event.shiftKey &&
+        (document.activeElement === first ||
+          document.activeElement === element ||
+          !element?.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last ||
+          document.activeElement === element ||
+          !element?.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKey, true);
+    return () => {
+      document.removeEventListener("keydown", handleKey, true);
+      const remainingDialogs = document.querySelectorAll('[role="dialog"]');
+      if (remainingDialogs.length && !isTopDialog()) return;
+      const target =
+        previous?.isConnected && !previous.matches(":disabled")
+          ? previous
+          : returnFocusRef.current();
+      target?.focus();
+    };
+  }, []);
+  const perform = async (operation: "migrate" | "start") => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setFailure("");
+    try {
+      const response = await act(
+        operation === "migrate" ? "migrate_legacy" : "start_worker",
+        {},
+        operation === "migrate"
+          ? "旧服务已迁移，可以启动桌面连接"
+          : "已请求启动执行器",
+      );
+      if (response === undefined || response === false) {
+        setFailure(
+          operation === "migrate"
+            ? "迁移未完成，请检查错误信息后重试。"
+            : "迁移已完成，但执行器未能启动。请检查错误信息后重试。",
+        );
+      } else if (operation === "migrate") setResult(response);
+      else setStarted(true);
+    } catch (error) {
+      setFailure(String(error));
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs.item(dialogs.length - 1) === dialog.current)
+        dialog.current?.focus();
+    }
+  };
+  return (
+    <div
+      className="scrim migration-scrim"
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !pendingRef.current)
+          onClose();
+      }}
+    >
+      <div
+        className="dialog migration-dialog"
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="migration-title"
+        aria-describedby="migration-description"
+        aria-busy={pending}
+        tabIndex={-1}
+      >
+        <h2 id="migration-title">{result ? "迁移完成" : "迁移旧执行器"}</h2>
+        <div id="migration-description">
+          {result ? (
+            <>
+              <p>
+                旧服务配置已备份并停用，连接配置已交给 Macrun
+                Desktop。任务记录和同步状态已复制到桌面版，原目录的旧副本仍保留。
+              </p>
+              {typeof result.backup === "string" && (
+                <p className="muted wrap">
+                  备份位置：<span className="mono">{result.backup}</span>
+                </p>
+              )}
+              <p>
+                {started
+                  ? "已请求启动执行器，可在连接区域查看连接状态。"
+                  : "下一步启动执行器，连接已保存的服务器。"}
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                迁移会备份原 LaunchAgent
+                配置、停止并停用旧服务，再把连接配置交给 Macrun Desktop。
+              </p>
+              <p>
+                任务记录和同步状态会复制到桌面版，原目录的旧副本仍保留。请确认旧服务没有正在运行的任务；执行器也会在迁移前检查。
+              </p>
+            </>
+          )}
+        </div>
+        {failure && (
+          <div className="migration-error" role="alert">
+            <b>{failure}</b>
+            {actionError && actionError !== failure && <p>{actionError}</p>}
+          </div>
+        )}
+        {pending && (
+          <p className="muted" role="status">
+            {result
+              ? "正在启动执行器，请稍候…"
+              : "正在备份和迁移旧服务，请稍候…"}
+          </p>
+        )}
+        <div className="actions">
+          {result ? (
+            <>
+              {!started && (
+                <button disabled={pending} onClick={() => perform("start")}>
+                  {pending ? "正在启动…" : "启动并连接"}
+                </button>
+              )}
+              <button className="primary" disabled={pending} onClick={onClose}>
+                完成
+              </button>
+            </>
+          ) : (
+            <>
+              <button disabled={pending} onClick={onClose}>
+                取消
+              </button>
+              <button
+                className="primary"
+                disabled={pending}
+                onClick={() => perform("migrate")}
+              >
+                {pending ? "正在迁移…" : failure ? "重试迁移" : "确认迁移"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

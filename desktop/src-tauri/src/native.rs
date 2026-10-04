@@ -138,115 +138,211 @@ fn legacy_argument(value: &Value, key: &str) -> Result<String> {
     anyhow::ensure!(found.len() == 1, "缺少或重复参数 {key}");
     Ok(found.remove(0))
 }
-#[tauri::command]
-pub fn migrate_legacy(rt: tauri::State<Runtime>) -> std::result::Result<Value, String> {
-    let result: Result<Value> = (|| {
-        anyhow::ensure!(
-            !rt.child.lock().unwrap().as_mut().is_some_and(|c| c
-                .try_wait()
-                .ok()
-                .flatten()
-                .is_none()),
-            "请先停止桌面执行器"
-        );
-        let home = std::env::var("HOME")?;
-        let plist = PathBuf::from(home).join("Library/LaunchAgents/dev.macrun.worker.plist");
-        anyhow::ensure!(plist.is_file(), "未找到旧 LaunchAgent 配置");
-        let out = Command::new("plutil")
-            .args(["-convert", "json", "-o", "-"])
-            .arg(&plist)
-            .output()?;
-        anyhow::ensure!(out.status.success(), "无法解析 LaunchAgent");
-        let value: Value = serde_json::from_slice(&out.stdout)?;
-        anyhow::ensure!(
-            value["Label"] == "dev.macrun.worker",
-            "LaunchAgent 标签不匹配"
-        );
-        let arg = |key: &str| legacy_argument(&value, key);
-        let server = arg("--server")?;
-        let cert = arg("--cert")?;
-        let token_path = arg("--token-file")?;
-        let backend_config = arg("--config").unwrap_or_default();
-        if !backend_config.is_empty() {
-            toml_config(&backend_config)?;
+
+fn legacy_worker_path(value: &Value) -> Result<String> {
+    match &value["EnvironmentVariables"]["PATH"] {
+        Value::Null => Ok(String::new()),
+        Value::String(path) => {
+            anyhow::ensure!(!path.contains('\0'), "旧 PATH 配置无效");
+            Ok(path.clone())
         }
-        if let Ok(old_data) = arg("--data")
-            && let Ok(entries) = std::fs::read_dir(PathBuf::from(old_data).join("tasks"))
+        _ => anyhow::bail!("旧 PATH 配置必须为字符串"),
+    }
+}
+#[tauri::command]
+pub async fn migrate_legacy(app: tauri::AppHandle) -> std::result::Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
         {
-            for entry in entries {
-                if let Ok(bytes) = std::fs::read(entry?.path().join("result.json")) {
-                    let task: Value = serde_json::from_slice(&bytes)?;
-                    anyhow::ensure!(
-                        task.get("ended_at").is_some(),
-                        "旧执行器有未结束任务，请先停止任务再迁移"
-                    );
-                }
+            // Share the short lifecycle lock with worker start and final exit.
+            let mut child = rt.child.lock().unwrap();
+            if rt.exiting.load(Ordering::SeqCst) {
+                return Err("应用正在退出，未开始迁移".into());
+            }
+            if child
+                .as_mut()
+                .is_some_and(|c| c.try_wait().ok().flatten().is_none())
+            {
+                return Err("请先停止桌面执行器".into());
+            }
+            if rt
+                .migrating
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                return Err("迁移正在进行，请等待完成".into());
             }
         }
-        let token = std::fs::read_to_string(token_path)?;
-        anyhow::ensure!(!token.trim().is_empty(), "旧令牌为空");
-        let account = uuid::Uuid::new_v4().to_string();
-        security_framework::passwords::set_generic_password(
-            "dev.macrun.desktop",
-            &account,
-            token.trim().as_bytes(),
-        )?;
-        let copied_cert = rt.data.join(format!("migrated-{account}.der"));
-        std::fs::copy(&cert, &copied_cert)?;
-        let backup = rt
-            .data
-            .join(format!("launchagent-{}.plist.bak", macrun::model::now()));
-        std::fs::copy(&plist, &backup)?;
-        let uid = Command::new("id").arg("-u").output()?;
-        let uid = String::from_utf8_lossy(&uid.stdout).trim().to_owned();
-        let disabled = plist.with_extension("plist.macrun-disabled");
-        anyhow::ensure!(!disabled.exists(), "存在旧迁移文件，请先检查它再迁移");
-        let settings = Settings {
-            server,
-            cert: copied_cert.to_string_lossy().into(),
-            token_file: "/dev/null".into(),
-            backend_config,
-            keychain_account: account,
-            certificate_fingerprint: blake3::hash(&std::fs::read(&copied_cert)?)
-                .to_hex()
-                .to_string(),
-        };
-        let candidate = rt.data.join("connection-migration.json");
-        wire::atomic_json(&candidate, &settings)?;
-        let was_running = legacy_running();
+        struct Guard<'a>(&'a AtomicBool);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = Guard(&rt.migrating);
+        migrate_legacy_inner(&rt).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "迁移任务异常中断，请检查保留的备份".to_owned())?
+}
+
+fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
+    use crate::migration::MigrationFiles;
+    anyhow::ensure!(
+        !rt.child
+            .lock()
+            .unwrap()
+            .as_mut()
+            .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
+        "请先停止桌面执行器"
+    );
+    let home = std::env::var("HOME")?;
+    let plist = PathBuf::from(home).join("Library/LaunchAgents/dev.macrun.worker.plist");
+    anyhow::ensure!(plist.is_file(), "未找到旧 LaunchAgent 配置");
+    let disabled = plist.with_extension("plist.macrun-disabled");
+    anyhow::ensure!(!disabled.exists(), "存在旧迁移文件，请先检查它再迁移");
+    let out = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-"])
+        .arg(&plist)
+        .output()?;
+    anyhow::ensure!(out.status.success(), "无法解析 LaunchAgent");
+    let value: Value = serde_json::from_slice(&out.stdout)?;
+    anyhow::ensure!(
+        value["Label"] == "dev.macrun.worker",
+        "LaunchAgent 标签不匹配"
+    );
+    anyhow::ensure!(
+        value["ProgramArguments"][1] == "worker",
+        "暂不支持经 shell 包装的旧执行器，请先检查启动配置"
+    );
+    let arg = |key: &str| legacy_argument(&value, key);
+    let server = arg("--server")?;
+    let cert = PathBuf::from(arg("--cert")?);
+    let token_path = PathBuf::from(arg("--token-file")?);
+    let old_data = PathBuf::from(arg("--data")?);
+    let worker_path = legacy_worker_path(&value)?;
+    anyhow::ensure!(
+        cert.is_absolute() && token_path.is_absolute() && old_data.is_absolute(),
+        "旧配置的证书、令牌和数据目录必须为绝对路径"
+    );
+    let has_config = value["ProgramArguments"].as_array().is_some_and(|args| {
+        args.iter()
+            .any(|v| v == "--config" || v.as_str().is_some_and(|s| s.starts_with("--config=")))
+    });
+    let backend_text = if has_config {
+        let path = PathBuf::from(arg("--config")?);
+        anyhow::ensure!(path.is_absolute(), "旧后端配置必须为绝对路径");
+        let text = std::fs::read_to_string(path).context("无法读取旧后端配置")?;
+        let _: macrun::config::WorkerConfig = toml::from_str(&text)
+            .map_err(|_| anyhow::anyhow!("旧后端配置格式不兼容，请检查 worker.toml"))?;
+        Some(text)
+    } else {
+        None
+    };
+    let cert_bytes = std::fs::read(&cert).context("无法读取旧服务器证书")?;
+    let token = std::fs::read_to_string(token_path).context("无法读取旧令牌文件")?;
+    anyhow::ensure!(!token.trim().is_empty(), "旧令牌为空");
+    let mut files = MigrationFiles::prepare(&rt.data, &old_data)?;
+    let backup = files.stage.join("launchagent.plist.bak");
+    wire::private_write(&backup, &std::fs::read(&plist)?)?;
+    let copied_cert = files.stage.join("certificate.der");
+    wire::private_write(&copied_cert, &cert_bytes)?;
+    let backend_config = if let Some(text) = backend_text {
+        let path = files.stage.join("worker.toml");
+        wire::private_write(&path, text.as_bytes())?;
+        path.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    };
+    let account = uuid::Uuid::new_v4().to_string();
+    security_framework::passwords::set_generic_password(
+        "dev.macrun.desktop",
+        &account,
+        token.trim().as_bytes(),
+    )
+    .map_err(|_| anyhow::anyhow!("无法将旧连接凭据保存到钥匙串；旧服务未停止"))?;
+    let settings = Settings {
+        server,
+        cert: copied_cert.to_string_lossy().into(),
+        token_file: "/dev/null".into(),
+        backend_config,
+        keychain_account: account,
+        certificate_fingerprint: blake3::hash(&cert_bytes).to_hex().to_string(),
+        worker_path,
+    };
+    wire::atomic_json(&files.stage.join("connection.json"), &settings)?;
+    let uid = Command::new("id").arg("-u").output()?;
+    anyhow::ensure!(uid.status.success(), "无法确定当前用户，旧服务未停止");
+    let domain = format!("gui/{}", String::from_utf8_lossy(&uid.stdout).trim());
+    let was_running = legacy_running();
+    let mut source_lock = None;
+    let result: Result<()> = (|| {
         if was_running {
             anyhow::ensure!(
                 Command::new("launchctl")
                     .arg("bootout")
-                    .arg(format!("gui/{uid}"))
+                    .arg(&domain)
                     .arg(&plist)
                     .status()?
                     .success(),
-                "无法停止旧服务；备份已保留"
+                "无法停止旧服务"
             );
+            anyhow::ensure!(!legacy_running(), "旧服务尚未卸载");
         }
-        // Preserve the original autoload entry for rollback.
-        if let Err(e) = std::fs::rename(&plist, &disabled)
-            .and_then(|_| std::fs::rename(&candidate, rt.data.join("connection.json")))
-        {
-            if disabled.exists() {
-                let _ = std::fs::rename(&disabled, &plist);
+        // Holding the original worker lock prevents another instance from changing
+        // task results between the second task check and the completed copy.
+        for attempt in 0..50 {
+            match wire::lock(&old_data) {
+                Ok(lock) => {
+                    source_lock = Some(lock);
+                    break;
+                }
+                Err(error) if attempt == 49 => return Err(error.context("旧执行器仍占用数据目录")),
+                Err(_) => std::thread::sleep(Duration::from_millis(100)),
             }
-            if was_running {
-                let _ = Command::new("launchctl")
-                    .arg("bootstrap")
-                    .arg(format!("gui/{uid}"))
-                    .arg(&plist)
-                    .status();
-            }
-            return Err(e.into());
         }
-        *rt.settings.lock().unwrap() = settings;
-        Ok(
-            json!({"backup":backup,"disabled":disabled,"note":"旧任务记录仍保留在原数据目录；确认无任务运行后迁移。"}),
-        )
+        files.copy_state(&old_data)?;
+        std::fs::rename(&plist, &disabled)?;
+        files.install()?;
+        Ok(())
     })();
-    result.map_err(|e| e.to_string())
+    if let Err(error) = result {
+        let mut failures = Vec::new();
+        if let Err(e) = files.rollback() {
+            failures.push(format!("恢复桌面数据失败：{e}"));
+        }
+        if disabled.exists() {
+            if plist.exists() {
+                failures.push("原服务入口已变化，未覆盖".into());
+            } else if let Err(e) = std::fs::rename(&disabled, &plist) {
+                failures.push(format!("恢复旧服务入口失败：{e}"));
+            }
+        }
+        drop(source_lock.take());
+        if was_running && !legacy_running() {
+            match Command::new("launchctl")
+                .arg("bootstrap")
+                .arg(&domain)
+                .arg(&plist)
+                .status()
+            {
+                Ok(status) if status.success() && legacy_running() => {}
+                _ => failures.push("旧服务恢复启动失败，请使用保留的备份恢复".into()),
+            }
+        }
+        if failures.is_empty() {
+            anyhow::bail!("迁移未完成，原配置已保留，旧服务已恢复原状态：{error}");
+        }
+        anyhow::bail!(
+            "迁移失败：{error}；{}。备份：{}",
+            failures.join("；"),
+            backup.display()
+        );
+    }
+    *rt.settings.lock().unwrap() = settings;
+    Ok(
+        json!({"backup":backup,"disabled":disabled,"note":"连接、任务去重与同步状态已复制到新版；旧数据目录保持原样。"}),
+    )
 }
 
 unsafe extern "C" {
@@ -281,6 +377,33 @@ pub fn notify_task(status: String, app: tauri::AppHandle) -> std::result::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn migration_preserves_only_worker_path_without_exposing_it_to_ui() {
+        let plist = json!({"EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/bin", "UNRELATED_SECRET": "test-only"}});
+        let settings = Settings {
+            worker_path: legacy_worker_path(&plist).unwrap(),
+            ..Default::default()
+        };
+        let stored = serde_json::to_value(&settings).unwrap();
+        assert_eq!(stored["worker_path"], "/opt/homebrew/bin:/usr/bin");
+        assert!(settings.public_value().get("worker_path").is_none());
+        let mut old = stored;
+        old.as_object_mut().unwrap().remove("worker_path");
+        assert!(
+            serde_json::from_value::<Settings>(old)
+                .unwrap()
+                .worker_path
+                .is_empty()
+        );
+        let mut command = Command::new("unused-test-worker");
+        settings.apply_worker_environment(&mut command);
+        let env: Vec<_> = command.get_envs().collect();
+        assert_eq!(env.len(), 1);
+        assert_eq!(env[0].0, "PATH");
+        assert_eq!(env[0].1.unwrap(), "/opt/homebrew/bin:/usr/bin");
+        assert!(legacy_worker_path(&json!({})).unwrap().is_empty());
+        assert!(legacy_worker_path(&json!({"EnvironmentVariables":{"PATH":true}})).is_err());
+    }
     #[test]
     fn migration_arguments_support_both_forms_and_reject_ambiguity() {
         let v = json!({"ProgramArguments":["macrun","worker","--server","127.0.0.1:7443","--cert=/tmp/cert.der"]});

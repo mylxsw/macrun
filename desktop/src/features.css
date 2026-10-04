@@ -689,4 +689,35 @@
     padding: 28px 24px;
   }
 }
-.pairing-close { width: 28px; height: 28px; min-height: 28px; padding: 0; border-color: transparent; background: transparent; }
+.pairing-close {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.migration-dialog {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.migration-dialog:focus {
+  outline: none;
+}
+.migration-dialog h2 {
+  margin: 0 0 12px;
+}
+.migration-error {
+  padding: 10px 12px;
+  margin-top: 12px;
+  border: 1px solid #f0cfc7;
+  border-radius: 8px;
+  background: #fcedea;
+  color: #a12b17;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.migration-error p {
+  margin: 5px 0 0;
+}

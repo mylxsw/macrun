@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod migration;
 mod native;
 mod supervisor;
 use anyhow::{Context, Result};
@@ -18,7 +19,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Settings {
     server: String,
     cert: String,
@@ -28,6 +29,21 @@ struct Settings {
     keychain_account: String,
     #[serde(default)]
     certificate_fingerprint: String,
+    #[serde(default)]
+    worker_path: String,
+}
+impl Settings {
+    fn public_value(&self) -> Value {
+        let mut value = serde_json::to_value(self).expect("settings serialize");
+        value.as_object_mut().unwrap().remove("worker_path");
+        value
+    }
+
+    fn apply_worker_environment(&self, command: &mut Command) {
+        if !self.worker_path.is_empty() {
+            command.env("PATH", &self.worker_path);
+        }
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -68,6 +84,7 @@ struct Runtime {
     preferences: Mutex<Preferences>,
     exiting: AtomicBool,
     desired_running: AtomicBool,
+    migrating: AtomicBool,
     window_layout: Mutex<WindowLayout>,
 }
 #[derive(Default)]
@@ -302,13 +319,15 @@ fn app_state(app: tauri::AppHandle, rt: tauri::State<Runtime>) -> Value {
     let running = child
         .as_mut()
         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"snapshot":*rt.snapshot.lock().unwrap(),"settings":*rt.settings.lock().unwrap(),"data_dir":rt.data,"legacy_running":legacy_running(),"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
+    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_running(),"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
 }
 #[tauri::command]
 fn save_settings(
     mut settings: Settings,
     rt: tauri::State<Runtime>,
 ) -> std::result::Result<(), String> {
+    // This native migration setting is not editable through the webview.
+    settings.worker_path = rt.settings.lock().unwrap().worker_path.clone();
     let result: Result<()> = (|| {
         anyhow::ensure!(!settings.server.trim().is_empty(), "请填写服务器地址");
         anyhow::ensure!(
@@ -374,6 +393,20 @@ async fn start_worker(
     }
     let result: Result<()> = (|| {
         let mut slot = rt.child.lock().unwrap();
+        anyhow::ensure!(
+            !rt.migrating.load(Ordering::SeqCst),
+            "正在迁移旧执行器，请稍后连接"
+        );
+        anyhow::ensure!(
+            !rt.exiting.load(Ordering::SeqCst),
+            "应用正在退出，未启动执行器"
+        );
+        // DNS lookup can outlive a migration or a connection edit. Never spawn
+        // with the obsolete credentials captured before that await.
+        anyhow::ensure!(
+            *rt.settings.lock().unwrap() == cfg,
+            "连接配置已变化，请重新连接"
+        );
         if let Some(c) = slot.as_mut()
             && c.try_wait()?.is_none()
         {
@@ -415,6 +448,7 @@ async fn start_worker(
             .append(true)
             .open(rt.data.join("worker.log"))?;
         let mut command = Command::new(binary);
+        cfg.apply_worker_environment(&mut command);
         command
             .args([
                 "worker",
@@ -531,6 +565,9 @@ async fn exit_app(
     app: tauri::AppHandle,
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
+    if rt.migrating.load(Ordering::SeqCst) {
+        return Err("正在迁移旧执行器，请等待完成后退出".into());
+    }
     rt.desired_running.store(false, Ordering::SeqCst);
     let running = rt
         .child
@@ -554,6 +591,10 @@ async fn exit_app(
             }
             return Err(format!("已请求执行器停止，请稍后再退出：{e}"));
         }
+    }
+    let _lifecycle = rt.child.lock().unwrap();
+    if rt.migrating.load(Ordering::SeqCst) {
+        return Err("正在迁移旧执行器，请等待完成后退出".into());
     }
     rt.exiting.store(true, Ordering::SeqCst);
     app.exit(0);
@@ -600,6 +641,11 @@ fn request_quit(app: tauri::AppHandle) {
     request_exit(&app);
 }
 fn request_exit(app: &tauri::AppHandle) {
+    if app.state::<Runtime>().migrating.load(Ordering::SeqCst) {
+        show(app, None);
+        let _ = app.emit("control-error", "正在迁移旧执行器，请等待完成后退出");
+        return;
+    }
     show(app, None);
     let _ = app.emit("exit-requested", ());
 }
@@ -687,6 +733,7 @@ fn main() {
                 preferences: Mutex::new(preferences),
                 exiting: AtomicBool::new(false),
                 desired_running: AtomicBool::new(false),
+                migrating: AtomicBool::new(false),
                 window_layout: Mutex::new(WindowLayout::default()),
             });
             let handle = app.handle().clone();

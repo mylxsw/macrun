@@ -69,9 +69,78 @@ function Status({ status }: { status: string }) {
     </span>
   );
 }
+
+const dialogControls =
+  "button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),a[href],summary,[tabindex='0']";
+const topDialog = () =>
+  Array.from(
+    document.querySelectorAll<HTMLElement>(
+      '[role="dialog"][aria-modal="true"]',
+    ),
+  ).at(-1);
+
+function useAppDialog(
+  open: boolean,
+  ref: React.RefObject<HTMLElement | null>,
+  returnFocus: React.RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!open || !dialog) return;
+    if (topDialog() === dialog)
+      dialog.querySelector<HTMLElement>(dialogControls)?.focus();
+    const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || topDialog() !== dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const nodes = Array.from(
+        dialog.querySelectorAll<HTMLElement>(dialogControls),
+      );
+      const first = nodes[0],
+        last = nodes[nodes.length - 1];
+      if (!first) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (
+        !dialog.contains(document.activeElement) ||
+        document.activeElement === dialog ||
+        (event.shiftKey && document.activeElement === first) ||
+        (!event.shiftKey && document.activeElement === last)
+      ) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("keydown", handler);
+      const top = topDialog(),
+        previous = returnFocus.current;
+      if (
+        previous?.isConnected &&
+        !previous.matches(":disabled") &&
+        (!top || top.contains(previous))
+      )
+        previous.focus();
+      else top?.querySelector<HTMLElement>(dialogControls)?.focus();
+    };
+  }, [open, ref, returnFocus]);
+}
+
 function App() {
   const firstLoad = useRef(true);
-  const dialogReturnFocus = useRef<HTMLElement | null>(null);
+  const quitReturnFocus = useRef<HTMLElement | null>(null);
+  const toolsReturnFocus = useRef<HTMLElement | null>(null);
+  const quitDialog = useRef<HTMLElement | null>(null);
+  const toolsDialog = useRef<HTMLElement | null>(null);
   const trayContent = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState("live"),
     [pairing, setPairing] = useState(false),
@@ -80,6 +149,7 @@ function App() {
     [snapshot, setSnapshot] = useState<Snapshot | null>(null),
     [available, setAvailable] = useState(false),
     [error, setError] = useState(""),
+    [refreshWarning, setRefreshWarning] = useState(""),
     [busy, setBusy] = useState(false),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState(""),
@@ -94,6 +164,7 @@ function App() {
   const refresh = async () => {
     if (!isTauri) return;
     const a = await invoke<AppState>("app_state");
+    setRefreshWarning("");
     setApp(a);
     if (firstLoad.current) {
       firstLoad.current = false;
@@ -117,11 +188,18 @@ function App() {
     success?: string,
   ) => {
     setError("");
+    setRefreshWarning("");
     setBusy(true);
     try {
       const r = await invoke(command, args);
       if (success) setNotice(success);
-      await refresh();
+      try {
+        await refresh();
+      } catch (e) {
+        setRefreshWarning(
+          `操作已完成，但界面状态刷新失败，请勿重复操作。${String(e)}`,
+        );
+      }
       return r ?? true;
     } catch (e) {
       setError(String(e));
@@ -160,7 +238,8 @@ function App() {
       }
     });
     on("exit-requested", () => {
-      dialogReturnFocus.current = document.activeElement as HTMLElement;
+      if (!quitDialog.current)
+        quitReturnFocus.current = document.activeElement as HTMLElement;
       setQuit(true);
     });
     on<string>("control-error", setError);
@@ -215,38 +294,8 @@ function App() {
         });
     sessionStorage.setItem(key, JSON.stringify(current.map((t) => t.task_id)));
   }, [snapshot]);
-  useEffect(() => {
-    if (!quit && !tools) return;
-    const previous = dialogReturnFocus.current;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setQuit(false);
-        setTools(null);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const nodes = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          '[role="dialog"] button:not(:disabled),[role="dialog"] input:not(:disabled),[role="dialog"] textarea:not(:disabled),[role="dialog"] select:not(:disabled),[role="dialog"] summary',
-        ),
-      );
-      if (!nodes.length) return;
-      const first = nodes[0],
-        last = nodes[nodes.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => {
-      document.removeEventListener("keydown", handler);
-      previous?.focus();
-    };
-  }, [quit, tools]);
+  useAppDialog(quit, quitDialog, quitReturnFocus, () => setQuit(false));
+  useAppDialog(!!tools, toolsDialog, toolsReturnFocus, () => setTools(null));
   const jump = (p: string) =>
     tray ? act("open_main", { route: p }) : setPage(p);
   const stop = () => control("stop_all");
@@ -308,10 +357,16 @@ function App() {
           </button>
         </div>
       )}
-      {notice && (
-        <div className="toast" role="status">
-          {notice}
+      {refreshWarning ? (
+        <div className="toast" role="alert">
+          {refreshWarning}
         </div>
+      ) : (
+        notice && (
+          <div className="toast" role="status">
+            {notice}
+          </div>
+        )
       )}
     </>
   );
@@ -319,6 +374,8 @@ function App() {
     <div className="scrim">
       <section
         className="dialog"
+        ref={quitDialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="exit-title"
@@ -932,7 +989,7 @@ function App() {
                         const trigger = document.activeElement as HTMLElement;
                         const r = await control("tools", { server: b.name });
                         if (r) {
-                          dialogReturnFocus.current = trigger;
+                          toolsReturnFocus.current = trigger;
                           setTools(r);
                         }
                       }}
@@ -1035,6 +1092,7 @@ function App() {
             app={app}
             snapshot={snapshot}
             busy={busy}
+            actionError={error}
             available={available}
             act={act}
             refresh={refresh}
@@ -1044,11 +1102,12 @@ function App() {
           />
         )}
       </main>
-      {exitDialog}
       {tools && (
         <div className="scrim">
           <section
             className="dialog tools"
+            ref={toolsDialog}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="后端工具列表"
@@ -1061,6 +1120,7 @@ function App() {
           </section>
         </div>
       )}
+      {exitDialog}
     </div>
   );
 }

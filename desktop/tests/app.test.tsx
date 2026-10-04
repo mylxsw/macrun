@@ -4,6 +4,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Root } from "react-dom/client";
+import type { Snapshot } from "../src/types";
 import { statuses } from "../src/model.mjs";
 
 const bridge = vi.hoisted(() => ({
@@ -111,7 +112,7 @@ function fixture() {
         yield_until: 0,
       },
       workspaces: [],
-      backends: [],
+      backends: [] as Snapshot["backends"],
       tasks,
       total_tasks: tasks.length,
       active_count: 3,
@@ -311,6 +312,7 @@ test("quit dialog traps Tab, closes with Escape and never exits implicitly", asy
   expect(document.activeElement).toBe(confirm);
   await user.tab();
   expect(document.activeElement).toBe(cancel);
+  await emit("exit-requested");
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(document.activeElement).toBe(
@@ -319,6 +321,108 @@ test("quit dialog traps Tab, closes with Escape and never exits implicitly", asy
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "exit_app"),
   ).toBe(false);
+});
+
+test("a successful migration stays successful when the following state refresh fails", async () => {
+  app.worker_running = false;
+  app.legacy_running = true;
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  const original = bridge.invoke.getMockImplementation()!;
+  let failRefresh = false;
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "migrate_legacy") {
+      app.legacy_running = false;
+      failRefresh = true;
+      return { backup: "/test/legacy-backup.plist" };
+    }
+    if (command === "app_state" && failRefresh) {
+      failRefresh = false;
+      throw new Error("状态读取暂时不可用");
+    }
+    return original(command, args);
+  });
+  await user.click(screen.getByRole("button", { name: "迁移", exact: true }));
+  await user.click(screen.getByRole("button", { name: "确认迁移" }));
+  const dialog = within(screen.getByRole("dialog", { name: "迁移完成" }));
+  expect(dialog.getByText("/test/legacy-backup.plist")).toBeTruthy();
+  expect(dialog.queryByRole("button", { name: "重试迁移" })).toBeNull();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "操作已完成，但界面状态刷新失败，请勿重复操作。",
+  );
+  expect(screen.getByRole("alert").textContent).toContain("状态读取暂时不可用");
+  expect(
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "migrate_legacy",
+    ),
+  ).toHaveLength(1);
+});
+
+test("native quit above a migration dialog keeps keyboard focus in the top dialog", async () => {
+  app.worker_running = false;
+  app.legacy_running = true;
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(screen.getByRole("button", { name: "迁移", exact: true }));
+  const migration = within(
+    screen.getByRole("dialog", { name: "迁移旧执行器" }),
+  );
+  const migrationCancel = migration.getByRole("button", { name: "取消" });
+  expect(document.activeElement).toBe(migrationCancel);
+  await emit("exit-requested");
+  const quit = within(screen.getByRole("dialog", { name: "退出 Macrun？" }));
+  const quitCancel = quit.getByRole("button", { name: "继续运行" });
+  const quitConfirm = quit.getByRole("button", { name: "停止并退出" });
+  expect(document.activeElement).toBe(quitCancel);
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(quitConfirm);
+  await user.tab();
+  expect(document.activeElement).toBe(quitCancel);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "退出 Macrun？" })).toBeNull();
+  expect(screen.getByRole("dialog", { name: "迁移旧执行器" })).toBeTruthy();
+  expect(document.activeElement).toBe(migrationCancel);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) =>
+      ["migrate_legacy", "exit_app"].includes(command),
+    ),
+  ).toBe(false);
+});
+
+test("closing quit restores an underlying tools dialog before its original trigger", async () => {
+  app.snapshot.backends.push({
+    name: "computer",
+    state: "ready",
+    command: "test-backend",
+    session: "test-session",
+    tool_count: 1,
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  const trigger = screen.getByRole("button", { name: "查看工具列表" });
+  await user.click(trigger);
+  const tools = screen.getByRole("dialog", { name: "后端工具列表" });
+  const toolsClose = within(tools).getByRole("button", { name: "关闭" });
+  expect(document.activeElement).toBe(toolsClose);
+  await emit("exit-requested");
+  const quit = within(screen.getByRole("dialog", { name: "退出 Macrun？" }));
+  await user.tab({ shift: true });
+  expect(document.activeElement).toBe(
+    quit.getByRole("button", { name: "停止并退出" }),
+  );
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "退出 Macrun？" })).toBeNull();
+  expect(document.activeElement).toBe(toolsClose);
+  await user.tab();
+  expect(document.activeElement).toBe(toolsClose);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });
 
 test("a tray task opens its own detail and clears stale task filters in the main window", async () => {
