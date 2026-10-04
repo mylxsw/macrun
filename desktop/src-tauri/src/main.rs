@@ -332,7 +332,7 @@ fn app_state(app: tauri::AppHandle, rt: tauri::State<Runtime>) -> Value {
     let running = child
         .as_mut()
         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_loaded,"legacy_detected":legacy_detected,"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
+    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"worker_starting":rt.starting.load(Ordering::SeqCst),"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_loaded,"legacy_detected":legacy_detected,"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
 }
 
 #[cfg(test)]
@@ -382,13 +382,26 @@ mod legacy_detection_tests {
 }
 
 #[tauri::command]
-fn save_settings(
-    mut settings: Settings,
-    rt: tauri::State<Runtime>,
+async fn save_settings(
+    settings: Settings,
+    app: tauri::AppHandle,
 ) -> std::result::Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
+        save_settings_inner(settings, &rt)
+    })
+    .await
+    .map_err(|_| "保存连接配置的后台任务异常，请重试".to_owned())?
+}
+
+fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Result<(), String> {
+    let original = rt.settings.lock().unwrap().clone();
     // This native migration setting is not editable through the webview.
-    settings.worker_path = rt.settings.lock().unwrap().worker_path.clone();
+    settings.worker_path = original.worker_path.clone();
     let result: Result<()> = (|| {
+        {
+            let _guard = configuration_edit_guard(rt)?;
+        }
         anyhow::ensure!(!settings.server.trim().is_empty(), "请填写服务器地址");
         anyhow::ensure!(
             PathBuf::from(&settings.cert).is_file(),
@@ -420,30 +433,71 @@ fn save_settings(
             settings.keychain_account = account;
             settings.token_file = "/dev/null".into();
         }
+        // Authorization can take arbitrarily long. Recheck before changing the
+        // active connection, keeping this short lock away from Keychain calls.
+        let _guard = configuration_edit_guard(rt)?;
+        let mut current = rt.settings.lock().unwrap();
+        anyhow::ensure!(*current == original, "连接配置已变化，请重新检查后保存");
         wire::atomic_json(&rt.data.join("connection.json"), &settings)?;
-        *rt.settings.lock().unwrap() = settings;
+        *current = settings;
         Ok(())
     })();
     result.map_err(|e| e.to_string())
+}
+fn configuration_edit_guard(
+    rt: &Runtime,
+) -> Result<std::sync::MutexGuard<'_, Option<std::process::Child>>> {
+    let mut child = rt.child.lock().unwrap();
+    anyhow::ensure!(
+        !rt.migrating.load(Ordering::SeqCst),
+        "正在迁移，请等待完成后修改连接"
+    );
+    anyhow::ensure!(
+        !rt.starting.load(Ordering::SeqCst),
+        "正在启动，请等待完成后修改连接"
+    );
+    anyhow::ensure!(!rt.exiting.load(Ordering::SeqCst), "应用正在退出");
+    anyhow::ensure!(
+        !child
+            .as_mut()
+            .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
+        "请先断开连接再修改配置"
+    );
+    Ok(child)
 }
 fn toml_config(path: &str) -> Result<macrun::config::WorkerConfig> {
     Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
 }
 
-struct StartAttempt<'a>(&'a AtomicBool);
+struct StartAttempt<'a> {
+    starting: &'a AtomicBool,
+    app: Option<tauri::AppHandle>,
+}
 
 impl<'a> StartAttempt<'a> {
     fn begin(starting: &'a AtomicBool) -> std::result::Result<Self, String> {
         starting
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| "执行器正在启动，请先完成系统授权并等待结果".to_owned())?;
-        Ok(Self(starting))
+        Ok(Self {
+            starting,
+            app: None,
+        })
+    }
+
+    fn announce(mut self, app: tauri::AppHandle) -> Self {
+        let _ = app.emit("worker-starting", true);
+        self.app = Some(app);
+        self
     }
 }
 
 impl Drop for StartAttempt<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.starting.store(false, Ordering::SeqCst);
+        if let Some(app) = &self.app {
+            let _ = app.emit("worker-starting", false);
+        }
     }
 }
 
@@ -458,6 +512,36 @@ async fn read_credential_in_background(
 #[cfg(test)]
 mod startup_tests {
     use super::*;
+
+    #[test]
+    fn configuration_edits_reject_start_migration_and_exit_before_any_file_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let rt = Runtime {
+            data: directory.path().to_path_buf(),
+            socket: directory.path().join("control.sock"),
+            child: Mutex::new(None),
+            snapshot: Mutex::new(Value::Null),
+            settings: Mutex::new(Settings::default()),
+            preferences: Mutex::new(Preferences::default()),
+            exiting: AtomicBool::new(false),
+            starting: AtomicBool::new(false),
+            desired_running: AtomicBool::new(false),
+            migrating: AtomicBool::new(false),
+            window_layout: Mutex::new(WindowLayout::default()),
+        };
+        assert!(configuration_edit_guard(&rt).is_ok());
+        for (flag, message) in [
+            (&rt.starting, "正在启动"),
+            (&rt.migrating, "正在迁移"),
+            (&rt.exiting, "正在退出"),
+        ] {
+            flag.store(true, Ordering::SeqCst);
+            let error = save_settings_inner(Settings::default(), &rt).unwrap_err();
+            assert!(error.contains(message));
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+            flag.store(false, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn startup_attempt_blocks_duplicates_and_releases_after_failure() {
@@ -496,7 +580,7 @@ async fn start_worker(
     app: tauri::AppHandle,
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
-    let _attempt = StartAttempt::begin(&rt.starting)?;
+    let _attempt = StartAttempt::begin(&rt.starting)?.announce(app.clone());
     let cfg = rt.settings.lock().unwrap().clone();
     {
         let mut child = rt.child.lock().unwrap();
@@ -638,7 +722,6 @@ async fn start_worker(
     })();
     result.map_err(|e| e.to_string())?;
     rt.desired_running.store(true, Ordering::SeqCst);
-    let _ = app.emit("worker-starting", ());
     Ok(())
 }
 #[tauri::command]
@@ -678,6 +761,7 @@ async fn control(
         "yield",
         "restart_backend",
         "task_detail",
+        "task_list",
         "prune",
         "observe",
         "self_test",
@@ -708,7 +792,6 @@ async fn exit_app(
     if rt.migrating.load(Ordering::SeqCst) {
         return Err("正在迁移旧执行器，请等待完成后退出".into());
     }
-    rt.desired_running.store(false, Ordering::SeqCst);
     let running = rt
         .child
         .lock()
@@ -724,6 +807,7 @@ async fn exit_app(
         {
             return Err("仍有任务运行或状态未知，请确认退出。".into());
         }
+        rt.desired_running.store(false, Ordering::SeqCst);
         if let Err(e) = local::request(&rt.socket, "shutdown", json!({})).await {
             // Closing the owned stdin pipe also requests a graceful worker shutdown.
             if let Some(c) = rt.child.lock().unwrap().as_mut() {
@@ -736,6 +820,7 @@ async fn exit_app(
     if rt.migrating.load(Ordering::SeqCst) {
         return Err("正在迁移旧执行器，请等待完成后退出".into());
     }
+    rt.desired_running.store(false, Ordering::SeqCst);
     rt.exiting.store(true, Ordering::SeqCst);
     app.exit(0);
     Ok(())
@@ -1012,14 +1097,23 @@ fn main() {
                         .unwrap()
                         .as_mut()
                         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-                    if budget.tick(
-                        macrun::model::now(),
-                        running,
-                        rt.desired_running.load(Ordering::SeqCst),
-                    ) && let Err(e) =
-                        start_worker(monitor.clone(), monitor.state::<Runtime>()).await
-                    {
-                        let _ = monitor.emit("control-error", e);
+                    let desired = rt.desired_running.load(Ordering::SeqCst);
+                    // A user-initiated start may be waiting on Keychain. Do not
+                    // consume recovery attempts or report duplicate-start errors.
+                    if rt.starting.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    if budget.tick(macrun::model::now(), running, desired) {
+                        if let Err(e) =
+                            start_worker(monitor.clone(), monitor.state::<Runtime>()).await
+                        {
+                            let _ = monitor.emit("control-error", e);
+                        }
+                    } else if budget.take_exhausted_notice(running, desired) {
+                        let _ = monitor.emit(
+                            "control-error",
+                            "执行器连续退出，已暂停自动重试。请查看日志后在设置中重新连接。",
+                        );
                     }
                 }
             });

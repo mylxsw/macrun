@@ -28,14 +28,18 @@ void macrun_monitor_start(void){pthread_t thread;if(pthread_create(&thread,NULL,
 unsigned long macrun_input_sequence(void){return atomic_load(&input_sequence);}
 bool macrun_input_available(void){return atomic_load(&input_available);}
 static IOPMAssertionID sleep_assertion=0;
+static pthread_mutex_t sleep_assertion_lock=PTHREAD_MUTEX_INITIALIZER;
 bool macrun_keep_awake(bool enabled){
-    if(enabled && !sleep_assertion) return IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep,kIOPMAssertionLevelOn,CFSTR("Macrun active desktop operation"),&sleep_assertion)==kIOReturnSuccess;
-    if(!enabled && sleep_assertion){IOPMAssertionRelease(sleep_assertion);sleep_assertion=0;}
-    return true;
+    pthread_mutex_lock(&sleep_assertion_lock);
+    bool success=true;
+    if(enabled && !sleep_assertion) success=IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep,kIOPMAssertionLevelOn,CFSTR("Macrun active desktop operation"),&sleep_assertion)==kIOReturnSuccess;
+    if(!enabled && sleep_assertion){success=IOPMAssertionRelease(sleep_assertion)==kIOReturnSuccess;if(success)sleep_assertion=0;}
+    pthread_mutex_unlock(&sleep_assertion_lock);
+    return success;
 }
 bool macrun_graphical_session(void){
     CFDictionaryRef session=CGSessionCopyCurrentDictionary();if(!session)return false;
     bool active=CFDictionaryGetValue(session,kCGSessionOnConsoleKey)==kCFBooleanTrue && CFDictionaryGetValue(session,kCGSessionLoginDoneKey)==kCFBooleanTrue;
     CFRelease(session);return active;
 }
-bool macrun_awake_active(void){return sleep_assertion!=0;}
+bool macrun_awake_active(void){pthread_mutex_lock(&sleep_assertion_lock);bool active=sleep_assertion!=0;pthread_mutex_unlock(&sleep_assertion_lock);return active;}

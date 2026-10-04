@@ -470,7 +470,12 @@
   padding-inline: 9px;
 }
 .input-permission-note {
+  display: block;
   line-height: 1.6;
+}
+.workspace-pagination {
+  margin-top: 9px;
+  gap: 8px;
 }
 .backend-advanced {
   display: flex;

@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Root } from "react-dom/client";
-import type { Snapshot } from "../src/types";
-import { statuses } from "../src/model.mjs";
+import type { Snapshot, Task } from "../src/types";
+import { statuses, selectTasks } from "../src/model.mjs";
 
 const bridge = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -127,6 +133,68 @@ function fixture() {
   };
 }
 let app = fixture();
+let historyRecords: Task[] = [];
+
+function historyPage(args: any) {
+  const all = (
+    selectTasks(historyRecords, "all", (args.query || "").trim()) as Task[]
+  )
+    .filter((task) => !args.kind || task.kind === args.kind)
+    .sort(
+      (a, b) =>
+        b.started_at - a.started_at || b.task_id.localeCompare(a.task_id),
+    );
+  const counts = all.reduce<Record<string, number>>((result, task) => {
+    result[task.status] = (result[task.status] || 0) + 1;
+    return result;
+  }, {});
+  const filtered = all.filter(
+    (task) =>
+      !args.status || args.status === "all" || task.status === args.status,
+  );
+  const after = filtered.filter(
+    (task) =>
+      !args.cursor ||
+      task.started_at < args.cursor.started_at ||
+      (task.started_at === args.cursor.started_at &&
+        task.task_id < args.cursor.task_id),
+  );
+  const rows = after.slice(0, args.limit || 50);
+  const last = rows.at(-1)!;
+  return structuredClone({
+    tasks: rows,
+    total: historyRecords.length,
+    filtered_total: filtered.length,
+    counts,
+    next_cursor:
+      after.length > rows.length
+        ? { started_at: last.started_at, task_id: last.task_id }
+        : null,
+  });
+}
+
+function largeHistory(count = 1500) {
+  const now = Date.now();
+  historyRecords = Array.from({ length: count }, (_, i) => ({
+    task_id: `history-${String(i).padStart(4, "0")}`,
+    kind: "exec.start",
+    status: i % 3 === 0 ? "failed" : "succeeded",
+    started_at: now - i * 1000,
+    ended_at: now,
+    arguments: {
+      command: `archive command ${i}`,
+      cwd: `/archives/project-${i}`,
+      path: `/files/item-${i}`,
+    },
+    output_tail: `tail-${i}`,
+  }));
+  app.snapshot.tasks = historyRecords.slice(
+    0,
+    200,
+  ) as typeof app.snapshot.tasks;
+  app.snapshot.total_tasks = count;
+  app.snapshot.active_count = 0;
+}
 
 beforeEach(() => {
   vi.resetModules();
@@ -141,15 +209,27 @@ beforeEach(() => {
   bridge.invoke.mockReset();
   bridge.listeners.clear();
   app = fixture();
+  historyRecords = app.snapshot.tasks;
   sessionStorage.clear();
   window.history.replaceState(null, "", "/");
   (window as any).__TAURI_INTERNALS__ = {};
   document.body.innerHTML = '<div id="root"></div>';
   bridge.invoke.mockImplementation(async (command, args) => {
     if (command === "app_state") return structuredClone(app);
+    if (command === "control" && args.action === "task_list")
+      return historyPage(args.args);
+    if (command === "control" && args.action === "task_detail") {
+      const task = historyRecords.find(
+        (task) => task.task_id === args.args.task_id,
+      );
+      if (!task) throw new Error("task does not exist");
+      return structuredClone({ ...task, output: { text: task.output_tail } });
+    }
     if (command === "control" && args.action === "pause") {
       app.snapshot.policy.paused = args.args.paused;
     }
+    if (command === "control" && args.action === "tools")
+      return { session: "test-session", result: { tools: [] } };
     if (command === "permissions")
       return {
         accessibility: false,
@@ -202,8 +282,10 @@ test("navigation keeps all nine task states independently usable", async () => {
     await user.click(
       screen.getByRole("button", { name: new RegExp(`^${label}\\s*1$`) }),
     );
+    await waitFor(() =>
+      expect(detail().getByText(`task-${status}`)).toBeTruthy(),
+    );
     expect(taskList().getAllByRole("button")).toHaveLength(1);
-    expect(detail().getByText(`task-${status}`)).toBeTruthy();
   }
   await user.click(navigation().getByRole("button", { name: "桌面控制" }));
   expect(
@@ -229,12 +311,16 @@ test("task search finds command, cwd, sync root, file path and exact task id", a
   ]) {
     await user.clear(input);
     await user.type(input, query);
+    await waitFor(() =>
+      expect(detail().getByText(`task-${status}`)).toBeTruthy(),
+    );
     expect(taskList().getAllByRole("button")).toHaveLength(1);
-    expect(detail().getByText(`task-${status}`)).toBeTruthy();
   }
   await user.clear(input);
   await user.type(input, "does-not-exist");
-  expect(taskList().queryAllByRole("button")).toHaveLength(0);
+  await waitFor(() =>
+    expect(taskList().queryAllByRole("button")).toHaveLength(0),
+  );
   expect(detail().queryByRole("button", { name: "打开完整日志" })).toBeNull();
 });
 
@@ -285,9 +371,7 @@ test("unknown results explain possible effects and offer observation without rep
     detail().queryByRole("button", { name: /取消任务|重试|重新执行|重放/ }),
   ).toBeNull();
   bridge.invoke.mockClear();
-  await user.click(
-    detail().getByRole("button", { name: "截一张当前屏幕核对" }),
-  );
+  await user.click(detail().getByRole("button", { name: "前往桌面控制核对" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "桌面控制" }),
   ).toBeTruthy();
@@ -517,3 +601,288 @@ test("an existing desktop connection opens the live page even with legacy files 
     ),
   ).toBe(false);
 });
+
+test("large task history pages without mounting every row and searches beyond the snapshot", async () => {
+  largeHistory();
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await waitFor(() => expect(detail().getByText("history-0000")).toBeTruthy());
+  expect(taskList().getAllByRole("button")).toHaveLength(50);
+  expect(screen.getByRole("button", { name: /^失败\s*500$/ })).toBeTruthy();
+  const pages = within(screen.getByRole("navigation", { name: "任务分页" }));
+  expect(pages.getByText("共 1500 条 · 第 1 页")).toBeTruthy();
+  await user.click(pages.getByRole("button", { name: "下一页" }));
+  await waitFor(() => expect(detail().getByText("history-0050")).toBeTruthy());
+  expect(taskList().getAllByRole("button")).toHaveLength(50);
+  expect(taskList().queryByText("archive command 0")).toBeNull();
+  await user.click(pages.getByRole("button", { name: "上一页" }));
+  await waitFor(() => expect(detail().getByText("history-0000")).toBeTruthy());
+  await user.type(
+    screen.getByRole("textbox", { name: "搜索任务" }),
+    "/ARCHIVES/project-1499",
+  );
+  await waitFor(() => expect(detail().getByText("history-1499")).toBeTruthy());
+  expect(taskList().getAllByRole("button")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: /^全部\s*1$/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^失败\s*0$/ })).toBeTruthy();
+  expect(detail().getByText("tail-1499")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("control", {
+    action: "task_detail",
+    args: { task_id: "history-1499", tail_bytes: 8192 },
+  });
+});
+
+test("native navigation loads an old task by id even outside the current page and snapshot", async () => {
+  largeHistory();
+  await mount();
+  await emit("navigate", "tasks:history-1498");
+  await waitFor(() => expect(detail().getByText("history-1498")).toBeTruthy());
+  expect(detail().getByText("tail-1498")).toBeTruthy();
+  expect(taskList().getAllByRole("button")).toHaveLength(50);
+  expect(taskList().queryByText("archive command 1498")).toBeNull();
+});
+
+test("offline cached history remains pageable and cannot send live task controls", async () => {
+  largeHistory();
+  const user = userEvent.setup();
+  await mount();
+  await emit("worker-unavailable");
+  bridge.invoke.mockClear();
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  const pages = within(screen.getByRole("navigation", { name: "任务分页" }));
+  expect(pages.getByText("共 200 条 · 第 1 页")).toBeTruthy();
+  for (let i = 1; i <= 3; i++) {
+    await user.click(pages.getByRole("button", { name: "下一页" }));
+    expect(
+      detail().getByText(`history-${String(i * 50).padStart(4, "0")}`),
+    ).toBeTruthy();
+  }
+  expect(
+    pages.getByRole("button", { name: "下一页" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(detail().queryByRole("button", { name: "取消任务" })).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "control"),
+  ).toBe(false);
+});
+
+test("startup feedback leaves navigation usable until the starting event clears", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await emit("worker-starting", true);
+  expect(
+    screen.getByText(/正在启动执行器。如 macOS 弹出钥匙串授权/),
+  ).toBeTruthy();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "设置与安全" }),
+  ).toBeTruthy();
+  await emit("worker-starting", false);
+  expect(
+    screen.queryByText(/正在启动执行器。如 macOS 弹出钥匙串授权/),
+  ).toBeNull();
+});
+
+test("live task directory actions retain the task identity for native validation", async () => {
+  const user = userEvent.setup();
+  await mount();
+  const card = screen
+    .getByRole("heading", { name: "command-running" })
+    .closest("article")!;
+  await user.click(
+    within(card).getByRole("button", { name: "在终端打开目录" }),
+  );
+  expect(bridge.invoke).toHaveBeenCalledWith("open_workspace", {
+    root: "/work/running",
+    terminal: true,
+    taskId: "task-running",
+  });
+});
+
+test("overlapping actions remain busy until the last action completes", async () => {
+  await mount();
+  const original = bridge.invoke.getMockImplementation()!;
+  let finishPause!: () => void, finishStop!: () => void;
+  bridge.invoke.mockImplementation((command, args) => {
+    if (command === "control" && args.action === "pause")
+      return new Promise<void>((resolve) => {
+        finishPause = resolve;
+      });
+    if (command === "control" && args.action === "stop_all")
+      return new Promise<void>((resolve) => {
+        finishStop = resolve;
+      });
+    return original(command, args);
+  });
+  const pause = screen.getByRole("button", { name: "暂停接收新任务" });
+  const stop = screen.getByRole("button", { name: /^全部停止/ });
+  act(() => {
+    fireEvent.click(pause);
+    fireEvent.click(stop);
+  });
+  expect(pause.hasAttribute("disabled")).toBe(true);
+  await act(async () => {
+    finishPause();
+  });
+  expect(pause.hasAttribute("disabled")).toBe(true);
+  await act(async () => {
+    finishStop();
+  });
+  expect(pause.hasAttribute("disabled")).toBe(false);
+});
+
+test("main tools dialog merges paginated tools by name and stops at the last page", async () => {
+  app.snapshot.backends.push({
+    name: "computer",
+    state: "ready",
+    command: "fixture",
+    session: "fixture-session",
+    tool_count: 0,
+  });
+  const original = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((command, args) => {
+    if (command === "control" && args.action === "tools")
+      return Promise.resolve({
+        session: "fixture-session",
+        result: args.args.cursor
+          ? { tools: [{ name: "observe" }, { name: "click" }] }
+          : { tools: [{ name: "observe" }], nextCursor: "next" },
+      });
+    return original(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(screen.getByRole("button", { name: "查看工具列表" }));
+  const dialog = within(screen.getByRole("dialog", { name: "后端工具列表" }));
+  expect(dialog.getByText("已读取 1 个工具")).toBeTruthy();
+  await user.click(dialog.getByRole("button", { name: "读取更多工具" }));
+  expect(dialog.getByText("已读取 2 个工具")).toBeTruthy();
+  expect(dialog.queryByRole("button", { name: "读取更多工具" })).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("control", {
+    action: "tools",
+    args: { server: "computer", cursor: "next" },
+  });
+});
+
+test("closing the tools dialog while a page loads prevents a late response reopening it", async () => {
+  app.snapshot.backends.push({
+    name: "computer",
+    state: "ready",
+    command: "fixture",
+    session: "fixture-session",
+    tool_count: 0,
+  });
+  const original = bridge.invoke.getMockImplementation()!;
+  let finish!: (value: any) => void;
+  bridge.invoke.mockImplementation((command, args) => {
+    if (command === "control" && args.action === "tools") {
+      if (args.args.cursor)
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      return Promise.resolve({
+        session: "fixture-session",
+        result: { tools: [{ name: "observe" }], nextCursor: "next" },
+      });
+    }
+    return original(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(screen.getByRole("button", { name: "查看工具列表" }));
+  await user.click(screen.getByRole("button", { name: "读取更多工具" }));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await act(async () =>
+    finish({
+      session: "fixture-session",
+      result: { tools: [{ name: "click" }] },
+    }),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("leaving the desktop page invalidates an initial tool request even after returning", async () => {
+  app.snapshot.backends.push({
+    name: "computer",
+    state: "ready",
+    command: "fixture",
+  });
+  const original = bridge.invoke.getMockImplementation()!;
+  let finish!: (value: any) => void;
+  bridge.invoke.mockImplementation((command, args) => {
+    if (command === "control" && args.action === "tools")
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    return original(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(screen.getByRole("button", { name: "查看工具列表" }));
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await act(async () =>
+    finish({
+      session: "old-session",
+      result: { tools: [{ name: "old-tool" }] },
+    }),
+  );
+  expect(screen.queryByRole("dialog", { name: "后端工具列表" })).toBeNull();
+  expect(
+    screen
+      .getByRole("button", { name: "查看工具列表" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  await user.click(screen.getByRole("button", { name: "查看工具列表" }));
+  await act(async () =>
+    finish({
+      session: "new-session",
+      result: { tools: [{ name: "new-tool" }] },
+    }),
+  );
+  expect(
+    screen.getByRole("dialog", { name: "后端工具列表" }).textContent,
+  ).toContain("new-tool");
+});
+
+test.each([
+  {},
+  { session: "", result: { tools: [] } },
+  { session: "session", result: { tools: {} } },
+  { session: "session", result: { tools: [null] } },
+  { session: "session", result: { tools: [{ name: 42 }] } },
+  { session: "session", result: { tools: [], nextCursor: {} } },
+])(
+  "invalid initial tools response stays out of the modal and shows a retryable error: %j",
+  async (invalid) => {
+    app.snapshot.backends.push({
+      name: "computer",
+      state: "ready",
+      command: "fixture",
+    });
+    const original = bridge.invoke.getMockImplementation()!;
+    bridge.invoke.mockImplementation((command, args) =>
+      command === "control" && args.action === "tools"
+        ? Promise.resolve(invalid)
+        : original(command, args),
+    );
+    const user = userEvent.setup();
+    await mount();
+    await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+    await user.click(screen.getByRole("button", { name: "查看工具列表" }));
+    expect(screen.queryByRole("dialog", { name: "后端工具列表" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "后端未返回有效工具列表，请重试。",
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "查看工具列表" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+  },
+);

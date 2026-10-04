@@ -8,7 +8,12 @@ use crate::{
 };
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     io::AsyncWriteExt,
     sync::{Mutex, mpsc, watch},
@@ -17,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 type Slot = Arc<Mutex<Option<Client>>>;
 pub struct Engine {
     data: PathBuf,
+    history: crate::history::TaskHistory,
     config: WorkerConfig,
     submissions: Mutex<()>,
     tasks: Mutex<BTreeMap<String, CancellationToken>>,
@@ -25,9 +31,14 @@ pub struct Engine {
     safety: Mutex<crate::safety::Safety>,
     approvals: Mutex<BTreeMap<String, tokio::sync::oneshot::Sender<bool>>>,
     backend_stop: Mutex<CancellationToken>,
-    tool_counts: Mutex<BTreeMap<String, usize>>,
+    tool_counts: Mutex<BTreeMap<String, DiscoveredTools>>,
     changes: watch::Sender<u64>,
     fingerprint_key: [u8; 32],
+}
+#[derive(Default)]
+struct DiscoveredTools {
+    session: String,
+    names: BTreeSet<String>,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Policy {
@@ -121,6 +132,7 @@ impl Engine {
         };
         let (changes, _) = watch::channel(0);
         Ok(Arc::new(Self {
+            history: crate::history::TaskHistory::new(data.clone()),
             data,
             config,
             submissions: Mutex::new(()),
@@ -260,6 +272,7 @@ impl Engine {
             client.stop().await;
         }
         *c = None;
+        self.tool_counts.lock().await.remove(name);
         self.changed();
         Ok(json!({"session_invalidated":true}))
     }
@@ -419,26 +432,14 @@ impl Engine {
         Ok(json!({"removed":removed,"dedup_preserved":true}))
     }
     pub async fn local_snapshot(&self) -> Result<Value> {
-        let mut tasks = Vec::new();
-        for entry in std::fs::read_dir(self.data.join("tasks"))? {
-            let path = entry?.path().join("result.json");
-            if let Ok(bytes) = std::fs::read(path)
-                && let Ok(mut v) = serde_json::from_slice::<Value>(&bytes)
-            {
-                v.as_object_mut().map(|m| m.remove("request_fingerprint"));
-                v["arguments"] = redact_arguments(&v["arguments"]);
-                if !v["arguments"].is_object() {
-                    v["arguments"] = json!({});
-                }
-                // Tool results can contain images and secrets; retrieve only on explicit request.
-                if v["kind"] == "mcp.call" {
-                    v.as_object_mut().map(|m| m.remove("result"));
-                }
-                tasks.push(v);
-            }
-        }
-        tasks.sort_by_key(|v| std::cmp::Reverse(v["started_at"].as_u64().unwrap_or(0)));
+        let mut tasks = self.history.records().await?;
         let total = tasks.len();
+        let mut task_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for task in &tasks {
+            *task_counts
+                .entry(task["status"].as_str().unwrap_or("unknown").into())
+                .or_default() += 1;
+        }
         let day = |ms: u64| {
             let t = (ms / 1000) as libc::time_t;
             let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
@@ -449,7 +450,7 @@ impl Engine {
             }
         };
         let today = day(now());
-        let mut summary: BTreeMap<String, u64> = BTreeMap::new();
+        let mut summary: BTreeMap<String, u64> = BTreeMap::from([("total".into(), 0)]);
         for t in &tasks {
             if day(t["started_at"].as_u64().unwrap_or(0)) == today {
                 *summary.entry("total".into()).or_default() += 1;
@@ -475,10 +476,15 @@ impl Engine {
         tasks = tasks
             .into_iter()
             .enumerate()
-            .filter(|(i, v)| *i < 200 || v.get("ended_at").is_none())
+            .filter(|(i, v)| *i < 200 || crate::history::active(v))
             .map(|(_, v)| v)
             .collect();
         for v in &mut tasks {
+            // Historical output is loaded with task_detail on demand. Only live
+            // activity cards need output in the frequent subscription snapshot.
+            if !crate::history::active(v) {
+                continue;
+            }
             let ident = v["task_id"].as_str().unwrap_or("");
             let p = self.directory(ident)?.join("output.log");
             if let Ok(meta) = tokio::fs::metadata(&p).await {
@@ -502,11 +508,23 @@ impl Engine {
                 ),
                 Err(_) => ("busy", None),
             };
-            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":self.tool_counts.lock().await.get(name).copied()}));
+            let tool_count = self
+                .tool_counts
+                .lock()
+                .await
+                .get(name)
+                .filter(|known| {
+                    state == "busy" || session.as_deref() == Some(known.session.as_str())
+                })
+                .map(|known| known.names.len());
+            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":tool_count}));
         }
         Ok(
-            json!({"today_summary":summary,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
         )
+    }
+    pub async fn local_task_list(&self, args: Value) -> Result<Value> {
+        self.history.page(args).await
     }
     fn directory(&self, id: &str) -> Result<PathBuf> {
         uuid::Uuid::parse_str(id)?;
@@ -532,7 +550,16 @@ impl Engine {
                 )?;
                 let log = dir.join("output.log");
                 if log.exists() {
-                    let args = json!({"path":log,"offset":a["offset"].as_u64().unwrap_or(0),"length":65536,"text":true});
+                    let tail = a["tail_bytes"].as_u64().map(|n| n.clamp(1, 65536));
+                    let offset = if let Some(length) = tail {
+                        tokio::fs::metadata(&log)
+                            .await?
+                            .len()
+                            .saturating_sub(length)
+                    } else {
+                        a["offset"].as_u64().unwrap_or(0)
+                    };
+                    let args = json!({"path":log,"offset":offset,"length":tail.unwrap_or(65536),"text":true});
                     let mut output = crate::files::handle("file.read", &args).await?;
                     output.as_object_mut().unwrap().remove("data");
                     v["output"] = output;
@@ -558,10 +585,6 @@ impl Engine {
                 let v = self
                     .backend_request(&a, "tools/list", &CancellationToken::new())
                     .await?;
-                self.tool_counts.lock().await.insert(
-                    string(&a, "server")?.into(),
-                    v["result"]["tools"].as_array().map_or(0, Vec::len),
-                );
                 self.changed();
                 Ok(v)
             }
@@ -808,6 +831,23 @@ impl Engine {
                 params
             };
             let result = c.rpc(method, params).await?;
+            if method == "tools/list" {
+                // Keep counting under the backend lock so a late page cannot
+                // overwrite a restarted session or a newer first-page refresh.
+                let mut discovered = self.tool_counts.lock().await;
+                let known = discovered.entry(name.to_owned()).or_default();
+                if known.session != c.generation || a["cursor"].as_str().is_none_or(str::is_empty) {
+                    known.names.clear();
+                }
+                known.session.clone_from(&c.generation);
+                if let Some(tools) = result["tools"].as_array() {
+                    known.names.extend(
+                        tools
+                            .iter()
+                            .filter_map(|tool| tool["name"].as_str().map(str::to_owned)),
+                    );
+                }
+            }
             Ok::<Value, anyhow::Error>(
                 json!({"server":name,"session":c.generation,"result":result}),
             )
@@ -818,6 +858,7 @@ impl Engine {
                 c.stop().await;
             }
             *guard = None;
+            self.tool_counts.lock().await.remove(name);
         }
         r
     }

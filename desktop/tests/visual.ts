@@ -18,6 +18,69 @@ const legacy = query.get("legacy");
 const legacyDetected = legacy === "running" || legacy === "stopped";
 const configured = overlay || (!pairing && !legacyDetected);
 const failure = query.get("error");
+const fixtureState = query.get("state");
+const delayMs = Math.min(5000, Math.max(0, Number(query.get("delay")) || 0));
+const requestedTasks = Math.min(
+  5000,
+  Math.max(0, Number(query.get("tasks")) || 0),
+);
+const requestedActive = Math.min(
+  requestedTasks,
+  Math.max(0, Number(query.get("active") ?? 3) || 0),
+);
+const isActive = (task: Task) =>
+  ["accepted", "running", "awaiting_approval"].includes(task.status);
+const statuses = [
+  "running",
+  "awaiting_approval",
+  "accepted",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+  "unknown",
+  "denied",
+];
+const history: Task[] = Array.from({ length: requestedTasks }, (_, index) => {
+  const status =
+    index < requestedActive
+      ? statuses[index % 3]
+      : statuses[3 + ((index - requestedActive) % 6)];
+  const task: Task = {
+    task_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    kind:
+      index % 5 === 0 ? "mcp.call" : index % 7 === 0 ? "sync" : "exec.start",
+    status,
+    arguments: {
+      command: `printf 'fixture-task-${index + 1}'; npm run verify -- --workspace=/tmp/macrun-visual-fixture/project-${index % 20}/packages/long-directory-name`,
+      cwd: `/tmp/macrun-visual-fixture/project-${index % 20}`,
+      ...(index % 5 === 0
+        ? {
+            server: "computer",
+            tool: index % 2 ? "computer.screenshot" : "computer.click",
+            arguments: { x: 412, y: 288 },
+          }
+        : {}),
+      ...(index % 7 === 0
+        ? { remote_root: `/tmp/macrun-visual-fixture/mirror-${index % 20}` }
+        : {}),
+    },
+    started_at: Date.now() - index * 1000,
+    output_tail: `fixture-task-${index + 1}\nNo real command was executed.\n`,
+  };
+  if (!isActive(task)) task.ended_at = task.started_at + 500;
+  if (["failed", "timed_out", "unknown"].includes(status))
+    task.error = {
+      message:
+        status === "unknown"
+          ? "测试执行被中断，操作可能已生效；请先核对。"
+          : "测试任务失败，可查看任务详情。",
+    };
+  if (task.kind === "sync")
+    task.progress = { received: 42, total: 42, bytes: 2048 };
+  if (status === "succeeded") task.result = { exit_code: 0 };
+  return task;
+});
 const callbacks = new Map<
   number,
   { callback: (value: any) => void; once: boolean }
@@ -29,12 +92,12 @@ const snapshot: Snapshot = {
   version: "0.2.0",
   protocol: 2,
   connection: {
-    state: "connected",
+    state: fixtureState === "reconnecting" ? "reconnecting" : "connected",
     server: "203.0.113.10:7443",
     since: now,
     rtt_ms: 38,
   },
-  policy: { paused: false, desktop_enabled: overlay },
+  policy: { paused: fixtureState === "paused", desktop_enabled: overlay },
   safety: {
     restrict_paths: true,
     roots: ["/tmp/macrun-visual-fixture"],
@@ -42,15 +105,31 @@ const snapshot: Snapshot = {
     retention_days: 30,
     yield_until: 0,
   },
-  workspaces: [],
-  backends: [],
+  workspaces: requestedTasks
+    ? Array.from({ length: 24 }, (_, index) => ({
+        root: `/tmp/macrun-visual-fixture/project-${index}`,
+        time: now - index * 1000,
+        status: index % 6 === 0 ? "failed" : "succeeded",
+      }))
+    : [],
+  backends: requestedTasks
+    ? [
+        {
+          name: "computer",
+          state: "ready",
+          session: "fixture-session",
+          command: "/tmp/macrun-visual-fixture/mock-backend",
+          tool_count: 2,
+        },
+      ]
+    : [],
   tasks: [],
   total_tasks: 0,
   active_count: 0,
   today_summary: { total: 0 },
 };
 if (overlay) {
-  snapshot.tasks.push({
+  history.unshift({
     task_id: "fixture-desktop-action",
     kind: "mcp.call",
     status: "running",
@@ -61,12 +140,34 @@ if (overlay) {
     },
     started_at: now - 1000,
   });
-  snapshot.active_count = 1;
-  snapshot.total_tasks = 1;
 }
+function summarize(task: Task): Task {
+  const { output_tail: _output, result: _result, ...summary } = task;
+  return structuredClone(summary);
+}
+function syncHistory() {
+  history.sort(
+    (a, b) => b.started_at - a.started_at || b.task_id.localeCompare(a.task_id),
+  );
+  const recent = history.slice(0, 200);
+  snapshot.tasks = [...recent, ...history.slice(200).filter(isActive)].map(
+    summarize,
+  );
+  snapshot.total_tasks = history.length;
+  snapshot.active_count = history.filter(isActive).length;
+  snapshot.today_summary = { total: history.length };
+  const counts: Record<string, number> = {};
+  for (const task of history)
+    counts[task.status] = (counts[task.status] || 0) + 1;
+  Object.assign(snapshot, { task_counts: counts });
+  Object.assign(snapshot.today_summary, counts);
+}
+syncHistory();
 const app: AppState & { legacy_detected: boolean } = {
-  worker_running: configured,
-  snapshot: configured ? snapshot : null,
+  worker_running:
+    configured && !["starting", "offline"].includes(fixtureState || ""),
+  worker_starting: configured && fixtureState === "starting",
+  snapshot: configured && fixtureState !== "starting" ? snapshot : null,
   settings: {
     server: configured ? snapshot.connection.server : "",
     cert: configured ? "/tmp/macrun-visual-fixture/certificate.der" : "",
@@ -91,6 +192,7 @@ const app: AppState & { legacy_detected: boolean } = {
   platform: "macos",
 };
 const calls: { command: string; args: Record<string, any> }[] = [];
+let appReads = 0;
 function emit(event: string, payload?: unknown) {
   for (const [id, listener] of listeners) {
     if (listener.event !== event) continue;
@@ -100,6 +202,8 @@ function emit(event: string, payload?: unknown) {
   }
 }
 function update() {
+  syncHistory();
+  if (!app.worker_running) return;
   emit("worker-state", snapshot);
 }
 function unregisterListener(_event: string, id: number) {
@@ -119,8 +223,44 @@ async function invoke(command: string, args: Record<string, any> = {}) {
   }
   if (command === "plugin:event|unlisten")
     return unregisterListener(args.event, args.eventId);
-  if (command === "app_state") return structuredClone(app);
+  if (command === "app_state") {
+    if (
+      failure === "app_state" ||
+      (query.has("refresh_error") && appReads++ > 0)
+    )
+      throw new Error("测试应用状态读取失败");
+    return structuredClone(app);
+  }
   if (["set_main_mode", "resize_panel"].includes(command)) return null;
+  if (delayMs && command !== "start_worker")
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  if (failure === command || (command === "control" && failure === args.action))
+    throw new Error(
+      `测试操作失败：${command === "control" ? args.action : command}`,
+    );
+  if (command === "save_settings") {
+    app.settings = {
+      ...structuredClone(args.settings),
+      keychain_account: "fixture-only",
+      certificate_fingerprint: "4fa19c07-fixture-not-a-real-fingerprint",
+    };
+    return null;
+  }
+  if (command === "save_preferences") {
+    app.preferences = structuredClone(args.preferences);
+    return null;
+  }
+  if (command === "autostart") {
+    app.autostart = !!args.enabled;
+    return null;
+  }
+  if (command === "stop_worker") {
+    if (snapshot.active_count)
+      throw new Error("测试任务仍在运行，请先停止任务");
+    app.worker_running = false;
+    emit("worker-unavailable");
+    return null;
+  }
   if (command === "migrate_legacy") {
     if (failure === "migration")
       throw new Error("测试迁移失败：原配置已保留，旧服务状态未变化");
@@ -165,14 +305,23 @@ async function invoke(command: string, args: Record<string, any> = {}) {
     };
   }
   if (command === "start_worker") {
-    if (failure === "start") throw new Error("测试执行器启动失败");
+    if (app.worker_starting) throw new Error("测试执行器正在启动，请等待授权");
     if (app.legacy_running)
       throw new Error("测试旧执行器仍在运行，请先完成迁移");
     if (!app.settings.server) throw new Error("测试连接尚未配置");
-    app.worker_running = true;
-    app.snapshot = snapshot;
-    queueMicrotask(update);
-    return null;
+    app.worker_starting = true;
+    emit("worker-starting", true);
+    try {
+      if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (failure === "start") throw new Error("测试执行器启动失败");
+      app.worker_running = true;
+      app.snapshot = snapshot;
+      queueMicrotask(update);
+      return null;
+    } finally {
+      app.worker_starting = false;
+      emit("worker-starting", false);
+    }
   }
   if (command === "connection_check") {
     return {
@@ -186,11 +335,73 @@ async function invoke(command: string, args: Record<string, any> = {}) {
     };
   }
   if (command === "control") {
-    if (args.action === "desktop")
+    const payload = args.args || {};
+    if (args.action === "task_list") {
+      const text = String(payload.query || "")
+        .trim()
+        .toLowerCase();
+      const matches = history.filter(
+        (task) =>
+          (payload.kind == null || payload.kind === task.kind) &&
+          [
+            task.task_id,
+            task.kind,
+            task.arguments.command,
+            task.arguments.tool,
+            task.arguments.cwd,
+            task.arguments.remote_root,
+            task.arguments.path,
+          ]
+            .filter((part) => typeof part === "string")
+            .join(" ")
+            .toLowerCase()
+            .includes(text),
+      );
+      const counts: Record<string, number> = {};
+      for (const task of matches)
+        counts[task.status] = (counts[task.status] || 0) + 1;
+      const filtered = matches.filter(
+        (task) =>
+          !payload.status ||
+          payload.status === "all" ||
+          task.status === payload.status,
+      );
+      const cursor = payload.cursor;
+      const remaining = filtered.filter(
+        (task) =>
+          !cursor ||
+          task.started_at < cursor.started_at ||
+          (task.started_at === cursor.started_at &&
+            task.task_id < cursor.task_id),
+      );
+      const limit = Math.max(
+        1,
+        Math.min(100, payload.limit === undefined ? 50 : Number(payload.limit)),
+      );
+      const page = remaining.slice(0, limit),
+        last = page.at(-1);
+      return {
+        tasks: page.map(summarize),
+        total: history.length,
+        filtered_total: filtered.length,
+        counts,
+        next_cursor:
+          remaining.length > page.length && last
+            ? { started_at: last.started_at, task_id: last.task_id }
+            : null,
+      };
+    }
+    if (args.action === "snapshot") return structuredClone(snapshot);
+    if (args.action === "pause") snapshot.policy.paused = !!payload.paused;
+    else if (args.action === "safety")
+      snapshot.safety = structuredClone(payload);
+    else if (args.action === "yield")
+      snapshot.safety.yield_until = Date.now() + 10000;
+    else if (args.action === "desktop")
       snapshot.policy.desktop_enabled = !!args.args.enabled;
     else if (args.action === "self_test") {
       const task: Task = {
-        task_id: "fixture-self-test",
+        task_id: `fixture-self-test-${history.length}`,
         kind: "exec.start",
         status: "succeeded",
         arguments: { command: "hostname", cwd: "/tmp/macrun-visual-fixture" },
@@ -199,24 +410,85 @@ async function invoke(command: string, args: Record<string, any> = {}) {
         result: { exit_code: 0 },
         output_tail: "visual-fixture\n",
       };
-      snapshot.tasks = [task];
-      snapshot.total_tasks = 1;
+      history.unshift(task);
       update();
-      return { task_id: task.task_id };
+      return { task_id: task.task_id, status: "accepted" };
     } else if (args.action === "task_detail") {
-      const task = snapshot.tasks.find(
-        (task) => task.task_id === args.args.task_id,
-      );
+      const task = history.find((task) => task.task_id === args.args.task_id);
       if (!task) throw new Error("测试任务不存在");
-      return structuredClone(task);
+      const detail: any = structuredClone(task);
+      if (task.output_tail !== undefined) {
+        const output = new TextEncoder().encode(task.output_tail);
+        const length = Math.max(
+          1,
+          Math.min(65536, Number(payload.tail_bytes) || 8192),
+        );
+        const offset = Math.max(0, output.length - length);
+        detail.output = {
+          text: new TextDecoder().decode(output.slice(offset)),
+          size: output.length,
+          offset,
+          next_offset: output.length,
+          eof: true,
+        };
+        delete detail.output_tail;
+      }
+      return detail;
     } else if (args.action === "stop_all") {
       snapshot.policy = { paused: true, desktop_enabled: false };
-      snapshot.tasks = snapshot.tasks.map((task) => ({
-        ...task,
-        status: "cancelled",
+      for (const task of history.filter(isActive)) {
+        task.status = "cancelled";
+        task.ended_at = Date.now();
+      }
+    } else if (["cancel", "approve"].includes(args.action)) {
+      const task = history.find((task) => task.task_id === payload.task_id);
+      if (!task) throw new Error("测试任务不存在");
+      task.status =
+        args.action === "approve" && payload.allow
+          ? "succeeded"
+          : args.action === "approve"
+            ? "denied"
+            : "cancelled";
+      task.ended_at = Date.now();
+    } else if (args.action === "tools") {
+      return {
+        session: "fixture-session",
+        result: {
+          tools: [
+            {
+              name: "computer.screenshot",
+              description: "测试观察工具",
+              inputSchema: { type: "object", properties: {} },
+            },
+            {
+              name: "computer.click",
+              description: "测试点击工具",
+              inputSchema: {
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+              },
+            },
+          ],
+        },
+      };
+    } else if (args.action === "restart_backend") {
+      return { ok: true };
+    } else if (args.action === "observe") {
+      const task: Task = {
+        task_id: `fixture-observe-${history.length}`,
+        kind: "mcp.call",
+        status: "succeeded",
+        arguments: {
+          server: payload.server,
+          tool: payload.tool,
+          local_observation: true,
+        },
+        started_at: Date.now(),
         ended_at: Date.now(),
-      }));
-      snapshot.active_count = 0;
+      };
+      history.unshift(task);
+      update();
+      return { task_id: task.task_id, status: "accepted" };
     } else throw new Error(`视觉夹具未实现控制：${args.action}`);
     update();
     return {};
@@ -235,12 +507,29 @@ async function invoke(command: string, args: Record<string, any> = {}) {
   }
   if (command === "permissions")
     return {
-      accessibility: false,
-      screen_recording: false,
+      accessibility: query.get("permissions") === "granted",
+      screen_recording: query.get("permissions") === "granted",
       graphical_session: true,
       keep_awake: false,
     };
   if (command === "input_status") return { available: false };
+  if (command === "backend_config")
+    return "[mcp.computer]\ncommand = '/tmp/macrun-visual-fixture/mock-backend'\n";
+  if (command === "save_backends") return null;
+  if (
+    [
+      "open_log",
+      "diagnostics",
+      "open_workspace",
+      "open_permission",
+      "notify_task",
+    ].includes(command)
+  ) {
+    document.documentElement.dataset.fixtureLastAction = command;
+    return command === "diagnostics"
+      ? "/tmp/macrun-visual-fixture/diagnostics.json"
+      : null;
+  }
   throw new Error(`视觉夹具未实现操作：${command}；不会访问真实系统。`);
 }
 

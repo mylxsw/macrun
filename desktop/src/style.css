@@ -452,6 +452,27 @@ kbd {
   border-color: #f0cfc7;
   color: #a12b17;
 }
+.action-feedback {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  max-height: 35vh;
+  overflow: auto;
+  box-shadow: 0 3px 10px #0000000a;
+}
+.startup-feedback {
+  background: #eef3ff;
+  border-color: #d7e1fb;
+  color: #2449c8;
+}
+.loading-icon {
+  animation: loading-turn 1.2s linear infinite;
+}
+@keyframes loading-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .error-text {
   color: #b4321c;
 }
@@ -500,6 +521,11 @@ kbd {
   grid-template-columns: 360px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+}
+.live-grid > *,
+.task-grid > *,
+.desktop-grid > * {
+  min-width: 0;
 }
 .task-list {
   overflow: hidden;
@@ -655,6 +681,8 @@ footer {
   border: 1px solid #dad9d4;
   width: 470px;
   max-width: 100%;
+  max-height: calc(100vh - 50px);
+  overflow: auto;
   box-shadow: 0 15px 55px #0003;
 }
 .dialog p {
@@ -668,7 +696,7 @@ footer {
   width: 700px;
 }
 .tools .term {
-  max-height: 65vh;
+  max-height: min(65vh, calc(100vh - 220px));
 }
 .toast {
   position: fixed;
@@ -682,6 +710,10 @@ footer {
   border-radius: 8px;
   z-index: 200;
   font-size: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: 35vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
 }
 .tray {
   padding: 6px;
@@ -833,6 +865,23 @@ textarea {
 .approval {
   border-color: #cc9a38;
   background: #fff9ed;
+  min-width: 0;
+  padding: 14px 16px;
+}
+.approval .command {
+  white-space: pre-wrap;
+  max-height: 144px;
+  max-width: 100%;
+  overflow: auto;
+}
+.approval > small {
+  display: block;
+  overflow-wrap: anywhere;
+  max-height: 3em;
+  overflow: auto;
+}
+.approval .actions {
+  margin-top: 10px;
 }
 .tag.awaiting_approval {
   color: #936015;

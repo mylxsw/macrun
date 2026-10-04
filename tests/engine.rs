@@ -205,3 +205,56 @@ async fn remote_cannot_change_local_controls() {
         "succeeded"
     );
 }
+
+#[tokio::test]
+async fn paginated_tool_counts_accumulate_distinct_names_and_reset_with_discovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = WorkerConfig::default();
+    config.mcp.insert(
+        "fixture".into(),
+        macrun::config::Backend {
+            command: "python3".into(),
+            args: vec![format!(
+                "{}/tests/fixtures/mcp.py",
+                env!("CARGO_MANIFEST_DIR")
+            )],
+            env: [("MACRUN_TEST_TOOLS_PAGINATED".into(), "1".into())].into(),
+            cwd: None,
+        },
+    );
+    let engine = Engine::open(dir.path().into(), config).unwrap();
+    let first = engine
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.local_snapshot().await.unwrap()["backends"][0]["tool_count"],
+        2
+    );
+    let next = engine.handle("mcp.tools", json!({"server":"fixture","cursor":first["result"]["nextCursor"],"session":first["session"]})).await.unwrap();
+    assert!(next["result"]["nextCursor"].is_null());
+    assert_eq!(
+        engine.local_snapshot().await.unwrap()["backends"][0]["tool_count"],
+        3
+    );
+    engine
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.local_snapshot().await.unwrap()["backends"][0]["tool_count"],
+        2
+    );
+    engine.restart_backend("fixture").await.unwrap();
+    assert!(engine.local_snapshot().await.unwrap()["backends"][0]["tool_count"].is_null());
+    let restarted = engine
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    assert_ne!(restarted["session"], first["session"]);
+    assert_eq!(
+        engine.local_snapshot().await.unwrap()["backends"][0]["tool_count"],
+        2
+    );
+    engine.shutdown().await.unwrap();
+}

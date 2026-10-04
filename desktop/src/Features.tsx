@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Check,
   CircleAlert,
@@ -16,6 +17,17 @@ export type Act = (
   a?: Record<string, unknown>,
   s?: string,
 ) => Promise<any>;
+const readNative: Act = (command, args) => invoke(command, args);
+const terminalStatuses = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "timed_out",
+  "unknown",
+  "denied",
+]);
+const failureText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 export function Approvals({
   tasks,
@@ -389,7 +401,7 @@ const approvalModes = [
   {
     key: "all",
     label: "每条都确认",
-    hint: "每条命令和桌面调用都需要你点“允许”。",
+    hint: "每条命令都需要你点“允许”；桌面调用由桌面控制开关管理。",
   },
 ];
 export function SafetyPanel({
@@ -641,6 +653,8 @@ export function WorkspaceList({
   snapshot: Snapshot | null;
   act: Act;
 }) {
+  const [limit, setLimit] = useState(6);
+  const workspaces = snapshot?.workspaces || [];
   return (
     <section className="workspace-section">
       <div className="row between">
@@ -648,12 +662,12 @@ export function WorkspaceList({
         <small>由服务器同步过来的目录</small>
       </div>
       <div className="card workspace-list">
-        {snapshot?.workspaces?.length ? (
-          snapshot.workspaces.map((w) => (
+        {workspaces.length ? (
+          workspaces.slice(0, limit).map((w) => (
             <div className="feature-line workspace-row" key={w.root}>
               <Folder size={17} />
               <div className="grow">
-                <b className="wrap">
+                <b className="ellipsis" title={w.root}>
                   {w.root.split("/").filter(Boolean).pop() || w.root}
                 </b>
                 <small className="mono ellipsis" title={w.root}>
@@ -698,6 +712,26 @@ export function WorkspaceList({
           <p className="muted">完成首次同步后在这里显示。</p>
         )}
       </div>
+      {workspaces.length > 6 && (
+        <div className="row between workspace-pagination">
+          <small>
+            已显示 {Math.min(limit, workspaces.length)} / {workspaces.length}{" "}
+            个工作区
+          </small>
+          <div className="actions">
+            {limit > 6 && (
+              <button className="link" onClick={() => setLimit(6)}>
+                收起
+              </button>
+            )}
+            {limit < workspaces.length && (
+              <button className="link" onClick={() => setLimit((v) => v + 6)}>
+                查看更多工作区
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -707,11 +741,13 @@ export function BackendPanel({
   act,
   app,
   mode = "all",
+  read = readNative,
 }: {
   snapshot: Snapshot | null;
   act: Act;
   app: AppState | null;
   mode?: "permissions" | "advanced" | "all";
+  read?: Act;
 }) {
   const [permissions, setPermissions] = useState<any>(null),
     [input, setInput] = useState<any>(null),
@@ -722,31 +758,113 @@ export function BackendPanel({
     [args, setArgs] = useState("{}"),
     [observation, setObservation] = useState<any>(null),
     [parseError, setParseError] = useState(""),
-    [pending, setPending] = useState(false);
+    [pending, setPending] = useState(""),
+    [permissionPending, setPermissionPending] = useState(false),
+    [permissionError, setPermissionError] = useState(""),
+    [operationError, setOperationError] = useState(""),
+    [configError, setConfigError] = useState(""),
+    [configDirty, setConfigDirty] = useState(false),
+    [configNotice, setConfigNotice] = useState(""),
+    [observationError, setObservationError] = useState(""),
+    [observationRetry, setObservationRetry] = useState(0);
+  const operationLock = useRef(false),
+    permissionLock = useRef(false);
   const check = async () => {
-    setPending(true);
+    if (permissionLock.current) return;
+    permissionLock.current = true;
+    setPermissionPending(true);
+    setPermissionError("");
     try {
-      setPermissions(await act("permissions"));
-      setInput(await act("input_status"));
+      const results = await Promise.allSettled([
+        read("permissions"),
+        read("input_status"),
+      ]);
+      const errors = [];
+      if (results[0].status === "fulfilled" && results[0].value)
+        setPermissions(results[0].value);
+      else {
+        setPermissions(null);
+        errors.push(
+          results[0].status === "rejected"
+            ? failureText(results[0].reason)
+            : "未收到权限检查结果",
+        );
+      }
+      if (results[1].status === "fulfilled" && results[1].value)
+        setInput(results[1].value);
+      else {
+        setInput(null);
+        errors.push(
+          results[1].status === "rejected"
+            ? failureText(results[1].reason)
+            : "未收到输入检测结果",
+        );
+      }
+      setPermissionError(errors.join("；"));
     } finally {
-      setPending(false);
+      permissionLock.current = false;
+      setPermissionPending(false);
     }
   };
   useEffect(() => {
     if (app && mode !== "advanced") void check();
   }, [!!app, mode]);
+  const perform = async (
+    name: string,
+    action: () => Promise<void>,
+    target: "permissions" | "config" | "tools" = "tools",
+  ) => {
+    if (operationLock.current) return;
+    operationLock.current = true;
+    setPending(name);
+    const setError =
+      target === "config"
+        ? setConfigError
+        : target === "permissions"
+          ? setPermissionError
+          : setOperationError;
+    setError("");
+    try {
+      await action();
+    } catch (error) {
+      setError(failureText(error));
+    } finally {
+      operationLock.current = false;
+      setPending("");
+    }
+  };
+  const mutate = async (
+    command: string,
+    params?: Record<string, unknown>,
+    success?: string,
+  ) => {
+    const result =
+      success === undefined
+        ? await act(command, params)
+        : await act(command, params, success);
+    if (result === undefined || result === false)
+      throw new Error("操作未完成，请查看错误提示后重试。");
+    return result;
+  };
   const observe = async () => {
     let argumentsValue;
     try {
       argumentsValue = JSON.parse(args);
+      if (
+        !argumentsValue ||
+        Array.isArray(argumentsValue) ||
+        typeof argumentsValue !== "object"
+      ) {
+        setParseError("工具参数必须为 JSON 对象，例如 {}。");
+        return;
+      }
       setParseError("");
     } catch {
       setParseError("工具参数必须为有效 JSON");
       return;
     }
-    setPending(true);
-    try {
-      const r = await act("control", {
+    await perform("observe", async () => {
+      const r = await mutate("control", {
         action: "observe",
         args: {
           server,
@@ -755,26 +873,85 @@ export function BackendPanel({
           arguments: argumentsValue,
         },
       });
-      if (r) setObservation({ task_id: r.task_id, status: r.status });
-    } finally {
-      setPending(false);
-    }
+      if (!r?.task_id)
+        throw new Error("未收到操作记录，请在任务列表核对，勿重复执行。");
+      setObservationError("");
+      setObservation(r);
+    });
   };
   useEffect(() => {
-    if (!observation?.task_id || observation?.ended_at) return;
+    if (
+      !observation?.task_id ||
+      observation?.ended_at ||
+      terminalStatuses.has(observation?.status)
+    )
+      return;
     let cancelled = false;
-    const timer = setInterval(async () => {
-      const r = await act("control", {
-        action: "task_detail",
-        args: { task_id: observation.task_id },
-      });
-      if (r && !cancelled) setObservation(r);
-    }, 1000);
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const r = await read("control", {
+          action: "task_detail",
+          args: { task_id: observation.task_id },
+        });
+        if (!r?.task_id) throw new Error("未收到操作状态");
+        if (cancelled) return;
+        setObservation(r);
+        setObservationError("");
+        if (!r.ended_at && !terminalStatuses.has(r.status))
+          timer = setTimeout(poll, 1000);
+      } catch (error) {
+        if (!cancelled)
+          setObservationError(
+            `无法读取操作状态：${failureText(error)}。可重新读取状态，不会再次执行工具。`,
+          );
+      }
+    };
+    timer = setTimeout(poll, 1000);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
-  }, [observation?.task_id, observation?.ended_at]);
+  }, [observation?.task_id, observationRetry, read]);
+  const observing =
+    !!observation?.task_id &&
+    !observation?.ended_at &&
+    !terminalStatuses.has(observation?.status);
+  const executorAvailable =
+    !!snapshot && app?.worker_running !== false && !app?.worker_starting;
+  const discoverTools = (append = false) =>
+    perform("tools", async () => {
+      const cursor = append ? tools?.result?.nextCursor : undefined;
+      const value = await read("control", {
+        action: "tools",
+        args: { server, ...(append ? { session: tools.session, cursor } : {}) },
+      });
+      if (
+        !value?.session ||
+        !Array.isArray(value.result?.tools) ||
+        value.result.tools.some(
+          (t: any) => !t || typeof t.name !== "string" || !t.name,
+        )
+      )
+        throw new Error("后端未返回有效工具列表");
+      if (append && value.session !== tools.session)
+        throw new Error("后端会话已变化，请重新读取工具。");
+      const cursors = append ? [...(tools.cursors || []), cursor] : [];
+      if (value.result.nextCursor && cursors.includes(value.result.nextCursor))
+        throw new Error("后端重复返回分页位置，请重新读取工具。");
+      const items = append
+        ? [...tools.result.tools, ...value.result.tools]
+        : value.result.tools;
+      const uniqueTools = [
+        ...new Map(items.map((t: any) => [t.name, t])).values(),
+      ];
+      setTools({
+        ...value,
+        cursors,
+        result: { ...value.result, tools: uniqueTools },
+      });
+      if (!append) setTool("");
+    });
   const checks = [
     {
       name: "辅助功能",
@@ -814,8 +991,12 @@ export function BackendPanel({
         <section className="requirements-section">
           <div className="row between">
             <h2>这台 Mac 是否具备条件</h2>
-            <button className="link" disabled={pending} onClick={check}>
-              检查系统权限
+            <button
+              className="link"
+              disabled={permissionPending}
+              onClick={check}
+            >
+              {permissionPending ? "检查中…" : "检查系统权限"}
             </button>
           </div>
           <div className="card">
@@ -832,20 +1013,35 @@ export function BackendPanel({
                 </div>
                 {c.kind && permissions && !c.ok && (
                   <button
-                    onClick={() => act("open_permission", { kind: c.kind })}
+                    disabled={!!pending}
+                    onClick={() =>
+                      perform(
+                        "permission",
+                        () => mutate("open_permission", { kind: c.kind }),
+                        "permissions",
+                      )
+                    }
                   >
                     系统设置
                   </button>
                 )}
                 {c.awake && app && (
                   <button
+                    disabled={!!pending}
                     onClick={() =>
-                      act("save_preferences", {
-                        preferences: {
-                          ...app.preferences,
-                          keep_awake: !app.preferences.keep_awake,
+                      perform(
+                        "awake",
+                        async () => {
+                          await mutate("save_preferences", {
+                            preferences: {
+                              ...app.preferences,
+                              keep_awake: !app.preferences.keep_awake,
+                            },
+                          });
+                          await check();
                         },
-                      })
+                        "permissions",
+                      )
                     }
                   >
                     {app.preferences.keep_awake ? "关闭保持唤醒" : "保持唤醒"}
@@ -854,12 +1050,28 @@ export function BackendPanel({
               </div>
             ))}
           </div>
+          <small className="input-permission-note">
+            以上权限仅检查 Macrun
+            应用；后端需单独授权，截图和控制能力仍需实际验证。
+          </small>
+          {permissionError && (
+            <p className="error-text" role="alert">
+              {permissionError}
+            </p>
+          )}
           {input && !input.available && (
             <small className="input-permission-note">
               本机输入检测尚不可用。
               <button
                 className="link"
-                onClick={() => act("open_permission", { kind: "input" })}
+                disabled={!!pending}
+                onClick={() =>
+                  perform(
+                    "permission",
+                    () => mutate("open_permission", { kind: "input" }),
+                    "permissions",
+                  )
+                }
               >
                 授权输入监控
               </button>
@@ -874,16 +1086,20 @@ export function BackendPanel({
             <summary>后端实拍与状态核对</summary>
             <div className="feature-disclosure-body">
               <p className="muted">
-                选择后端公布的只读观察或截图工具。结果未知的操作不会自动重放。
+                工具由后端提供，可能包含点击和输入操作。请核对用途后选择只读观察或截图工具；结果未知的操作不会自动重放。
               </p>
               <label className="field">
                 <span>后端</span>
                 <select
                   value={server}
+                  disabled={!!pending || observing}
                   onChange={(e) => {
                     setServer(e.target.value);
                     setTools(null);
                     setTool("");
+                    setObservation(null);
+                    setObservationError("");
+                    setOperationError("");
                   }}
                 >
                   <option value="">选择后端</option>
@@ -894,61 +1110,85 @@ export function BackendPanel({
               </label>
               <div className="actions">
                 <button
-                  disabled={!server || pending}
-                  onClick={async () =>
-                    setTools(
-                      await act("control", {
-                        action: "tools",
-                        args: { server },
-                      }),
-                    )
+                  disabled={
+                    !server || !!pending || observing || !executorAvailable
                   }
+                  onClick={() => discoverTools()}
                 >
-                  读取工具
+                  {pending === "tools" ? "读取工具中…" : "读取工具"}
                 </button>
                 <button
-                  disabled={!server || pending}
-                  onClick={async () => {
-                    await act(
-                      "control",
-                      { action: "restart_backend", args: { server } },
-                      "后端会话已失效，请重新读取工具",
-                    );
-                    setTools(null);
-                    setTool("");
-                  }}
+                  disabled={
+                    !server || !!pending || observing || !executorAvailable
+                  }
+                  onClick={() =>
+                    perform("restart", async () => {
+                      await mutate(
+                        "control",
+                        { action: "restart_backend", args: { server } },
+                        "后端会话已失效，请重新读取工具",
+                      );
+                      setTools(null);
+                      setTool("");
+                    })
+                  }
                 >
-                  重启后端
+                  {pending === "restart" ? "重启中…" : "重启后端"}
                 </button>
               </div>
+              {!executorAvailable && (
+                <small className="input-permission-note">
+                  连接执行器后可读取工具和核对桌面操作。
+                </small>
+              )}
               {tools && (
                 <>
                   <label className="field">
                     <span>工具（{tools.result?.tools?.length || 0}）</span>
                     <select
                       value={tool}
+                      disabled={!!pending || observing}
                       onChange={(e) => setTool(e.target.value)}
                     >
-                      <option value="">选择只读截图工具</option>
+                      <option value="">选择观察或截图工具</option>
                       {tools.result?.tools?.map((t: any) => (
                         <option key={t.name}>{t.name}</option>
                       ))}
                     </select>
                   </label>
+                  {tools.result?.nextCursor && (
+                    <button
+                      disabled={!!pending || observing || !executorAvailable}
+                      onClick={() => discoverTools(true)}
+                    >
+                      读取更多工具
+                    </button>
+                  )}
                   {tool && (
-                    <pre className="schema">
-                      {JSON.stringify(
-                        tools.result?.tools?.find((t: any) => t.name === tool)
-                          ?.inputSchema,
-                        null,
-                        2,
-                      )}
-                    </pre>
+                    <>
+                      <p className="muted">
+                        {tools.result?.tools?.find((t: any) => t.name === tool)
+                          ?.description ||
+                          "后端未提供工具说明，请先核对其用途。"}
+                      </p>
+                      <pre className="schema">
+                        {JSON.stringify(
+                          tools.result?.tools?.find((t: any) => t.name === tool)
+                            ?.inputSchema,
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </>
                   )}
                   <label className="field">
                     <span>工具参数 JSON</span>
                     <textarea
                       value={args}
+                      disabled={!!pending || observing}
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       onChange={(e) => setArgs(e.target.value)}
                     />
                   </label>
@@ -957,10 +1197,31 @@ export function BackendPanel({
                       {parseError}
                     </p>
                   )}
-                  <button disabled={!tool || pending} onClick={observe}>
-                    执行观察并核对
+                  <button
+                    disabled={
+                      !tool ||
+                      !executorAvailable ||
+                      !!pending ||
+                      observing ||
+                      !snapshot?.policy.desktop_enabled ||
+                      snapshot.policy.paused
+                    }
+                    onClick={observe}
+                  >
+                    {pending === "observe" ? "提交中…" : "执行观察并核对"}
                   </button>
+                  {(!snapshot?.policy.desktop_enabled ||
+                    snapshot.policy.paused) && (
+                    <small className="input-permission-note">
+                      请先连接执行器、取消暂停并开启桌面控制。
+                    </small>
+                  )}
                 </>
+              )}
+              {operationError && (
+                <p className="error-text" role="alert">
+                  {operationError}
+                </p>
               )}
               {observation && (
                 <>
@@ -970,9 +1231,26 @@ export function BackendPanel({
                       observation.status}
                   </p>
                   {observation.error && (
-                    <p className="error-text">{observation.error.message}</p>
+                    <p className="error-text" role="alert">
+                      {observation.error.message}
+                    </p>
                   )}
                   <ToolResult value={observation.result} />
+                </>
+              )}
+              {observationError && (
+                <>
+                  <p className="error-text" role="alert">
+                    {observationError}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setObservationError("");
+                      setObservationRetry((v) => v + 1);
+                    }}
+                  >
+                    重新读取状态
+                  </button>
                 </>
               )}
             </div>
@@ -984,12 +1262,22 @@ export function BackendPanel({
             </summary>
             <div className="feature-disclosure-body card">
               <button
-                onClick={async () => {
-                  const config = await act("backend_config");
-                  if (typeof config === "string") setText(config);
-                }}
+                disabled={!!pending || configDirty}
+                onClick={() =>
+                  perform(
+                    "config-read",
+                    async () => {
+                      const config = await read("backend_config");
+                      if (typeof config !== "string")
+                        throw new Error("未收到后端配置");
+                      setText(config);
+                      setConfigNotice("");
+                    },
+                    "config",
+                  )
+                }
               >
-                读取配置
+                {pending === "config-read" ? "读取配置中…" : "读取配置"}
               </button>
               {text !== null && (
                 <>
@@ -998,24 +1286,55 @@ export function BackendPanel({
                     <textarea
                       className="config-editor"
                       value={text}
-                      onChange={(e) => setText(e.target.value)}
+                      disabled={!!pending}
+                      onChange={(e) => {
+                        setText(e.target.value);
+                        setConfigDirty(true);
+                        setConfigNotice("");
+                      }}
                       spellCheck={false}
                     />
                   </label>
                   <button
-                    disabled={app?.worker_running}
+                    disabled={
+                      !!pending || app?.worker_running || app?.worker_starting
+                    }
                     onClick={() =>
-                      act(
-                        "save_backends",
-                        { text },
-                        "配置已保存并备份，重新连接后生效",
+                      perform(
+                        "config-save",
+                        async () => {
+                          await mutate(
+                            "save_backends",
+                            { text },
+                            "配置已保存并备份，重新连接后生效",
+                          );
+                          setConfigDirty(false);
+                          setConfigNotice("配置已保存并备份，重新连接后生效。");
+                        },
+                        "config",
                       )
                     }
                   >
-                    保存配置
+                    {pending === "config-save" ? "保存中…" : "保存配置"}
                   </button>
+                  {configDirty && (
+                    <small className="input-permission-note">
+                      更改尚未保存。
+                    </small>
+                  )}
+                  {(app?.worker_running || app?.worker_starting) && (
+                    <small className="input-permission-note">
+                      请先断开连接，再保存后端配置。
+                    </small>
+                  )}
                 </>
               )}
+              {configError && (
+                <p className="error-text" role="alert">
+                  {configError}
+                </p>
+              )}
+              {configNotice && <p role="status">{configNotice}</p>}
             </div>
           </details>
         </div>
@@ -1023,71 +1342,206 @@ export function BackendPanel({
     </>
   );
 }
+const imageTypes = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+const toolContent = (value: any): any[] =>
+  Array.isArray(value?.result?.content) ? value.result.content : [];
+const imageSource = (content: any) =>
+  content?.type === "image" &&
+  imageTypes.has(content.mimeType) &&
+  typeof content.data === "string" &&
+  content.data.length > 0
+    ? `data:${content.mimeType};base64,${content.data}`
+    : undefined;
+function ResultImage({
+  src,
+  alt,
+  className,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  return failed ? (
+    <small role="status">截图无法显示，请核对后端返回的图片格式。</small>
+  ) : (
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+function structuredPreview(value: unknown) {
+  let remaining = 250;
+  let truncated = false;
+  const omitted = () => {
+    truncated = true;
+    return "…（已省略）";
+  };
+  const limit = (item: unknown, depth = 0): unknown => {
+    if (remaining-- <= 0 || depth > 6) return omitted();
+    if (typeof item === "string")
+      return item.length > 1000 ? item.slice(0, 1000) + omitted() : item;
+    if (Array.isArray(item)) {
+      const result = item.slice(0, 40).map((entry) => limit(entry, depth + 1));
+      if (item.length > 40) result.push(omitted());
+      return result;
+    }
+    if (item && typeof item === "object") {
+      const keys = Object.keys(item);
+      const result = Object.fromEntries(
+        keys
+          .slice(0, 40)
+          .map((key) => [
+            key.length > 120 ? key.slice(0, 120) + omitted() : key,
+            limit((item as Record<string, unknown>)[key], depth + 1),
+          ]),
+      );
+      if (keys.length > 40) result["…"] = omitted();
+      return result;
+    }
+    return item;
+  };
+  let text = JSON.stringify(limit(value), null, 2) ?? "null";
+  if (text.length > 16000) text = text.slice(0, 16000) + omitted();
+  return { text, truncated };
+}
 export function ToolResult({ value }: { value: any }) {
+  const content = toolContent(value);
+  const structured =
+    value?.result?.structuredContent === undefined
+      ? null
+      : structuredPreview(value.result.structuredContent);
   return (
     <>
-      {value?.result?.content?.map((c: any, i: number) =>
-        c.type === "image" &&
-        ["image/png", "image/jpeg"].includes(c.mimeType) ? (
-          <img
+      {value?.result?.isError === true && (
+        <p className="error-text" role="alert">
+          后端工具报告执行失败，请查看返回内容。
+        </p>
+      )}
+      {content.map((c: any, i: number) =>
+        imageSource(c) ? (
+          <ResultImage
             className="observation"
             key={i}
             alt="后端观察截图"
-            src={`data:${c.mimeType};base64,${c.data}`}
+            src={imageSource(c)!}
           />
-        ) : c.type === "text" ? (
+        ) : c?.type === "text" && typeof c.text === "string" ? (
           <pre className="schema" key={i}>
             {c.text}
           </pre>
-        ) : null,
+        ) : (
+          <small className="input-permission-note" key={i}>
+            此返回内容暂不支持预览。
+          </small>
+        ),
+      )}
+      {structured && (
+        <details className="feature-disclosure">
+          <summary>结构化结果</summary>
+          <pre className="schema" aria-label="结构化结果 JSON">
+            {structured.text}
+          </pre>
+          {structured.truncated && (
+            <small className="input-permission-note">
+              预览已截断较长内容；这里只显示结果，不会执行工具。
+            </small>
+          )}
+        </details>
       )}
     </>
   );
 }
 export function Replay({
   tasks,
-  act,
   onTasks,
+  read = readNative,
 }: {
   tasks: Task[];
   act: Act;
   onTasks?: () => void;
+  read?: Act;
 }) {
   const [detail, setDetail] = useState<any>(null);
   const [records, setRecords] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(false);
-  const loadRecord = async (taskId: string) => {
-    const cached = records[taskId];
-    if (
-      cached &&
-      [
-        "succeeded",
-        "failed",
-        "cancelled",
-        "timed_out",
-        "unknown",
-        "denied",
-      ].includes(cached.status)
-    )
-      return cached;
-    const record = await act("control", {
-      action: "task_detail",
-      args: { task_id: taskId },
+  const [loadingTask, setLoadingTask] = useState("");
+  const [error, setError] = useState("");
+  const recordsRef = useRef<Record<string, any>>({});
+  const inFlight = useRef(new Map<string, Promise<any>>());
+  const selection = useRef(0);
+  const screenshotsLoading = useRef(false);
+  const detailSection = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!detail?.task_id) return;
+    detailSection.current?.scrollIntoView?.({
+      block: "nearest",
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+        ? "auto"
+        : "smooth",
     });
-    if (record) setRecords((previous) => ({ ...previous, [taskId]: record }));
-    return record;
-  };
-  const thumbnail = (taskId: string) => {
-    const content = records[taskId]?.result?.result?.content;
-    const picture = content?.find(
-      (c: any) =>
-        c.type === "image" && ["image/png", "image/jpeg"].includes(c.mimeType),
-    );
-    return picture
-      ? `data:${picture.mimeType};base64,${picture.data}`
-      : undefined;
-  };
+  }, [detail?.task_id]);
   const recent = tasks.filter((t) => t.kind === "mcp.call").slice(0, 8);
+  const recentIds = recent.map((t) => t.task_id).join("\u0000");
+  const visibleIds = useRef(new Set<string>());
+  visibleIds.current = new Set(recent.map((t) => t.task_id));
+  useEffect(() => {
+    recordsRef.current = Object.fromEntries(
+      Object.entries(recordsRef.current).filter(([id]) =>
+        visibleIds.current.has(id),
+      ),
+    );
+    setRecords(recordsRef.current);
+  }, [recentIds]);
+  const loadRecord = (taskId: string): Promise<any> => {
+    const cached = recordsRef.current[taskId];
+    if (cached && terminalStatuses.has(cached.status))
+      return Promise.resolve(cached);
+    const existing = inFlight.current.get(taskId);
+    if (existing) return existing;
+    const request = (async () => {
+      const record = await read("control", {
+        action: "task_detail",
+        args: { task_id: taskId },
+      });
+      if (record?.task_id !== taskId) throw new Error("未收到匹配的操作记录");
+      if (visibleIds.current.has(taskId)) {
+        recordsRef.current = { ...recordsRef.current, [taskId]: record };
+        setRecords(recordsRef.current);
+      }
+      return record;
+    })().finally(() => inFlight.current.delete(taskId));
+    inFlight.current.set(taskId, request);
+    return request;
+  };
+  const thumbnail = (taskId: string) =>
+    imageSource(
+      toolContent(records[taskId]?.result).find((c) => imageSource(c)),
+    );
+  const openRecord = async (taskId: string) => {
+    const version = ++selection.current;
+    setLoadingTask(taskId);
+    setDetail(null);
+    setError("");
+    try {
+      const record = await loadRecord(taskId);
+      if (version === selection.current) setDetail(record);
+    } catch (error) {
+      if (version === selection.current)
+        setError(`操作记录读取失败：${failureText(error)}`);
+    } finally {
+      if (version === selection.current) setLoadingTask("");
+    }
+  };
   return (
     <section className="replay-section">
       <div className="row between">
@@ -1098,10 +1552,27 @@ export function Replay({
               className="link"
               disabled={loading}
               onClick={async () => {
+                if (screenshotsLoading.current) return;
+                screenshotsLoading.current = true;
                 setLoading(true);
+                setError("");
+                const failures: string[] = [];
                 try {
-                  for (const task of recent) await loadRecord(task.task_id);
+                  for (const task of recent) {
+                    try {
+                      await loadRecord(task.task_id);
+                    } catch (error) {
+                      failures.push(
+                        `${task.arguments.tool || "桌面操作"}：${failureText(error)}`,
+                      );
+                    }
+                  }
+                  if (failures.length)
+                    setError(
+                      `部分截图读取失败，可重试：${failures.join("；")}`,
+                    );
                 } finally {
+                  screenshotsLoading.current = false;
                   setLoading(false);
                 }
               }}
@@ -1116,31 +1587,38 @@ export function Replay({
           )}
         </div>
       </div>
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
       {recent.length ? (
         <div className="replay-frames">
           {recent.map((t, i) => (
             <button
               className={`card replay-frame ${detail?.task_id === t.task_id ? "selected" : ""}`}
               key={t.task_id}
-              onClick={async () => setDetail(await loadRecord(t.task_id))}
+              aria-busy={loadingTask === t.task_id}
+              disabled={loadingTask === t.task_id}
+              onClick={() => openRecord(t.task_id)}
             >
               <div className="replay-preview">
                 {thumbnail(t.task_id) ? (
-                  <img
-                    src={thumbnail(t.task_id)}
+                  <ResultImage
+                    src={thumbnail(t.task_id)!}
                     alt={`${t.arguments.tool || "桌面操作"}的记录截图`}
                   />
                 ) : (
                   <>
                     <Monitor size={24} />
                     <small>
-                      {records[t.task_id]
-                        ? ["accepted", "running", "awaiting_approval"].includes(
-                            records[t.task_id].status,
-                          )
-                          ? "操作进行中，点按刷新"
-                          : "这次操作没有截图"
-                        : "查看操作记录"}
+                      {loadingTask === t.task_id
+                        ? "读取记录中…"
+                        : records[t.task_id]
+                          ? terminalStatuses.has(records[t.task_id].status)
+                            ? "这次操作没有截图"
+                            : "操作进行中，点按刷新"
+                          : "查看操作记录"}
                     </small>
                   </>
                 )}
@@ -1167,17 +1645,30 @@ export function Replay({
         </div>
       )}
       {detail && (
-        <div className="card replay-detail">
+        <div className="card replay-detail" ref={detailSection}>
           <div className="row between">
             <h3>操作详情</h3>
             <button
               className="icon-button"
               aria-label="关闭操作详情"
-              onClick={() => setDetail(null)}
+              onClick={() => {
+                selection.current++;
+                setDetail(null);
+                setLoadingTask("");
+              }}
             >
               <X size={15} />
             </button>
           </div>
+          <p>
+            状态：
+            {statuses[detail.status as keyof typeof statuses] || detail.status}
+          </p>
+          {detail.error?.message && (
+            <p className="error-text" role="alert">
+              {detail.error.message}
+            </p>
+          )}
           <pre className="schema">
             {JSON.stringify(detail.arguments, null, 2)}
           </pre>

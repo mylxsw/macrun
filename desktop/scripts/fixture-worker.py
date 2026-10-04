@@ -29,7 +29,7 @@ import time
 
 from blake3 import blake3
 
-STATES = ("working", "idle", "empty", "paused", "offline", "approval", "overlay", "long")
+STATES = ("working", "idle", "empty", "paused", "offline", "approval", "overlay", "long", "large")
 MARKER = ".macrun-ui-fixture"
 ACTIVE = {"accepted", "running", "awaiting_approval"}
 IDS = [f"3f2a91c0-1111-4111-8111-{i:012d}" for i in range(20)]
@@ -93,12 +93,13 @@ def scenario(name):
     tasks[5].update(result={"exit_code": 2}, error={"message": "make test exited with code 2"}, output_tail="Test Suite 'CounterTests' failed\nmake: *** [test] Error 2")
     tasks[6].update(error={"message": "worker_restarted"}, output_tail="error: worker_restarted\nExecution interrupted; effects may have occurred.\nNever automatically replay.")
     snapshot = {
+        "_anchor": int(time.time() * 1000),
         "version": "0.2.0", "protocol": 2,
         "policy": {"paused": name == "paused", "desktop_enabled": True},
         "safety": {"restrict_paths": True, "roots": ["~/work", "/tmp"], "approval": "risk", "retention_days": 30, "yield_until": 0},
         "connection": {"state": "connected", "server": "203.0.113.10:7443", "_age": 11520000, "rtt_ms": 38, "error": None,
                        "checks": {"transport": True, "certificate": True, "authentication": True, "protocol": True}},
-        "backends": [{"name": "computer", "state": "running", "session": "7", "command": "/Applications/CuaDriver.app/Contents/MacOS/cua-driver mcp", "tool_count": 23}],
+        "backends": [{"name": "computer", "state": "ready", "session": "7", "command": "/Applications/CuaDriver.app/Contents/MacOS/cua-driver mcp", "tool_count": 2}],
         "workspaces": [{"root": "~/work/Counter", "_age": 120000, "status": "running"}, {"root": "~/work/macrun-site", "_age": 10800000, "status": "succeeded"}, {"root": "~/work/notes-api", "_age": 55440000, "status": "failed", "error": {"message": "路径冲突"}}],
         "tasks": tasks, "today_summary": {"total": 42, "succeeded": 38, "failed": 2, "unknown": 1, "cancelled": 1}, "total_tasks": len(tasks),
     }
@@ -113,19 +114,46 @@ def scenario(name):
         snapshot["tasks"] = [task(10, "exec.start", "awaiting_approval", 8000, command="git push origin feature/menu-bar", cwd="~/work/Counter"), *tasks[2:]]
     if name == "overlay":
         snapshot["tasks"] = [task(11, "mcp.call", "running", 500, server="computer", tool="computer.click", arguments={"x": 412, "y": 288}), *tasks[2:]]
-    if name == "long":
+    if name in ("long", "large"):
         tasks[0]["arguments"].update(command="xcodebuild test -scheme Counter -destination 'platform=macOS' " + "-only-testing:CounterTests/testPersistence ".join([""] * 9), cwd="~/work/" + "very-long-project-directory/" * 8 + "Counter")
-        for i in range(30):
+        if name == "large":
+            snapshot["tasks"].extend([
+                task(12, "exec.start", "accepted", 2000, command="echo pending-fixture", cwd="~/work/Counter"),
+                task(13, "exec.start", "awaiting_approval", 5000, command="git push origin fixture-branch", cwd="~/work/Counter"),
+                task(14, "exec.start", "denied", 6000, 1000, command="echo denied-fixture", cwd="~/work/Counter"),
+            ])
+            snapshot["workspaces"].extend({"root": f"~/work/fixture-project-{i}", "_age": i * 1000, "status": "succeeded"} for i in range(21))
+        extra_count = 1500 - len(snapshot["tasks"]) if name == "large" else 30
+        terminal = ("succeeded", "failed", "cancelled", "timed_out", "unknown", "denied")
+        for i in range(extra_count):
             item = copy.deepcopy(tasks[7])
             item.update(task_id=f"aabbccdd-1111-4111-8111-{i:012d}", _age=200000 + i * 1000)
             item["arguments"]["command"] = f"echo fixture-task-{i}"
+            item["output_tail"] = f"fixture-task-{i}\nIsolated UI test output; no command was executed.\n"
+            if name == "large":
+                item["status"] = terminal[i % len(terminal)]
+                if item["status"] != "succeeded":
+                    item.pop("result", None)
+                if item["status"] == "failed":
+                    item["result"] = {"exit_code": 2}
+                if i % 5 == 0:
+                    item["kind"] = "mcp.call"
+                    item.pop("result", None)
+                    item["arguments"].update(server="computer", tool="computer.screenshot")
+                if item["status"] in ("failed", "timed_out", "unknown"):
+                    item["error"] = {"code": "fixture_failure", "message": "隔离测试任务失败；此错误对象属于任务详情。"}
             snapshot["tasks"].append(item)
+        if name == "large":
+            snapshot["today_summary"] = {"total": len(snapshot["tasks"])}
+            for item in snapshot["tasks"]:
+                status = item["status"]
+                snapshot["today_summary"][status] = snapshot["today_summary"].get(status, 0) + 1
     return snapshot
 
 
 def materialize(value):
     value = copy.deepcopy(value)
-    now = int(time.time() * 1000)
+    now = value.pop("_anchor", int(time.time() * 1000))
     for item in value["tasks"]:
         item["started_at"] = now - item.pop("_age", 0)
         duration = item.pop("_duration", None)
@@ -136,7 +164,54 @@ def materialize(value):
     value["connection"]["since"] = now - value["connection"].pop("_age", 0)
     value["active_count"] = sum(t["status"] in ACTIVE for t in value["tasks"])
     value["total_tasks"] = len(value["tasks"])
+    value["task_counts"] = {}
+    for item in value["tasks"]:
+        status = item["status"]
+        value["task_counts"][status] = value["task_counts"].get(status, 0) + 1
     return value
+
+
+def summary(item, snapshot=False):
+    item = copy.deepcopy(item)
+    result = item.pop("result", None)
+    if snapshot and isinstance(result, dict) and isinstance(result.get("exit_code"), int):
+        item["result"] = {"exit_code": result["exit_code"]}
+    if not snapshot or item["status"] not in ACTIVE:
+        item.pop("output_tail", None)
+    return item
+
+
+def snapshot_view(state):
+    value = materialize(state)
+    tasks = sorted(value["tasks"], key=lambda item: (item["started_at"], item["task_id"]), reverse=True)
+    value["tasks"] = [summary(item, snapshot=True) for item in tasks[:200] + [item for item in tasks[200:] if item["status"] in ACTIVE]]
+    return value
+
+
+def task_page(state, args):
+    status = args.get("status") or "all"
+    if status not in ACTIVE | {"all", "succeeded", "failed", "cancelled", "timed_out", "unknown", "denied"}:
+        raise ValueError("unknown task status")
+    limit = min(100, max(1, int(args.get("limit", 50))))
+    needle = str(args.get("query", "")).strip().lower()
+    tasks = materialize(state)["tasks"]
+    tasks.sort(key=lambda item: (item["started_at"], item["task_id"]), reverse=True)
+    matches, counts = [], {}
+    for item in tasks:
+        if args.get("kind") is not None and item["kind"] != args["kind"]:
+            continue
+        arguments = item["arguments"]
+        text = " ".join(str(value) for value in [item["task_id"], item["kind"], *[arguments.get(key, "") for key in ("command", "tool", "cwd", "remote_root", "path")]]).lower()
+        if needle not in text:
+            continue
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+        if status == "all" or item["status"] == status:
+            matches.append(item)
+    cursor = args.get("cursor")
+    remaining = [item for item in matches if not cursor or (item["started_at"], item["task_id"]) < (cursor["started_at"], cursor["task_id"])]
+    page = remaining[:limit]
+    next_cursor = {key: page[-1][key] for key in ("started_at", "task_id")} if len(remaining) > len(page) else None
+    return {"tasks": [summary(item) for item in page], "total": len(tasks), "filtered_total": len(matches), "counts": counts, "next_cursor": next_cursor}
 
 
 async def read_frame(reader):
@@ -164,7 +239,11 @@ async def serve(data):
         loop.add_signal_handler(sig, stopped.set)
 
     def load():
-        return json.loads((data / "fixture-state.json").read_text())
+        value = json.loads((data / "fixture-state.json").read_text())
+        if "_anchor" not in value:
+            value["_anchor"] = int(time.time() * 1000)
+            write_json(data / "fixture-state.json", value)
+        return value
 
     async def handle(reader, writer):
         try:
@@ -172,13 +251,15 @@ async def serve(data):
             action, args = request.get("action"), request.get("args") or {}
             if action == "subscribe":
                 while not stopped.is_set():
-                    await write_frame(writer, materialize(load()))
+                    await write_frame(writer, snapshot_view(load()))
                     await asyncio.sleep(0.25)
                 return
             state = load()
             reply = {"ok": True}
             if action == "snapshot":
-                reply = materialize(state)
+                reply = snapshot_view(state)
+            elif action == "task_list":
+                reply = task_page(state, args)
             elif action == "pause":
                 state["policy"]["paused"] = bool(args["paused"])
             elif action == "desktop":
@@ -198,16 +279,23 @@ async def serve(data):
             elif action == "yield":
                 state["safety"]["yield_until"] = int(time.time() * 1000) + 30000
             elif action == "task_detail":
-                reply = next(t for t in materialize(state)["tasks"] if t["task_id"] == args["task_id"])
+                reply = next((t for t in materialize(state)["tasks"] if t["task_id"] == args["task_id"]), None)
+                if reply is None:
+                    raise ValueError("UI fixture task not found")
+                if "output_tail" in reply:
+                    output = reply.pop("output_tail").encode()
+                    length = max(1, min(65536, int(args.get("tail_bytes", 8192))))
+                    offset = max(0, len(output) - length)
+                    reply["output"] = {"text": output[offset:].decode(errors="replace"), "size": len(output), "offset": offset, "next_offset": len(output), "eof": True}
             elif action == "tools":
-                reply = {"tools": [{"name": "computer.screenshot", "description": "截取当前屏幕", "inputSchema": {"type": "object"}}, {"name": "computer.click", "description": "点击指定位置", "inputSchema": {"type": "object"}}]}
+                reply = {"session": state["backends"][0]["session"], "result": {"tools": [{"name": "computer.screenshot", "description": "截取当前屏幕", "inputSchema": {"type": "object"}}, {"name": "computer.click", "description": "点击指定位置", "inputSchema": {"type": "object"}}]}}
             elif action == "restart_backend":
                 state["backends"][0]["session"] = str(int(state["backends"][0]["session"]) + 1)
             elif action == "shutdown":
                 stopped.set()
             else:
                 reply = {"error": f"UI fixture does not implement {action}; no real operation was performed"}
-            if action not in ("snapshot", "task_detail", "tools"):
+            if action not in ("snapshot", "task_list", "task_detail", "tools"):
                 write_json(data / "fixture-state.json", state)
             with (data / "fixture-actions.jsonl").open("a") as log:
                 log.write(json.dumps({"action": action, "args": args}, ensure_ascii=False) + "\n")

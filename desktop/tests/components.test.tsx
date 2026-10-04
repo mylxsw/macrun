@@ -215,9 +215,11 @@ test("invalid observation JSON never dispatches a backend action", async () => {
     <BackendPanel
       snapshot={{
         ...snapshot,
+        policy: { paused: false, desktop_enabled: true },
         backends: [{ name: "fixture", state: "running", command: "/fixture" }],
       }}
       act={act}
+      read={act}
       app={null}
       mode="advanced"
     />,
@@ -310,7 +312,7 @@ test("replay fetches screenshots only after an explicit action and reuses the re
       },
     },
   });
-  render(<Replay tasks={[task]} act={act} />);
+  render(<Replay tasks={[task]} act={act} read={act} />);
   expect(act).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "显示截图" }));
   expect(act).toHaveBeenCalledWith("control", {
@@ -338,6 +340,7 @@ test("keeping the Mac awake can be turned off without losing other preferences",
     <BackendPanel
       snapshot={snapshot}
       act={act}
+      read={act}
       app={{ ...app, preferences: { ...app.preferences, keep_awake: true } }}
       mode="permissions"
     />,
@@ -376,11 +379,11 @@ test("replay reloads a running record after completion and then caches its scree
         },
       },
     });
-  const { rerender } = render(<Replay tasks={[task]} act={act} />);
+  const { rerender } = render(<Replay tasks={[task]} act={act} read={act} />);
   await user.click(screen.getByRole("button", { name: /screenshot.*运行中/ }));
   expect(act).toHaveBeenCalledTimes(1);
   expect(screen.getByText("操作进行中，点按刷新")).toBeTruthy();
-  rerender(<Replay tasks={[completed]} act={act} />);
+  rerender(<Replay tasks={[completed]} act={act} read={act} />);
   expect(act).toHaveBeenCalledTimes(1);
   await user.click(screen.getByRole("button", { name: /screenshot.*成功/ }));
   expect(act).toHaveBeenCalledTimes(2);
@@ -663,4 +666,149 @@ test("the migration banner distinguishes a running legacy service and hides when
     />,
   );
   expect(screen.queryByRole("region", { name: "旧版 Macrun 迁移" })).toBeNull();
+});
+
+test("manual save locks edits until the pending request finishes and preserves failed drafts", async () => {
+  let finish!: (value: unknown) => void;
+  const act = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const user = userEvent.setup();
+  render(
+    <SettingsPage
+      app={app}
+      snapshot={snapshot}
+      available
+      busy={false}
+      act={act}
+      refresh={vi.fn()}
+      setError={vi.fn()}
+      onPair={vi.fn()}
+      manualOpen
+    />,
+  );
+  const server = screen.getByRole("textbox", {
+    name: "服务器地址",
+  }) as HTMLInputElement;
+  await user.clear(server);
+  await user.type(server, "pending-save:7443");
+  const save = screen.getByRole("button", { name: "保存配置" });
+  await user.click(save);
+  expect(server.disabled).toBe(true);
+  expect(save.hasAttribute("disabled")).toBe(true);
+  await user.click(save);
+  expect(act).toHaveBeenCalledTimes(1);
+  await reactAct(async () => finish(false));
+  expect(server.disabled).toBe(false);
+  expect(server.value).toBe("pending-save:7443");
+  expect(screen.getByText("更改尚未保存。")).toBeTruthy();
+});
+
+test("editing a paired token file switches manual saving away from the old keychain credential", async () => {
+  const act = vi.fn().mockResolvedValue(undefined),
+    user = userEvent.setup();
+  render(
+    <SettingsPage
+      app={{
+        ...app,
+        settings: {
+          ...app.settings,
+          token_file: "/dev/null",
+          keychain_account: "old-account",
+        },
+      }}
+      snapshot={snapshot}
+      available
+      busy={false}
+      act={act}
+      refresh={vi.fn()}
+      setError={vi.fn()}
+      onPair={vi.fn()}
+      manualOpen
+    />,
+  );
+  const token = screen.getByRole("textbox", { name: "令牌文件路径" });
+  await user.clear(token);
+  await user.type(token, "/test/new-token");
+  await user.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(act).toHaveBeenCalledWith(
+    "save_settings",
+    {
+      settings: expect.objectContaining({
+        token_file: "/test/new-token",
+        keychain_account: "",
+      }),
+    },
+    "连接配置已保存",
+  );
+});
+
+test("starting state explains native authorization and blocks duplicate connection edits", () => {
+  const props = {
+    snapshot,
+    available: false,
+    busy: false,
+    act: vi.fn(),
+    refresh: vi.fn(),
+    setError: vi.fn(),
+    onPair: vi.fn(),
+    manualOpen: true,
+  };
+  const { rerender } = render(
+    <SettingsPage {...props} app={{ ...app, worker_starting: true }} />,
+  );
+  expect(
+    screen.getByRole("button", { name: "正在启动…" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(
+    screen.getByRole("button", { name: "重新配对" }).hasAttribute("disabled"),
+  ).toBe(true);
+  expect(
+    (screen.getByRole("textbox", { name: "服务器地址" }) as HTMLInputElement)
+      .disabled,
+  ).toBe(true);
+  expect(screen.getByText(/如果 macOS 请求访问钥匙串/)).toBeTruthy();
+  rerender(
+    <SettingsPage {...props} app={{ ...app, worker_starting: false }} />,
+  );
+  expect(
+    screen.getByRole("button", { name: "启动并连接" }).hasAttribute("disabled"),
+  ).toBe(false);
+  expect(screen.queryByText(/如果 macOS 请求访问钥匙串/)).toBeNull();
+});
+
+test("connection checks cannot show an old success after connection settings change", async () => {
+  let finish!: (value: unknown) => void;
+  const act = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const props = {
+    snapshot,
+    available: true,
+    busy: false,
+    act,
+    refresh: vi.fn(),
+    setError: vi.fn(),
+    onPair: vi.fn(),
+  };
+  const user = userEvent.setup();
+  const { rerender } = render(<SettingsPage {...props} app={app} />);
+  await user.click(screen.getByRole("button", { name: "测试连通性" }));
+  rerender(
+    <SettingsPage
+      {...props}
+      app={{ ...app, settings: { ...app.settings, server: "changed:7443" } }}
+    />,
+  );
+  await reactAct(async () =>
+    finish({ checks: [{ name: "Old connection", ok: true }] }),
+  );
+  expect(screen.queryByText(/Old connection/)).toBeNull();
+  expect(screen.getByText("changed:7443")).toBeTruthy();
 });

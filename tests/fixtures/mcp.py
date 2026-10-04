@@ -8,7 +8,13 @@ for line in sys.stdin:
     if 'id' not in v: continue
     method=v['method']; args=v.get('params',{})
     if method=='initialize': result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},'serverInfo':{'name':'fixture','version':'1'}}
-    elif method=='tools/list': result={'tools':[{'name':'observe','description':'Stateful counter fixture','inputSchema':{'type':'object','properties':{}}}]}
+    elif method=='tools/list':
+        names = ['observe']
+        if os.environ.get('MACRUN_TEST_TOOLS_PAGINATED'):
+            names = ['observe', 'last'] if args.get('cursor') == 'second-page' else ['observe', 'first']
+        result={'tools':[{'name':name,'description':'Stateful counter fixture','inputSchema':{'type':'object','properties':{}}} for name in names]}
+        if os.environ.get('MACRUN_TEST_TOOLS_PAGINATED') and not args.get('cursor'):
+            result['nextCursor']='second-page'
     elif method=='tools/call':
         a=args.get('arguments',{})
         if a.get('crash'): os._exit(2)

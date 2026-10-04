@@ -6,6 +6,8 @@ import {
   Replay,
 } from "./Features";
 import { SettingsPage } from "./SettingsPage";
+import { useTaskHistory, useReplayHistory } from "./taskHistory";
+import "./task-history.css";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import React, { useEffect, useState, useRef } from "react";
@@ -29,13 +31,7 @@ import {
   Info,
   LogOut,
 } from "lucide-react";
-import {
-  statuses,
-  active,
-  title,
-  selectTasks,
-  todaySummary,
-} from "./model.mjs";
+import { statuses, active, title, todaySummary } from "./model.mjs";
 import type { Task, Snapshot, AppState } from "./types";
 import "./style.css";
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
@@ -61,6 +57,27 @@ const duration = (t: Task) => {
 };
 const time = (t: Task) =>
   new Date(t.started_at).toLocaleTimeString("zh-CN", { hour12: false });
+type ToolPage = {
+  session: string;
+  result: {
+    tools: { name: string; [key: string]: unknown }[];
+    nextCursor?: string;
+  };
+};
+function isToolPage(value: unknown): value is ToolPage {
+  if (!value || typeof value !== "object") return false;
+  const page = value as Partial<ToolPage>;
+  return (
+    typeof page.session === "string" &&
+    page.session.length > 0 &&
+    Array.isArray(page.result?.tools) &&
+    page.result.tools.every(
+      (tool) => tool && typeof tool.name === "string" && tool.name.length > 0,
+    ) &&
+    (page.result.nextCursor === undefined ||
+      typeof page.result.nextCursor === "string")
+  );
+}
 function Status({ status }: { status: string }) {
   return (
     <span className={`tag ${status}`}>
@@ -137,10 +154,12 @@ function useAppDialog(
 
 function App() {
   const firstLoad = useRef(true);
+  const pendingActions = useRef(0);
   const quitReturnFocus = useRef<HTMLElement | null>(null);
   const toolsReturnFocus = useRef<HTMLElement | null>(null);
   const quitDialog = useRef<HTMLElement | null>(null);
   const toolsDialog = useRef<HTMLElement | null>(null);
+  const toolsRequest = useRef(0);
   const trayContent = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState("live"),
     [pairing, setPairing] = useState(false),
@@ -155,7 +174,8 @@ function App() {
     [query, setQuery] = useState(""),
     [selected, setSelected] = useState(""),
     [quit, setQuit] = useState(false),
-    [tools, setTools] = useState<any>(null),
+    [tools, setTools] = useState<ToolPage | null>(null),
+    [toolsServer, setToolsServer] = useState(""),
     [notice, setNotice] = useState("");
   const tasks = snapshot?.tasks || [],
     running = tasks.filter(active),
@@ -192,6 +212,7 @@ function App() {
   ) => {
     setError("");
     setRefreshWarning("");
+    pendingActions.current += 1;
     setBusy(true);
     try {
       const r = await invoke(command, args);
@@ -207,11 +228,23 @@ function App() {
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy(false);
+      pendingActions.current -= 1;
+      setBusy(pendingActions.current > 0);
     }
   };
   const control = (action: string, args: Record<string, unknown> = {}) =>
-    act("control", { action, args });
+    act(
+      "control",
+      { action, args },
+      {
+        cancel: "已请求取消任务，等待执行器返回结果",
+        stop_all: "已请求停止所有任务，暂停接收并关闭桌面控制",
+        pause: args.paused ? "已暂停接收新任务" : "已恢复接收新任务",
+        desktop: args.enabled
+          ? "已允许桌面控制，实际能力请通过后端验证"
+          : "已关闭桌面控制",
+      }[action],
+    );
   useEffect(() => {
     if (!isTauri) return;
     let disposed = false;
@@ -224,7 +257,12 @@ function App() {
     on<Snapshot>("worker-state", (s) => {
       setSnapshot(s);
       setAvailable(true);
-      setApp((a) => (a ? { ...a, worker_running: true } : a));
+      setApp((a) =>
+        a ? { ...a, worker_running: true, worker_starting: false } : a,
+      );
+    });
+    on<boolean>("worker-starting", (starting) => {
+      setApp((a) => (a ? { ...a, worker_starting: starting } : a));
     });
     on("worker-unavailable", () => {
       setAvailable(false);
@@ -298,7 +336,15 @@ function App() {
     sessionStorage.setItem(key, JSON.stringify(current.map((t) => t.task_id)));
   }, [snapshot]);
   useAppDialog(quit, quitDialog, quitReturnFocus, () => setQuit(false));
-  useAppDialog(!!tools, toolsDialog, toolsReturnFocus, () => setTools(null));
+  const closeTools = () => {
+    toolsRequest.current += 1;
+    setTools(null);
+  };
+  useEffect(() => {
+    toolsRequest.current += 1;
+    setTools(null);
+  }, [page, pairing]);
+  useAppDialog(!!tools, toolsDialog, toolsReturnFocus, closeTools);
   const jump = (p: string) =>
     tray ? act("open_main", { route: p }) : setPage(p);
   const stop = () => control("stop_all");
@@ -339,8 +385,21 @@ function App() {
           : "succeeded";
   const recent = tasks.slice(0, 6);
   const approvals = tasks.filter((t) => t.status === "awaiting_approval");
-  const filtered = selectTasks(tasks, filter, query) as Task[];
-  const sel = filtered.find((t) => t.task_id === selected) || filtered[0];
+  const history = useTaskHistory({
+    enabled: page === "tasks" && !tray,
+    available,
+    snapshot,
+    filter,
+    query,
+    selected,
+  });
+  const replayHistory = useReplayHistory(
+    page === "desktop" && !tray,
+    available,
+    snapshot,
+  );
+  const filtered = history.tasks;
+  const sel = history.selectedTask;
   const summary =
     snapshot?.today_summary || (todaySummary(tasks) as Record<string, number>);
   const nav = [
@@ -352,7 +411,7 @@ function App() {
   const feedback = (
     <>
       {error && (
-        <div className="alert error" role="alert">
+        <div className="alert error action-feedback" role="alert">
           <Info size={16} />
           <span>{error}</span>
           <button onClick={() => setError("")} aria-label="关闭错误提示">
@@ -370,6 +429,15 @@ function App() {
             {notice}
           </div>
         )
+      )}
+      {app?.worker_starting && !overlay && !border && (
+        <div className="alert startup-feedback" role="status">
+          <RefreshCw size={16} className="loading-icon" />
+          <span>
+            正在启动执行器。如 macOS 弹出钥匙串授权，请在系统窗口中完成允许。
+            等待期间仍可查看其他页面。
+          </span>
+        </div>
       )}
     </>
   );
@@ -622,6 +690,14 @@ function App() {
           </div>
         )}
         {feedback}
+        {snapshot && !available && !app?.worker_starting && (
+          <div className="alert" role="status">
+            <Info size={16} />
+            <span>
+              执行器暂时不可用。以下保留上次收到的记录，任务状态可能已变化。
+            </span>
+          </div>
+        )}
         {page === "live" && (
           <>
             <header className="page-header">
@@ -672,9 +748,11 @@ function App() {
                     ? paused
                       ? "已暂停接收"
                       : "运行中 · 接收任务"
-                    : app?.worker_running
-                      ? "正在启动／连接本机控制"
-                      : "未运行"
+                    : app?.worker_starting
+                      ? "正在读取凭据并启动"
+                      : app?.worker_running
+                        ? "正在启动／连接本机控制"
+                        : "未运行"
                 }
                 detail={
                   snapshot
@@ -715,6 +793,7 @@ function App() {
                       act("open_workspace", {
                         root: t.arguments.cwd || t.arguments.remote_root,
                         terminal: true,
+                        taskId: t.task_id,
                       })
                     }
                   />
@@ -723,12 +802,18 @@ function App() {
                   <div className="card empty">
                     <Activity size={28} />
                     <h3>
-                      {available ? "等待 Agent 发起任务" : "连接你的服务器"}
+                      {available
+                        ? "等待 Agent 发起任务"
+                        : app?.worker_starting
+                          ? "正在启动执行器"
+                          : "连接你的服务器"}
                     </h3>
                     <p>
                       {available
                         ? "新任务、命令输出和同步进度会实时显示在这里。"
-                        : "启动执行器后，在这里查看这台电脑上的执行情况。"}
+                        : app?.worker_starting
+                          ? "如有钥匙串授权窗口，请完成系统确认。连接成功后，任务会自动显示。"
+                          : "启动执行器后，在这里查看这台电脑上的执行情况。"}
                     </p>
                     {!available && (
                       <button
@@ -768,8 +853,7 @@ function App() {
                 </p>
                 {(snapshot?.total_tasks || 0) > 200 && (
                   <p className="muted">
-                    列表显示最近 200
-                    条和所有进行中的任务；今日汇总包含全部今日记录。
+                    在任务页查看完整历史记录，支持按状态、命令和目录查找。
                   </p>
                 )}
               </aside>
@@ -789,7 +873,10 @@ function App() {
                   aria-label="搜索任务"
                   placeholder="命令、目录或任务编号"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setSelected("");
+                  }}
                 />
               </label>
             </header>
@@ -799,46 +886,128 @@ function App() {
                   aria-pressed={filter === k}
                   key={k}
                   className={filter === k ? "on" : ""}
-                  onClick={() => setFilter(k)}
+                  onClick={() => {
+                    setFilter(k);
+                    setSelected("");
+                  }}
                 >
                   <span className={`dot ${k}`} />
                   {v}
                   <small>
                     {k === "all"
-                      ? tasks.length
-                      : tasks.filter((t) => t.status === k).length}
+                      ? Object.values(history.counts).reduce(
+                          (sum, count) => sum + count,
+                          0,
+                        )
+                      : history.counts[k] || 0}
                   </small>
                 </button>
               ))}
             </div>
             <div className="task-grid">
-              <section className="card task-list" aria-label="任务列表">
-                {filtered.map((t) => (
-                  <button
-                    className={sel?.task_id === t.task_id ? "selected" : ""}
-                    key={t.task_id}
-                    onClick={() => setSelected(t.task_id)}
-                  >
-                    <span className={`dot ${t.status}`} />
-                    <div className="grow">
-                      <div className="mono ellipsis">{title(t)}</div>
-                      <small>
-                        {kindLabel(t)} · {time(t)}
-                      </small>
-                    </div>
-                    <div className="right">
-                      <span className={`text-${t.status}`}>
-                        {label(t.status)}
-                      </span>
-                      <small className="mono">{duration(t)}</small>
-                    </div>
-                  </button>
-                ))}
-                {!filtered.length && (
-                  <div className="empty">没有匹配的任务</div>
+              <div className="task-history-list">
+                {!available && (
+                  <p className="task-history-status">
+                    执行器未连接，仅显示已缓存的近期任务。
+                  </p>
                 )}
-              </section>
+                {history.error && (
+                  <div className="task-history-error" role="alert">
+                    历史记录读取失败：{history.error}{" "}
+                    <button onClick={history.reload}>重新加载历史</button>
+                  </div>
+                )}
+                <section
+                  className="card task-list"
+                  aria-label="任务列表"
+                  ref={history.list}
+                  aria-busy={history.loading}
+                >
+                  {filtered.map((t) => (
+                    <button
+                      className={sel?.task_id === t.task_id ? "selected" : ""}
+                      key={t.task_id}
+                      onClick={() => {
+                        setSelected(t.task_id);
+                        if (window.innerWidth <= 1000)
+                          document
+                            .querySelector<HTMLElement>(
+                              '[aria-label="任务详情"]',
+                            )
+                            ?.scrollIntoView?.({
+                              block: "nearest",
+                              behavior: "smooth",
+                            });
+                      }}
+                    >
+                      <span className={`dot ${t.status}`} />
+                      <div className="grow">
+                        <div className="mono ellipsis">{title(t)}</div>
+                        <small>
+                          {kindLabel(t)} · {time(t)}
+                        </small>
+                      </div>
+                      <div className="right">
+                        <span className={`text-${t.status}`}>
+                          {label(t.status)}
+                        </span>
+                        <small className="mono">{duration(t)}</small>
+                      </div>
+                    </button>
+                  ))}
+                  {!filtered.length && (
+                    <div className="empty">
+                      {history.loading ? "正在读取任务…" : "没有匹配的任务"}
+                    </div>
+                  )}
+                </section>
+                <nav className="task-pagination" aria-label="任务分页">
+                  <span role="status">
+                    {history.loading
+                      ? "正在读取…"
+                      : `共 ${history.filtered_total} 条 · 第 ${history.pageNumber} 页`}
+                  </span>
+                  <button
+                    disabled={!history.previous || history.loading}
+                    onClick={() => {
+                      setSelected("");
+                      history.previous?.();
+                      if (window.innerWidth <= 1000)
+                        document
+                          .querySelector<HTMLElement>('[aria-label="任务详情"]')
+                          ?.scrollIntoView?.({
+                            block: "nearest",
+                            behavior: "smooth",
+                          });
+                    }}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    disabled={!history.next || history.loading}
+                    onClick={() => {
+                      setSelected("");
+                      history.next?.();
+                      if (window.innerWidth <= 1000)
+                        document
+                          .querySelector<HTMLElement>('[aria-label="任务详情"]')
+                          ?.scrollIntoView?.({
+                            block: "nearest",
+                            behavior: "smooth",
+                          });
+                    }}
+                  >
+                    下一页
+                  </button>
+                </nav>
+              </div>
               <section className="card task-detail" aria-label="任务详情">
+                {history.detailError && (
+                  <div className="task-history-error" role="alert">
+                    任务详情读取失败：{history.detailError}{" "}
+                    <button onClick={history.reload}>重试读取详情</button>
+                  </div>
+                )}
                 {sel ? (
                   <>
                     <div className="row between">
@@ -888,7 +1057,11 @@ function App() {
                       <small>最后 8 KB</small>
                     </div>
                     <pre className="term">
-                      {sel.output_tail || sel.error?.message || "暂无文本输出"}
+                      {history.detailLoading
+                        ? "正在读取输出…"
+                        : sel.output_tail ||
+                          sel.error?.message ||
+                          "暂无文本输出"}
                     </pre>
                     <div className="actions">
                       <button onClick={() => copy(sel.task_id)}>
@@ -902,7 +1075,7 @@ function App() {
                       </button>
                       {sel.status === "unknown" && (
                         <button onClick={() => setPage("desktop")}>
-                          截一张当前屏幕核对
+                          前往桌面控制核对
                         </button>
                       )}
                       {active(sel) && (
@@ -989,12 +1162,17 @@ function App() {
                     <button
                       disabled={!available || busy}
                       onClick={async () => {
+                        const request = ++toolsRequest.current;
                         const trigger = document.activeElement as HTMLElement;
                         const r = await control("tools", { server: b.name });
-                        if (r) {
-                          toolsReturnFocus.current = trigger;
-                          setTools(r);
+                        if (!r || request !== toolsRequest.current) return;
+                        if (!isToolPage(r)) {
+                          setError("后端未返回有效工具列表，请重试。");
+                          return;
                         }
+                        toolsReturnFocus.current = trigger;
+                        setToolsServer(b.name);
+                        setTools(r);
                       }}
                     >
                       查看工具列表
@@ -1087,7 +1265,16 @@ function App() {
                 <kbd>⌃ ⌥ ⌘ .</kbd>
               </div>
             </div>
-            <Replay tasks={tasks} act={act} onTasks={() => setPage("tasks")} />
+            {replayHistory.error && (
+              <p className="task-history-error" role="alert">
+                最近操作读取失败：{replayHistory.error}
+              </p>
+            )}
+            <Replay
+              tasks={replayHistory.tasks}
+              act={act}
+              onTasks={() => setPage("tasks")}
+            />
           </>
         )}
         {page === "settings" && (
@@ -1117,9 +1304,56 @@ function App() {
           >
             <h2>后端工具列表</h2>
             <pre className="term">{JSON.stringify(tools, null, 2)}</pre>
-            <button autoFocus onClick={() => setTools(null)}>
-              关闭
-            </button>
+            <div className="row between">
+              <small>已读取 {tools.result?.tools?.length || 0} 个工具</small>
+              <div className="actions">
+                {tools.result?.nextCursor && (
+                  <button
+                    disabled={busy}
+                    onClick={async () => {
+                      const request = ++toolsRequest.current;
+                      const next = await control("tools", {
+                        server: toolsServer,
+                        cursor: tools.result.nextCursor,
+                      });
+                      if (!next || request !== toolsRequest.current) return;
+                      if (!isToolPage(next)) {
+                        setError("后端未返回有效工具列表，请重试。");
+                        return;
+                      }
+                      if (next.session !== tools.session) {
+                        closeTools();
+                        setError("后端会话已变化，请重新打开工具列表。");
+                        return;
+                      }
+                      const merged = new Map<
+                        string,
+                        ToolPage["result"]["tools"][number]
+                      >();
+                      for (const item of [
+                        ...(tools.result?.tools || []),
+                        ...(next.result?.tools || []),
+                      ])
+                        merged.set(item.name, item);
+                      setTools({
+                        ...next,
+                        result: { ...next.result, tools: [...merged.values()] },
+                      });
+                    }}
+                  >
+                    {busy ? "读取中…" : "读取更多工具"}
+                  </button>
+                )}
+                <button autoFocus onClick={closeTools}>
+                  关闭
+                </button>
+              </div>
+            </div>
+            {error && (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
+            )}
           </section>
         </div>
       )}
@@ -1230,9 +1464,7 @@ function TaskCard({
       )}
       {!sync && (
         <div className="actions">
-          <button onClick={view}>
-            {sync ? "查看同步详情" : "查看完整输出"}
-          </button>
+          <button onClick={view}>查看任务详情</button>
           {(t.arguments.cwd || t.arguments.remote_root) && (
             <button className="ghost" onClick={openDirectory}>
               在终端打开目录

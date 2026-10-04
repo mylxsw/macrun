@@ -63,6 +63,7 @@ export type AppState = {
     auto_connect: boolean;
   };
   worker_running: boolean;
+  worker_starting?: boolean;
   snapshot: Snapshot | null;
   settings: Settings;
   data_dir: string;

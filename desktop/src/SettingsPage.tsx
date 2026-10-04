@@ -35,12 +35,36 @@ export function SettingsPage({
   const [settings, setSettings] = useState(app?.settings || emptySettings),
     [dirty, setDirty] = useState(false),
     [manual, setManual] = useState(manualOpen),
+    [savingSettings, setSavingSettings] = useState(false),
     [checks, setChecks] = useState<any>(null),
     [migrationOpen, setMigrationOpen] = useState(false);
   const migrationTrigger = useRef<HTMLButtonElement>(null);
   const connectionAction = useRef<HTMLButtonElement>(null);
   const connectionHeading = useRef<HTMLHeadingElement>(null);
   const connection = useRef<HTMLElement>(null);
+  const savePending = useRef(false);
+  const editVersion = useRef(0);
+  const connectionIdentity = useRef("");
+  connectionIdentity.current = JSON.stringify([
+    app?.settings.server,
+    app?.settings.cert,
+    app?.settings.certificate_fingerprint,
+    app?.settings.keychain_account,
+    app?.settings.token_file,
+    available,
+  ]);
+  const connectionBusy = busy || savingSettings || !!app?.worker_starting;
+  useEffect(
+    () => setChecks(null),
+    [
+      app?.settings.server,
+      app?.settings.cert,
+      app?.settings.certificate_fingerprint,
+      app?.settings.keychain_account,
+      app?.settings.token_file,
+      available,
+    ],
+  );
   useEffect(() => {
     if (app && !dirty) setSettings(app.settings);
   }, [app?.settings, dirty]);
@@ -51,8 +75,13 @@ export function SettingsPage({
     }
   }, [manualOpen]);
   const update = (k: keyof Settings, v: string) => {
+    editVersion.current += 1;
     setDirty(true);
-    setSettings((s) => ({ ...s, [k]: v }));
+    setSettings((s) => ({
+      ...s,
+      [k]: v,
+      ...(k === "token_file" ? { keychain_account: "" } : {}),
+    }));
   };
   const pref = (key: keyof AppState["preferences"], enabled: boolean) =>
     app &&
@@ -139,16 +168,18 @@ export function SettingsPage({
           <div className="feature-line">
             <span className="setting-key">服务器</span>
             <span className="grow mono wrap">
-              {snapshot?.connection.server ||
-                app?.settings.server ||
+              {app?.settings.server ||
+                snapshot?.connection.server ||
                 "尚未配对"}
             </span>
             <span className={`tag ${connected ? "succeeded" : ""}`}>
               {connected
                 ? "已连接 · QUIC"
-                : app?.worker_running
-                  ? "连接中"
-                  : "未连接"}
+                : app?.worker_starting
+                  ? "正在启动"
+                  : app?.worker_running
+                    ? "连接中"
+                    : "未连接"}
             </span>
           </div>
           <div className="feature-line">
@@ -192,7 +223,10 @@ export function SettingsPage({
                 ? "有任务运行时，请先全部停止，等待任务结束后再断开。"
                 : "更换服务器或令牌失效时重新配对。现有任务记录会保留。"}
             </small>
-            <button disabled={busy || app?.worker_running} onClick={onPair}>
+            <button
+              disabled={connectionBusy || app?.worker_running}
+              onClick={onPair}
+            >
               {app?.settings.server ? "重新配对" : "配对服务器"}
             </button>
             {app?.worker_running ? (
@@ -208,26 +242,52 @@ export function SettingsPage({
               <button
                 ref={connectionAction}
                 disabled={
-                  busy || dirty || !app?.settings.server || app?.legacy_running
+                  connectionBusy ||
+                  dirty ||
+                  !app?.settings.server ||
+                  app?.legacy_running
                 }
                 onClick={() => act("start_worker", {}, "已请求启动执行器")}
               >
-                启动并连接
+                {app?.worker_starting ? "正在启动…" : "启动并连接"}
               </button>
             )}
           </div>
         </div>
+        {app?.worker_starting && (
+          <p className="muted" role="status">
+            正在启动执行器。如果 macOS
+            请求访问钥匙串，请完成系统授权后等待连接；无需重复点击。
+          </p>
+        )}
         {manual && (
           <form
             className="card connection-form"
             onSubmit={async (e) => {
               e.preventDefault();
-              const saved = await act(
-                "save_settings",
-                { settings },
-                "连接配置已保存",
-              );
-              if (saved !== undefined) setDirty(false);
+              if (connectionBusy || app?.worker_running || savePending.current)
+                return;
+              savePending.current = true;
+              setSavingSettings(true);
+              const revision = editVersion.current;
+              try {
+                const saved = await act(
+                  "save_settings",
+                  { settings },
+                  "连接配置已保存",
+                );
+                if (
+                  saved !== undefined &&
+                  saved !== false &&
+                  editVersion.current === revision
+                )
+                  setDirty(false);
+              } catch (error) {
+                setError(String(error));
+              } finally {
+                savePending.current = false;
+                setSavingSettings(false);
+              }
             }}
           >
             <div className="row between">
@@ -265,7 +325,7 @@ export function SettingsPage({
                   value={settings[k]}
                   placeholder={placeholder}
                   onChange={(e) => update(k, e.target.value)}
-                  disabled={app?.worker_running}
+                  disabled={connectionBusy || app?.worker_running}
                 />
               </label>
             ))}
@@ -276,7 +336,7 @@ export function SettingsPage({
               <button
                 type="submit"
                 className="primary"
-                disabled={busy || app?.worker_running || !dirty}
+                disabled={connectionBusy || app?.worker_running || !dirty}
               >
                 保存配置
               </button>
@@ -298,10 +358,7 @@ export function SettingsPage({
               className="switch"
               disabled={busy || !app}
               checked={app?.autostart || false}
-              onChange={async (e) => {
-                await act("autostart", { enabled: e.target.checked });
-                refresh().catch((e) => setError(String(e)));
-              }}
+              onChange={(e) => act("autostart", { enabled: e.target.checked })}
             />
           </label>
           <div className="feature-line">
@@ -398,7 +455,7 @@ export function SettingsPage({
           </div>
           <div className="feature-line feature-shaded">
             <small className="grow">
-              诊断包包含版本、连通状态和脱敏日志，不包含命令输出、文件内容、截图和令牌。
+              诊断包包含版本、连接状态、运行任务数量和权限状态，不包含日志、命令输出、文件内容、截图和令牌。
             </small>
             <button
               disabled={busy || !app}
@@ -409,8 +466,11 @@ export function SettingsPage({
             <button
               disabled={busy || !available}
               onClick={async () => {
+                setChecks(null);
+                const identity = connectionIdentity.current;
                 const result = await act("connection_check");
-                if (result) setChecks(result);
+                if (result && identity === connectionIdentity.current)
+                  setChecks(result);
               }}
             >
               测试连通性

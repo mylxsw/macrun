@@ -1,6 +1,6 @@
 # Macrun UI 还原交接
 
-2026-10-04 更新：本轮已完成七个画板的 UI 还原和相关交互复查。修改前后截图、测试记录和未覆盖范围见 [v2 界面还原复查](ui-review/README.md)。以下保留接手时的基线与要求；当前设置页已拆至 `desktop/src/SettingsPage.tsx`，菜单栏面板宽 352，配对窗口独立为 800×580。
+2026-10-04 更新：本轮已完成七个画板的 UI 还原和相关交互复查。后续全量分页、按钮反馈、真实截图与点击的质量回归见 [界面与交互验收](quality-review.md)。修改前后截图、测试记录和未覆盖范围见 [v2 界面还原复查](ui-review/README.md)。以下保留接手时的基线与要求；当前设置页已拆至 `desktop/src/SettingsPage.tsx`，菜单栏面板宽 352，配对窗口独立为 800×580。
 
 ## 给接手的 ChatGPT / Codex
 
@@ -60,7 +60,7 @@ make desktop-build                # 优化构建
 /Users/mylxsw/Workspace/codes/vibe/macrun/desktop/src-tauri/target/debug/bundle/macos/Macrun Desktop.app
 ```
 
-当前开发模式沿用本机配置，可能按已有设置自动连接。需要隔离时，可在 debug 模式使用项目已经支持的 `MACRUN_DESKTOP_DATA` 指定测试目录；先检查旧服务冲突，不迁移生产 LaunchAgent、不修改生产凭据。不把模拟数据写进正式配置或业务代码。
+当前开发模式沿用本机配置，可能按已有设置自动连接。需要隔离时，可在 debug 模式使用项目已经支持的 `MACRUN_DESKTOP_DATA` 指定测试目录；先检查旧服务冲突，不迁移生产 LaunchAgent、不修改生产凭据。不把模拟数据写进正式配置或业务代码。原生视觉验收请按 [夹具启动说明](../../desktop/scripts/fixture-README.md)准备隔离副本并通过系统应用入口打开；本机直接运行包内二进制曾白屏，不能据辅助功能树正常就判定画面正常。
 
 ## 实现文件导航
 

@@ -8,46 +8,87 @@ unsafe extern "C" {
 pub fn permissions() -> Value {
     json!({"accessibility":unsafe {AXIsProcessTrusted()},"screen_recording":unsafe{CGPreflightScreenCaptureAccess()},"graphical_session":unsafe{macrun_graphical_session()},"keep_awake":unsafe{macrun_awake_active()},"scope":"desktop_app","note":"后端有独立权限；请通过后端实拍验证。"})
 }
-#[tauri::command]
-pub fn open_permission(kind: String) -> std::result::Result<(), String> {
-    let pane = match kind.as_str() {
+fn permission_url(kind: &str) -> std::result::Result<String, String> {
+    let pane = match kind {
         "accessibility" => "Privacy_Accessibility",
         "screen" => "Privacy_ScreenCapture",
         "input" => "Privacy_ListenEvent",
         _ => return Err("未知权限".into()),
     };
-    Command::new("open")
-        .arg(format!(
-            "x-apple.systempreferences:com.apple.preference.security?{pane}"
-        ))
-        .spawn()
+    Ok(format!(
+        "x-apple.systempreferences:com.apple.preference.security?{pane}"
+    ))
+}
+#[tauri::command]
+pub async fn open_permission(kind: String) -> std::result::Result<(), String> {
+    let status = tokio::process::Command::new("open")
+        .arg(permission_url(&kind)?)
+        .status()
+        .await
         .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("无法打开系统权限设置，请在系统设置中手动打开“隐私与安全性”".into());
+    }
     Ok(())
+}
+fn task_workspace(task: &Value, task_id: &str, root: &str) -> std::result::Result<PathBuf, String> {
+    if task["task_id"] != task_id {
+        return Err("任务记录不匹配".into());
+    }
+    let key = match task["kind"].as_str() {
+        Some("exec.start") => "cwd",
+        Some("sync") => "remote_root",
+        _ => return Err("该任务没有可打开的工作目录".into()),
+    };
+    let stored = task["arguments"][key]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .ok_or("任务工作目录不可用")?;
+    if stored != root {
+        return Err("目录与任务记录不匹配".into());
+    }
+    Ok(macrun::config::expand(stored))
 }
 #[tauri::command]
 pub async fn open_workspace(
     root: String,
     terminal: bool,
+    task_id: Option<String>,
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
-    let snapshot = local::request(&rt.socket, "snapshot", json!({}))
-        .await
-        .map_err(|e| e.to_string())?;
-    if !snapshot["workspaces"]
-        .as_array()
-        .is_some_and(|w| w.iter().any(|w| w["root"] == root))
-    {
-        return Err("未知工作区".into());
-    }
-    let p = macrun::config::expand(&root);
+    let p = if let Some(task_id) = task_id {
+        let task = local::request(&rt.socket, "task_detail", json!({"task_id":task_id}))
+            .await
+            .map_err(|e| e.to_string())?;
+        task_workspace(&task, &task_id, &root)?
+    } else {
+        let snapshot = local::request(&rt.socket, "snapshot", json!({}))
+            .await
+            .map_err(|e| e.to_string())?;
+        if !snapshot["workspaces"]
+            .as_array()
+            .is_some_and(|w| w.iter().any(|w| w["root"] == root))
+        {
+            return Err("未知工作区".into());
+        }
+        macrun::config::expand(&root)
+    };
     if !p.is_dir() {
         return Err("工作区目录不存在".into());
     }
-    let mut cmd = Command::new("open");
+    let mut cmd = tokio::process::Command::new("open");
     if terminal {
         cmd.args(["-a", "Terminal"]);
     }
-    cmd.arg(p).spawn().map_err(|e| e.to_string())?;
+    if !cmd
+        .arg(p)
+        .status()
+        .await
+        .map_err(|e| e.to_string())?
+        .success()
+    {
+        return Err("无法打开工作目录，请检查目录访问权限".into());
+    }
     Ok(())
 }
 #[tauri::command]
@@ -61,12 +102,19 @@ pub fn backend_config(rt: tauri::State<Runtime>) -> std::result::Result<String, 
 #[tauri::command]
 pub fn save_backends(text: String, rt: tauri::State<Runtime>) -> std::result::Result<(), String> {
     let result: Result<()> = (|| {
+        let mut child = rt.child.lock().unwrap();
         anyhow::ensure!(
-            !rt.child.lock().unwrap().as_mut().is_some_and(|c| c
-                .try_wait()
-                .ok()
-                .flatten()
-                .is_none()),
+            !rt.starting.load(Ordering::SeqCst),
+            "执行器正在启动，请等待后再修改配置"
+        );
+        anyhow::ensure!(
+            !rt.migrating.load(Ordering::SeqCst),
+            "正在迁移旧执行器，请稍后修改配置"
+        );
+        anyhow::ensure!(
+            !child
+                .as_mut()
+                .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
             "请先断开连接，再修改后端配置"
         );
         let config: macrun::config::WorkerConfig = toml::from_str(&text)?;
@@ -82,9 +130,10 @@ pub fn save_backends(text: String, rt: tauri::State<Runtime>) -> std::result::Re
             )?;
         }
         wire::private_write(&path, text.as_bytes())?;
-        let mut settings = rt.settings.lock().unwrap();
+        let mut settings = rt.settings.lock().unwrap().clone();
         settings.backend_config = path.to_string_lossy().into();
-        wire::atomic_json(&rt.data.join("connection.json"), &*settings)?;
+        wire::atomic_json(&rt.data.join("connection.json"), &settings)?;
+        *rt.settings.lock().unwrap() = settings;
         Ok(())
     })();
     result.map_err(|e| e.to_string())
@@ -377,6 +426,52 @@ pub fn notify_task(status: String, app: tauri::AppHandle) -> std::result::Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn task_workspace_requires_the_recorded_kind_id_and_path() {
+        let task =
+            json!({"task_id":"command-1","kind":"exec.start","arguments":{"cwd":"/tmp/work"}});
+        assert_eq!(
+            task_workspace(&task, "command-1", "/tmp/work").unwrap(),
+            PathBuf::from("/tmp/work")
+        );
+        assert!(task_workspace(&task, "other-task", "/tmp/work").is_err());
+        assert!(task_workspace(&task, "command-1", "/tmp/unrelated").is_err());
+        let sync =
+            json!({"task_id":"sync-1","kind":"sync","arguments":{"remote_root":"/tmp/sync"}});
+        assert_eq!(
+            task_workspace(&sync, "sync-1", "/tmp/sync").unwrap(),
+            PathBuf::from("/tmp/sync")
+        );
+        let backend = json!({"task_id":"call-1","kind":"mcp.call","arguments":{"cwd":"/tmp/work"}});
+        assert!(task_workspace(&backend, "call-1", "/tmp/work").is_err());
+        assert!(
+            task_workspace(
+                &json!({"task_id":"gone","kind":"exec.start"}),
+                "gone",
+                "/tmp/work"
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn permission_links_only_allow_known_system_panes() {
+        assert!(
+            permission_url("accessibility")
+                .unwrap()
+                .ends_with("?Privacy_Accessibility")
+        );
+        assert!(
+            permission_url("screen")
+                .unwrap()
+                .ends_with("?Privacy_ScreenCapture")
+        );
+        assert!(
+            permission_url("input")
+                .unwrap()
+                .ends_with("?Privacy_ListenEvent")
+        );
+        assert!(permission_url("https://example.com").is_err());
+    }
     #[test]
     fn migration_preserves_only_worker_path_without_exposing_it_to_ui() {
         let plist = json!({"EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/bin", "UNRELATED_SECRET": "test-only"}});

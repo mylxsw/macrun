@@ -41,8 +41,10 @@ pub async fn request(socket: &Path, action: &str, args: Value) -> Result<Value> 
         let mut stream = UnixStream::connect(socket).await?;
         wire::send(&mut stream, &json!({"action":action,"args":args})).await?;
         let v: Value = wire::recv(&mut stream).await?;
-        if let Some(error) = v.get("error") {
-            bail!("{}", error.as_str().unwrap_or("local control failed"));
+        // Control failures use an error string; task records have a structured
+        // error describing their completed execution, which is valid detail data.
+        if let Some(error) = v.get("error").and_then(Value::as_str) {
+            bail!("{error}");
         }
         Ok(v)
     })
@@ -151,6 +153,7 @@ async fn handle(
                     .await
             }
             "task_detail" => engine.handle("task.get", a.clone()).await,
+            "task_list" => engine.local_task_list(a.clone()).await,
             "snapshot" => snapshot(&engine, &connection).await,
             "pause" => {
                 engine
