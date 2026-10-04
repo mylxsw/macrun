@@ -1,6 +1,6 @@
 :root {
   font:
-    13.5px/1.5 "Geist",
+    13.5px/1.5 "Geist Variable",
     "PingFang SC",
     "Hiragino Sans GB",
     system-ui,
@@ -26,12 +26,13 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid #dad9d4;
   background: #fff;
   border-radius: 7px;
   min-height: 32px;
-  padding: 5px 12px;
+  padding: 0 12px;
+  font-size: 13px;
   color: inherit;
 }
 button:hover {
@@ -86,7 +87,7 @@ small,
   color: var(--muted);
 }
 small {
-  line-height: 1.6;
+  line-height: 1.5;
 }
 b {
   font-weight: 550;
@@ -94,7 +95,7 @@ b {
 .mono,
 pre,
 kbd {
-  font-family: "Geist Mono", "SF Mono", ui-monospace, monospace;
+  font-family: "Geist Mono Variable", "SF Mono", ui-monospace, monospace;
 }
 .wrap {
   overflow-wrap: anywhere;
@@ -108,7 +109,8 @@ kbd {
 .layout {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 .sidebar {
   background: #f2f2ef;
@@ -121,16 +123,16 @@ kbd {
   height: 100vh;
 }
 .drag {
-  height: 31px;
+  height: 32px;
 }
 .brand {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 8px 6px 23px;
+  padding: 0 6px 18px;
 }
 .brand b {
-  font-size: 15px;
+  font-size: 14.5px;
 }
 .brand small {
   display: block;
@@ -140,7 +142,7 @@ kbd {
   background: #1a1a19;
   color: white;
   width: 31px;
-  height: 31px;
+  height: 32px;
   display: grid;
   place-items: center;
   border-radius: 8px;
@@ -148,14 +150,17 @@ kbd {
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .sidebar nav button {
   justify-content: flex-start;
   border-color: transparent;
   background: transparent;
   color: #4a4945;
-  padding: 9px 10px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  min-height: 36px;
+  gap: 10px;
 }
 .sidebar nav .on {
   background: #fff;
@@ -182,8 +187,11 @@ kbd {
   margin-top: 4px;
 }
 .content {
-  padding: 30px 32px 28px;
+  padding: 28px 32px 40px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 .title-drag {
   position: absolute;
@@ -310,7 +318,7 @@ kbd {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
-  margin: 20px 0 25px;
+  margin: 22px 0;
 }
 .status-card {
   padding: 14px 16px;
@@ -325,7 +333,7 @@ kbd {
 }
 .live-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: 22px;
 }
 .active-task {
@@ -345,11 +353,10 @@ kbd {
   padding: 12px 14px;
   font-size: 12px;
   line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
   max-height: 340px;
   overflow: auto;
-  min-height: 75px;
+  margin: 12px 0;
 }
 .section-heading {
   margin-top: 24px;
@@ -461,7 +468,7 @@ kbd {
 .search input {
   border: 0;
   background: none;
-  width: 250px;
+  width: 280px;
   max-width: 100%;
   outline-offset: 4px;
 }
@@ -469,12 +476,12 @@ kbd {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 22px;
+  margin-bottom: 16px;
 }
 .filters button {
   border-radius: 30px;
-  font-size: 12px;
-  padding: 5px 11px;
+  font-size: 12.5px;
+  padding: 0 11px;
   min-height: 30px;
 }
 .filters .on {
@@ -490,7 +497,7 @@ kbd {
 }
 .task-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.5fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -501,7 +508,7 @@ kbd {
   width: 100%;
   display: flex;
   text-align: left;
-  padding: 13px 14px;
+  padding: 11px 14px;
   border: 0;
   border-bottom: 1px solid #f0efeb;
   border-radius: 0;
@@ -515,18 +522,19 @@ kbd {
   background: #f0f3fe;
 }
 .task-list .mono {
-  font-size: 12px;
+  font-size: 13px;
 }
 .task-detail {
   padding: 20px;
 }
 .task-detail .command {
-  margin: 15px 0 18px;
+  margin: 12px 0 16px;
+  font-size: 15px;
 }
 dl {
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 6px 12px;
   margin: 20px 0;
 }
 dt {
@@ -536,7 +544,7 @@ dt {
 dd {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: 13.5px;
 }
 .desktop-grid {
   display: grid;
@@ -676,13 +684,13 @@ footer {
   font-size: 12px;
 }
 .tray {
-  padding: 8px;
-  min-height: 100vh;
+  padding: 6px;
+  min-height: 0;
   background: #fafaf9;
   font-size: 13px;
 }
 .tray header {
-  padding: 12px;
+  padding: 10px 10px 8px;
 }
 .tray h2 {
   display: flex;
@@ -714,8 +722,8 @@ footer {
   background: none;
   text-align: left;
   justify-content: flex-start;
-  min-height: 34px;
-  padding: 5px 10px;
+  min-height: 32px;
+  padding: 0 10px;
 }
 .menuitem svg {
   width: 16px;
@@ -732,7 +740,7 @@ footer {
 .menuitem:hover small {
   color: #eaf0ff;
 }
-.tray > small {
+.tray-content > small {
   margin-left: 12px;
 }
 .tray hr {
@@ -826,19 +834,6 @@ textarea {
   border-color: #cc9a38;
   background: #fff9ed;
 }
-.overlay-bar {
-  height: 64px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 10px 16px;
-  background: #fff8e8;
-  border: 2px solid #db8a2b;
-  font-size: 13px;
-}
-.card + .card {
-  margin-top: 16px;
-}
 .tag.awaiting_approval {
   color: #936015;
   background: #fff2cd;
@@ -846,4 +841,358 @@ textarea {
 .tag.denied {
   color: #a5483d;
   background: #fae9e6;
+}
+
+/* Layout values mirror the v2 artboards; page content owns its own spacing. */
+svg {
+  flex-shrink: 0;
+  stroke-width: 1.5;
+}
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: #4a4945;
+}
+button.ghost:hover {
+  background: #efefeb;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+a:focus-visible {
+  outline: 2px solid #2f5bea;
+  outline-offset: 2px;
+}
+.sidebar {
+  min-height: 0;
+}
+.sidebar-status {
+  padding: 10px 12px;
+  margin-top: auto;
+}
+.sidebar-status .row {
+  gap: 8px;
+}
+.sidebar-status .row .dot {
+  margin: 0;
+}
+.sidebar-status .row b {
+  white-space: nowrap;
+}
+.sidebar-status .row .muted {
+  font-size: 11.5px;
+}
+.sidebar nav button:hover {
+  background: #e7e6e1;
+}
+.sidebar nav .on:hover {
+  background: #fff;
+}
+.title-drag {
+  height: 24px;
+  z-index: 1;
+  pointer-events: auto;
+}
+.page-header > div:first-child {
+  flex: 1 1 280px;
+}
+.page-header > .actions {
+  gap: 10px;
+}
+.live-grid > section > h2 {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.task-meta {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.task-meta .mono {
+  color: #1a1a19;
+}
+.sync-actions {
+  margin-top: 10px;
+}
+.sync-task .command {
+  margin: 10px 0 2px;
+}
+.active-task + .active-task {
+  margin-top: 12px;
+}
+.active-task {
+  margin-bottom: 0;
+}
+.active-task .actions {
+  margin-top: 12px;
+}
+.recent button {
+  padding: 7px 14px;
+}
+.recent button small:first-child {
+  width: 54px;
+  flex-shrink: 0;
+}
+.recent button small {
+  font-size: 12px;
+}
+.section-heading h2 {
+  margin-bottom: 0;
+}
+.live-grid .section-heading {
+  margin: 22px 0 10px;
+}
+.task-list .right {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.task-list button:last-child {
+  border-bottom: 0;
+}
+.task-list .mono {
+  font-size: 13px;
+}
+.task-list small {
+  display: block;
+}
+.page-tasks > .page-header {
+  margin-bottom: 16px;
+}
+.task-explanation {
+  border: 0;
+  background: #fff3dc;
+  margin-bottom: 18px;
+  font-size: 13.5px;
+}
+.task-detail .actions {
+  margin-top: 16px;
+}
+.task-detail .tag .dot {
+  display: none;
+}
+.task-detail .term {
+  margin: 8px 0 0;
+}
+.tag {
+  padding: 1px 7px;
+}
+.dot.awaiting_approval {
+  background: #d08a0b;
+}
+.dot.denied {
+  background: #a5483d;
+}
+.text-awaiting_approval {
+  color: #b26a00;
+}
+.text-denied {
+  color: #a5483d;
+}
+.backend-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.backend-stats .soft {
+  padding: 8px 10px;
+}
+.backend-stats .soft > div {
+  margin-top: 2px;
+  font-weight: 550;
+}
+.backend-note {
+  display: block;
+  margin-top: 8px;
+}
+.backend > .row > svg {
+  padding: 9px;
+  width: 36px;
+  height: 36px;
+  background: #f1f0ec;
+  border-radius: 9px;
+}
+.backend p {
+  margin-bottom: 14px;
+}
+.behavior-card {
+  margin-bottom: 22px;
+}
+.behavior-card .line {
+  padding: 13px 16px;
+}
+.tray {
+  border: 1px solid #d0cfca;
+  border-radius: 12px;
+  overflow: auto;
+  height: auto;
+  max-height: 100vh;
+}
+.tray-current {
+  margin: 2px 4px 6px;
+  padding: 2px 12px;
+  border-radius: 9px;
+}
+.tray-task {
+  width: 100%;
+  border: 0;
+  margin: 0;
+  padding: 8px 0;
+  border-radius: 0;
+}
+.tray-task.compact {
+  border-top: 1px solid #f0efeb;
+}
+.tray-task .mono {
+  font-size: 12.5px;
+}
+.tray-task > .mono {
+  margin-top: 3px;
+}
+.tray .approval {
+  margin: 2px 4px 6px;
+  padding: 10px 12px;
+}
+.tray .approval .actions button {
+  flex: 1;
+}
+.tray hr {
+  margin: 5px 10px;
+}
+.tray-connection {
+  margin: 2px 4px 6px !important;
+}
+.transparent-surface,
+.transparent-surface body,
+.transparent-surface #root {
+  background: transparent;
+}
+.overlay-shell {
+  height: 64px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6px 8px 12px;
+}
+.overlay-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  background: rgba(26, 26, 25, 0.92);
+  color: white;
+  border-radius: 999px;
+  padding: 7px 8px 7px 16px;
+  box-shadow: 0 5px 10px #0003;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.overlay-bar .dot {
+  width: 9px;
+  height: 9px;
+  background: #ff7a2f;
+}
+.overlay-action {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.overlay-action > span,
+.overlay-key {
+  color: #bdbcb6;
+}
+.overlay-key {
+  font-size: 12px;
+}
+.overlay-bar button {
+  border: 0;
+  border-radius: 999px;
+  background: white;
+  color: #1a1a19;
+  padding: 4px 12px;
+  min-height: 28px;
+  font-weight: 550;
+  flex-shrink: 0;
+}
+.pairing-window {
+  position: relative;
+  height: 100vh;
+}
+.pairing-feedback > .alert {
+  position: fixed;
+  left: 245px;
+  right: 16px;
+  bottom: 70px;
+  z-index: 3;
+}
+@media (max-width: 1120px) {
+  .live-grid {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+  .task-grid {
+    grid-template-columns: 310px minmax(0, 1fr);
+  }
+}
+@media (max-width: 1000px) {
+  .live-grid,
+  .task-grid,
+  .desktop-grid {
+    grid-template-columns: 1fr;
+  }
+  .live-grid > aside {
+    display: block;
+  }
+  .task-detail {
+    grid-row: 1;
+  }
+  .task-list {
+    max-height: none;
+  }
+  .content {
+    padding: 28px 22px 32px;
+  }
+}
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+  .title-drag {
+    left: 180px;
+  }
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+  .status-card {
+    padding: 10px 14px;
+  }
+  .status-card h3 {
+    margin-top: 3px;
+  }
+  .search {
+    width: 100%;
+  }
+  .search input {
+    width: 100%;
+  }
+  .page-header {
+    gap: 12px;
+  }
+}
+
+.sync-title-button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 0;
+  min-height: 0;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.sync-title-button:hover {
+  color: #2f5bea;
+  background: transparent;
 }

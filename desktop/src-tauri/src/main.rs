@@ -68,37 +68,93 @@ struct Runtime {
     preferences: Mutex<Preferences>,
     exiting: AtomicBool,
     desired_running: AtomicBool,
+    window_layout: Mutex<WindowLayout>,
 }
-fn tray_status(app: &tauri::AppHandle, v: &Value) {
-    let (color, label) = if v["connection"]["state"] != "connected" {
-        ([193, 64, 55], "断线")
-    } else if v["tasks"]
-        .as_array()
-        .is_some_and(|t| t.iter().any(|t| t["status"] == "awaiting_approval"))
-    {
-        ([204, 148, 38], "待确认")
-    } else if v["policy"]["paused"] == true {
-        ([130, 130, 126], "暂停")
-    } else if v["active_count"].as_u64().unwrap_or(0) > 0 {
-        ([48, 116, 218], "工作中")
+#[derive(Default)]
+struct WindowLayout {
+    pairing: bool,
+    normal_size: Option<tauri::PhysicalSize<u32>>,
+}
+
+#[tauri::command]
+fn set_main_mode(
+    pairing: bool,
+    app: tauri::AppHandle,
+    rt: tauri::State<Runtime>,
+) -> std::result::Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("主窗口不可用")?;
+    let mut layout = rt.window_layout.lock().unwrap();
+    if layout.pairing == pairing {
+        return Ok(());
+    }
+    if pairing {
+        layout.normal_size = Some(window.inner_size().map_err(|e| e.to_string())?);
+        window.set_decorations(false).map_err(|e| e.to_string())?;
+        window
+            .set_size(tauri::LogicalSize::new(800., 580.))
+            .map_err(|e| e.to_string())?;
     } else {
-        ([51, 143, 93], "空闲")
-    };
-    let mut rgba = vec![0u8; 44 * 44 * 4];
+        window.set_decorations(true).map_err(|e| e.to_string())?;
+        if let Some(size) = layout.normal_size {
+            window.set_size(size).map_err(|e| e.to_string())?;
+        }
+    }
+    layout.pairing = pairing;
+    Ok(())
+}
+
+#[tauri::command]
+fn resize_panel(window: tauri::WebviewWindow, height: f64) -> std::result::Result<(), String> {
+    if window.label() != "tray" || !height.is_finite() {
+        return Err("仅快捷面板支持内容高度调整".into());
+    }
+    window
+        .set_size(tauri::LogicalSize::new(
+            352.,
+            height.ceil().clamp(120., 720.),
+        ))
+        .map_err(|e| e.to_string())
+}
+fn tray_image(color: [u8; 3], dark: bool) -> tauri::image::Image<'static> {
+    // Retina terminal mark plus a separate state dot, matching the menu-bar design.
+    let mut rgba = vec![0u8; 52 * 44 * 4];
+    let ink = if dark { [245, 245, 244] } else { [26, 26, 25] };
     for y in 0i32..44 {
-        for x in 0i32..44 {
-            let dx = x - 22;
-            let dy = y - 22;
-            if dx * dx + dy * dy < 14 * 14 {
-                let i = ((y * 44 + x) * 4) as usize;
-                rgba[i..i + 3].copy_from_slice(&color);
+        for x in 0i32..52 {
+            let chevron =
+                (6..=16).contains(&x) && ((y - x - 6).abs() <= 1 || (y + x - 38).abs() <= 1);
+            let baseline = (20..=30).contains(&x) && (30..=32).contains(&y);
+            let dot = (x - 43).pow(2) + (y - 22).pow(2) <= 6 * 6;
+            if chevron || baseline || dot {
+                let i = ((y * 52 + x) * 4) as usize;
+                rgba[i..i + 3].copy_from_slice(if dot { &color } else { &ink });
                 rgba[i + 3] = 255;
             }
         }
     }
+    tauri::image::Image::new_owned(rgba, 52, 44)
+}
+
+fn tray_status(app: &tauri::AppHandle, v: &Value) {
+    let (color, label) = if v["connection"]["state"] != "connected" {
+        ([194, 54, 31], "断线")
+    } else if v["tasks"]
+        .as_array()
+        .is_some_and(|t| t.iter().any(|t| t["status"] == "awaiting_approval"))
+    {
+        ([208, 138, 11], "待确认")
+    } else if v["policy"]["paused"] == true {
+        ([138, 137, 132], "暂停")
+    } else if v["active_count"].as_u64().unwrap_or(0) > 0 {
+        ([47, 91, 234], "工作中")
+    } else {
+        ([31, 157, 92], "空闲")
+    };
     if let Some(icon) = app.tray_by_id("macrun") {
+        let dark =
+            app.get_webview_window("main").and_then(|w| w.theme().ok()) == Some(tauri::Theme::Dark);
         let _ = icon.set_icon_as_template(false);
-        let _ = icon.set_icon(Some(tauri::image::Image::new_owned(rgba, 44, 44)));
+        let _ = icon.set_icon(Some(tray_image(color, dark)));
         let _ = icon.set_tooltip(Some(format!("Macrun · {label}")));
     }
 }
@@ -122,6 +178,102 @@ fn show(app: &tauri::AppHandle, route: Option<&str>) {
     if let Some(r) = route {
         let _ = app.emit("navigate", r);
     }
+}
+fn show_tray(app: &tauri::AppHandle, toggle: bool) {
+    let Some(window) = app.get_webview_window("tray") else {
+        return;
+    };
+    if toggle && window.is_visible().unwrap_or(false) {
+        let _ = window.hide();
+        return;
+    }
+    if let Some(icon) = app.tray_by_id("macrun")
+        && let Ok(Some(rect)) = icon.rect()
+    {
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let anchor = rect.position.to_physical::<f64>(scale);
+        let anchor_size = rect.size.to_physical::<f64>(scale);
+        let monitor = window.available_monitors().ok().and_then(|monitors| {
+            monitors.into_iter().find(|m| {
+                let p = m.position();
+                let size = m.size();
+                anchor.x >= p.x as f64
+                    && anchor.x < p.x as f64 + size.width as f64
+                    && anchor.y >= p.y as f64
+                    && anchor.y < p.y as f64 + size.height as f64
+            })
+        });
+        let scale = monitor.as_ref().map_or(scale, |m| m.scale_factor());
+        let mut x = anchor.x + anchor_size.width - 352. * scale;
+        if let Some(monitor) = monitor {
+            let left = monitor.position().x as f64 + 8. * scale;
+            let right = monitor.position().x as f64 + monitor.size().width as f64 - 360. * scale;
+            x = x.clamp(left, right.max(left));
+        }
+        let _ = window.set_position(tauri::PhysicalPosition::new(
+            x,
+            anchor.y + anchor_size.height + 6. * scale,
+        ));
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+fn native_menu(app: &tauri::AppHandle) -> Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, WINDOW_SUBMENU_ID};
+    let menu = Menu::default(app)?;
+    if let Some(window) = menu
+        .get(WINDOW_SUBMENU_ID)
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        window.insert(
+            &MenuItem::with_id(app, "open-main", "打开主窗口", true, Some("CmdOrCtrl+O"))?,
+            0,
+        )?;
+        window.insert(
+            &MenuItem::with_id(
+                app,
+                "open-panel",
+                "菜单栏面板",
+                true,
+                Some("CmdOrCtrl+Shift+M"),
+            )?,
+            1,
+        )?;
+        window.insert(&PredefinedMenuItem::separator(app)?, 2)?;
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(application) = menu
+        .items()?
+        .first()
+        .and_then(|item| item.as_submenu().cloned())
+    {
+        application.insert(
+            &MenuItem::with_id(app, "open-settings", "设置…", true, Some("CmdOrCtrl+,"))?,
+            2,
+        )?;
+        // The native Quit item can terminate before the webview confirmation.
+        // Route Cmd+Q through the same guarded flow as the tray's Quit action.
+        if let Some(quit) = application.items()?.last() {
+            application.remove(quit)?;
+        }
+        application.append(&MenuItem::with_id(
+            app,
+            "request-quit",
+            "退出 Macrun",
+            true,
+            Some("CmdOrCtrl+Q"),
+        )?)?;
+    }
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| match event.id().as_ref() {
+        "open-main" => show(app, None),
+        "open-panel" => show_tray(app, false),
+        "open-settings" => show(app, Some("settings")),
+        "request-quit" => request_exit(app),
+        _ => {}
+    });
+    Ok(())
 }
 fn legacy_running() -> bool {
     #[cfg(target_os = "macos")]
@@ -327,6 +479,7 @@ async fn pair(uri: String, rt: tauri::State<'_, Runtime>) -> std::result::Result
         let mut settings=rt.settings.lock().unwrap().clone();
         settings.server=invite.server;settings.cert=cert.to_string_lossy().into();
         settings.token_file="/dev/null".into();settings.keychain_account=account;
+        settings.certificate_fingerprint=invite.fingerprint.clone();
         wire::atomic_json(&rt.data.join("connection.json"),&settings)?;
         *rt.settings.lock().unwrap()=settings;
         Ok(json!({"fingerprint":invite.fingerprint,"protocol":invite.protocol,"credentials":"keychain"}))
@@ -475,6 +628,8 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             app_state,
+            set_main_mode,
+            resize_panel,
             save_settings,
             save_preferences,
             pair,
@@ -532,41 +687,21 @@ fn main() {
                 preferences: Mutex::new(preferences),
                 exiting: AtomicBool::new(false),
                 desired_running: AtomicBool::new(false),
+                window_layout: Mutex::new(WindowLayout::default()),
             });
             let handle = app.handle().clone();
             app.global_shortcut().register("Control+Alt+Super+Period")?;
-            let mut rgba = vec![0u8; 22 * 22 * 4];
-            for y in 5..17 {
-                for x in 4..18 {
-                    if (x < 11 && (y == x + 1 || y == 21 - x)) || (y == 16 && x > 11) {
-                        let i = (y * 22 + x) * 4;
-                        rgba[i + 3] = 255;
-                    }
-                }
-            }
             tauri::tray::TrayIconBuilder::with_id("macrun")
-                .icon(tauri::image::Image::new_owned(rgba, 22, 22))
-                .icon_as_template(true)
+                .icon(tray_image([138, 137, 132], false))
+                .icon_as_template(false)
                 .tooltip("Macrun · 本机执行器")
                 .on_tray_icon_event(|icon, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button_state: tauri::tray::MouseButtonState::Up,
-                        position,
                         ..
                     } = event
-                        && let Some(w) = icon.app_handle().get_webview_window("tray")
                     {
-                        if w.is_visible().unwrap_or(false) {
-                            let _ = w.hide();
-                        } else {
-                            let scale = w.scale_factor().unwrap_or(1.0);
-                            let _ = w.set_position(tauri::PhysicalPosition::new(
-                                position.x - 340. * scale,
-                                position.y + 14. * scale,
-                            ));
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
+                        show_tray(icon.app_handle(), true);
                     }
                 })
                 .build(app)?;
@@ -575,10 +710,11 @@ fn main() {
                 "tray",
                 tauri::WebviewUrl::App("index.html?tray=1".into()),
             )
-            .title("Macrun 快捷面板")
-            .inner_size(360., 560.)
+            .title("Macrun · 菜单栏")
+            .inner_size(352., 510.)
             .resizable(false)
             .decorations(false)
+            .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
@@ -588,9 +724,11 @@ fn main() {
                 "overlay",
                 tauri::WebviewUrl::App("index.html?overlay=1".into()),
             )
-            .title("Macrun 桌面操作")
+            .title("Macrun · 屏幕提示")
             .inner_size(600., 64.)
+            .resizable(false)
             .decorations(false)
+            .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
             .visible(false)
@@ -613,8 +751,11 @@ fn main() {
                         format!("border-{i}-{side}"),
                         tauri::WebviewUrl::App("index.html?border=1".into()),
                     )
+                    .title(format!("Macrun · 屏幕边框 {}-{}", i + 1, side + 1))
                     .decorations(false)
                     .resizable(false)
+                    .focusable(false)
+                    .focused(false)
                     .always_on_top(true)
                     .skip_taskbar(true)
                     .visible(false)
@@ -636,6 +777,7 @@ fn main() {
                     ))?;
                 }
             }
+            native_menu(app.handle())?;
             unsafe {
                 native::macrun_monitor_start();
             }

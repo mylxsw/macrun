@@ -21,7 +21,7 @@ export function selectTasks(tasks, filter, query) {
   return tasks.filter(
     (t) =>
       (filter === "all" || t.status === filter) &&
-      `${title(t)} ${t.arguments?.cwd || ""} ${t.task_id}`
+      `${title(t)} ${t.arguments?.cwd || ""} ${t.arguments?.remote_root || ""} ${t.arguments?.path || ""} ${t.task_id}`
         .toLowerCase()
         .includes(q),
   );

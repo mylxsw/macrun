@@ -20,6 +20,31 @@ test("search matches command cwd and id", () => {
   assert.equal(selectTasks(tasks, "all", "command 1").length, 1);
   assert.equal(selectTasks(tasks, "failed", "task-1").length, 0);
 });
+test("search includes sync roots and file paths even when another argument supplies the title", () => {
+  const pathTasks = [
+    {
+      ...tasks[0],
+      task_id: "sync-target",
+      kind: "sync",
+      arguments: { command: "upload source", remote_root: "/work/Counter" },
+    },
+    {
+      ...tasks[1],
+      task_id: "file-target",
+      kind: "mcp.call",
+      arguments: { tool: "read_file", path: "/work/notes/README.md" },
+    },
+  ];
+  assert.deepEqual(
+    selectTasks(pathTasks, "all", "/WORK/counter").map((t) => t.task_id),
+    ["sync-target"],
+  );
+  assert.deepEqual(
+    selectTasks(pathTasks, "all", "notes/readme").map((t) => t.task_id),
+    ["file-target"],
+  );
+  assert.equal(selectTasks(pathTasks, "succeeded", "notes/readme").length, 0);
+});
 test("today summary uses local received date; active includes accepted", () => {
   assert.equal(
     todaySummary(

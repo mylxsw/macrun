@@ -20,6 +20,7 @@ v2 替代 2026-10-04 早些时候归档的 v1 交互原型。v1 以统计看板�
 | [功能规划与交互设计](design.md) | 用户问题、信息架构、功能清单与优先级、核心改动、待确认事项 |
 | [执行计划](implementation-plan.md) | 建议架构、阶段、验收边界与 Windows 适配 |
 | [UI 还原交接](ui-handoff.md) | 最新任务：按 v2 设计修复还原度，含源码入口、检查线索与交付要求 |
+| [v2 界面还原复查](ui-review/README.md) | 七页修改前后截图、原生交互与构建记录、测试数据和验收边界 |
 | [原生验收接续](native-acceptance.md) | 应用授权的官方入口、可复制的接续指令与剩余验收流程 |
 | [交互原型](prototype/index.html) | 单文件 HTML，下载后用桌面浏览器离线打开 |
 | [设计源文件](prototype/screens/) | 每个画板一个 `.dc.html`，`build.cjs` 由它们生成 `index.html` |

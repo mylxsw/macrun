@@ -1,11 +1,13 @@
 import {
   Approvals,
   Pairing,
-  SafetyPanel,
   WorkspaceList,
   BackendPanel,
   Replay,
 } from "./Features";
+import { SettingsPage } from "./SettingsPage";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,20 +36,23 @@ import {
   selectTasks,
   todaySummary,
 } from "./model.mjs";
-import type { Task, Snapshot, AppState, Settings } from "./types";
+import type { Task, Snapshot, AppState } from "./types";
 import "./style.css";
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
 const border = new URLSearchParams(location.search).has("border");
 const overlay = new URLSearchParams(location.search).has("overlay");
 const tray = new URLSearchParams(location.search).has("tray");
-const emptySettings: Settings = {
-  server: "",
-  cert: "",
-  token_file: "",
-  backend_config: "",
-};
 const label = (s: string) => (statuses as Record<string, string>)[s] || s;
+const kindLabel = (t: Task) =>
+  ["exec", "exec.start"].includes(t.kind)
+    ? "命令"
+    : t.kind === "sync"
+      ? "同步"
+      : t.kind === "mcp.call"
+        ? `桌面 · ${t.arguments.tool || "操作"}`
+        : t.kind;
 const duration = (t: Task) => {
+  if (t.status === "unknown") return "—";
   const sec = Math.max(
     0,
     Math.floor(((t.ended_at || Date.now()) - t.started_at) / 1000),
@@ -66,7 +71,11 @@ function Status({ status }: { status: string }) {
 }
 function App() {
   const firstLoad = useRef(true);
+  const dialogReturnFocus = useRef<HTMLElement | null>(null);
+  const trayContent = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState("live"),
+    [pairing, setPairing] = useState(false),
+    [manualOpen, setManualOpen] = useState(false),
     [app, setApp] = useState<AppState | null>(null),
     [snapshot, setSnapshot] = useState<Snapshot | null>(null),
     [available, setAvailable] = useState(false),
@@ -88,10 +97,20 @@ function App() {
     setApp(a);
     if (firstLoad.current) {
       firstLoad.current = false;
-      if (!a.settings.server) setPage("settings");
+      if (!a.settings.server && !tray && !overlay && !border) setPairing(true);
     }
     if (a.snapshot) setSnapshot(a.snapshot);
   };
+  useEffect(() => {
+    if (isTauri && !tray && !overlay && !border)
+      invoke("set_main_mode", { pairing }).catch((e) => setError(String(e)));
+  }, [pairing]);
+  useEffect(() => {
+    document.documentElement.classList.toggle(
+      "transparent-surface",
+      overlay || border || tray,
+    );
+  }, []);
   const act = async (
     command: string,
     args: Record<string, unknown> = {},
@@ -130,8 +149,20 @@ function App() {
       setAvailable(false);
       refresh().catch(() => {});
     });
-    on<string>("navigate", setPage);
-    on("exit-requested", () => setQuit(true));
+    on<string>("navigate", (route) => {
+      setPairing(false);
+      const [target, taskId] = route.split(":");
+      setPage(target);
+      if (taskId) {
+        setSelected(taskId);
+        setFilter("all");
+        setQuery("");
+      }
+    });
+    on("exit-requested", () => {
+      dialogReturnFocus.current = document.activeElement as HTMLElement;
+      setQuit(true);
+    });
     on<string>("control-error", setError);
     const timer = setInterval(() => {
       refresh().catch(() => {});
@@ -141,6 +172,18 @@ function App() {
       unsub.forEach((f) => f());
       clearInterval(timer);
     };
+  }, []);
+  useEffect(() => {
+    if (!tray || !isTauri || !trayContent.current) return;
+    const observer = new ResizeObserver(() => {
+      const height = trayContent.current?.scrollHeight || 0;
+      if (height)
+        invoke("resize_panel", { height: Math.ceil(height + 14) }).catch(
+          () => {},
+        );
+    });
+    observer.observe(trayContent.current);
+    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     if (!notice) return;
@@ -174,7 +217,7 @@ function App() {
   }, [snapshot]);
   useEffect(() => {
     if (!quit && !tools) return;
-    const previous = document.activeElement as HTMLElement | null;
+    const previous = dialogReturnFocus.current;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setQuit(false);
@@ -184,7 +227,7 @@ function App() {
       if (event.key !== "Tab") return;
       const nodes = Array.from(
         document.querySelectorAll<HTMLElement>(
-          '[role="dialog"] button:not(:disabled),[role="dialog"] input,[role="dialog"] textarea',
+          '[role="dialog"] button:not(:disabled),[role="dialog"] input:not(:disabled),[role="dialog"] textarea:not(:disabled),[role="dialog"] select:not(:disabled),[role="dialog"] summary',
         ),
       );
       if (!nodes.length) return;
@@ -212,7 +255,9 @@ function App() {
     control("desktop", { enabled: !snapshot?.policy.desktop_enabled });
   const choose = (t: Task) => {
     setSelected(t.task_id);
-    jump("tasks");
+    setFilter("all");
+    setQuery("");
+    jump(tray ? `tasks:${t.task_id}` : "tasks");
   };
   const copy = async (s: string) => {
     try {
@@ -240,7 +285,8 @@ function App() {
         : running.length
           ? "running"
           : "succeeded";
-  const recent = tasks.filter((t) => !active(t)).slice(0, 6);
+  const recent = tasks.slice(0, 6);
+  const approvals = tasks.filter((t) => t.status === "awaiting_approval");
   const filtered = selectTasks(tasks, filter, query) as Task[];
   const sel = filtered.find((t) => t.task_id === selected) || filtered[0];
   const summary =
@@ -297,116 +343,168 @@ function App() {
           </button>
         </div>
         {feedback}
-        <Approvals tasks={tasks} act={act} disabled={busy || !available} />
       </section>
     </div>
   );
   if (border)
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#dc892c" }} />
+      <div style={{ position: "fixed", inset: 0, background: "#e8590c" }} />
     );
   if (overlay)
     return (
-      <div className="overlay-bar">
-        <span className="dot running" />
-        Agent 正在操作桌面{" "}
-        <span className="grow mono">
-          {running.find((t) => t.kind === "mcp.call")?.arguments.tool || ""}
-        </span>
-        <button className="danger" onClick={stop}>
-          全部停止
-        </button>
+      <div className="overlay-shell">
+        <div className="overlay-bar">
+          <span className="dot" />
+          <span className="overlay-action">
+            <b>Agent 正在操作这台 Mac</b>
+            <span>
+              {" "}
+              ·{" "}
+              {running.find((t) => t.kind === "mcp.call")?.arguments.tool ||
+                "桌面操作"}
+            </span>
+          </span>
+          <span className="mono overlay-key">⌃⌥⌘.</span>
+          <button disabled={busy || !available} onClick={stop}>
+            停止
+          </button>
+        </div>
+        {feedback}
       </div>
     );
   if (tray)
     return (
       <div className="tray">
-        <header>
-          <h2>
-            <span className={`dot ${stateClass}`} />
-            {stateText}
-          </h2>
-          <p>
-            {running.length} 个任务进行中 ·{" "}
-            {snapshot?.connection.server || "尚未配置服务器"}
-          </p>
-        </header>
-        {running.slice(0, 2).map((t) => (
-          <button
-            className="tray-task"
-            key={t.task_id}
-            onClick={() => choose(t)}
-          >
-            <div className="row between">
-              <small>
-                {t.kind === "sync" ? "同步" : "任务"} · {label(t.status)}
-              </small>
-              <small className="mono">{duration(t)}</small>
+        <div ref={trayContent} className="tray-content">
+          <header>
+            <h2>
+              <span
+                className={`dot ${approvals.length ? "awaiting_approval" : stateClass}`}
+              />
+              {approvals.length ? "需要你确认" : stateText}
+            </h2>
+            <p>
+              {running.length} 个任务进行中 ·{" "}
+              {snapshot?.connection.server || "尚未配置服务器"}
+            </p>
+          </header>
+          <Approvals tasks={tasks} act={act} disabled={busy || !available} />
+          {!!running.filter((t) => t.status !== "awaiting_approval").length && (
+            <div className="tray-current card">
+              {running
+                .filter((t) => t.status !== "awaiting_approval")
+                .slice(0, 2)
+                .map((t, i) => (
+                  <button
+                    className={`tray-task ${i ? "compact" : ""}`}
+                    key={t.task_id}
+                    onClick={() => choose(t)}
+                  >
+                    <div className="row between">
+                      <small>
+                        {kindLabel(t)} · {label(t.status)}
+                      </small>
+                      <span className="mono">
+                        {t.progress
+                          ? `${t.progress.received} / ${t.progress.total} 个文件`
+                          : duration(t)}
+                      </span>
+                    </div>
+                    {!i && <div className="mono ellipsis">{title(t)}</div>}
+                  </button>
+                ))}
             </div>
-            <div className="mono ellipsis">{title(t)}</div>
-            {t.progress && (
-              <small>
-                {t.progress.received} / {t.progress.total} 个文件
-              </small>
-            )}
-          </button>
-        ))}
-        <button
-          className="menuitem"
-          disabled={!available || busy}
-          onClick={pause}
-        >
-          {paused ? <Play /> : <Pause />}
-          {paused ? "恢复接收任务" : "暂停接收新任务"}
-        </button>
-        <button
-          className="menuitem"
-          disabled={!available || busy}
-          onClick={stop}
-        >
-          <Square />
-          全部停止<small>⌃⌥⌘.</small>
-        </button>
-        <button
-          className="menuitem"
-          disabled={!available || busy}
-          onClick={desktopToggle}
-        >
-          <MousePointer2 />
-          {snapshot?.policy.desktop_enabled ? "关闭桌面控制" : "允许桌面控制"}
-        </button>
-        <hr />
-        <small>最近</small>
-        {recent.slice(0, 3).map((t) => (
+          )}
+          {!connected && (
+            <div className="alert error tray-connection">
+              {snapshot?.connection.error ||
+                "尚未连接服务器，请打开设置检查连接。"}
+            </div>
+          )}
           <button
             className="menuitem"
-            onClick={() => choose(t)}
-            key={t.task_id}
+            disabled={!available || busy}
+            onClick={pause}
           >
-            <span className={`dot ${t.status}`} />
-            <span className="ellipsis">{title(t)}</span>
-            <small>{time(t).slice(0, 5)}</small>
+            {paused ? <Play /> : <Pause />}
+            {paused ? "恢复接收任务" : "暂停接收新任务"}
           </button>
-        ))}
-        {!recent.length && <p className="muted">暂无任务记录</p>}
-        <hr />
-        <button className="menuitem" onClick={() => jump("live")}>
-          打开 Macrun<small>↗</small>
-        </button>
-        <button className="menuitem" onClick={() => jump("settings")}>
-          设置…
-        </button>
-        <button
-          className="menuitem"
-          onClick={() => {
-            act("request_quit");
-          }}
-        >
-          退出 Macrun
-        </button>
-        {feedback}
-        <Approvals tasks={tasks} act={act} disabled={busy || !available} />
+          <button
+            className="menuitem"
+            disabled={!available || busy}
+            onClick={stop}
+          >
+            <Square />
+            全部停止<small>⌃⌥⌘.</small>
+          </button>
+          <button
+            className="menuitem"
+            disabled={!available || busy}
+            onClick={desktopToggle}
+          >
+            <MousePointer2 />
+            允许桌面控制
+            <small>{snapshot?.policy.desktop_enabled ? "✓" : ""}</small>
+          </button>
+          <hr />
+          <small>最近</small>
+          {tasks
+            .filter((t) => !active(t))
+            .slice(0, 3)
+            .map((t) => (
+              <button
+                className="menuitem"
+                onClick={() => choose(t)}
+                key={t.task_id}
+              >
+                <span className={`dot ${t.status}`} />
+                <span className="ellipsis">{title(t)}</span>
+                <small>{time(t).slice(0, 5)}</small>
+              </button>
+            ))}
+          {!recent.length && <p className="muted">暂无任务记录</p>}
+          <hr />
+          <button className="menuitem" onClick={() => jump("live")}>
+            打开 Macrun<small>⌘O</small>
+          </button>
+          <button className="menuitem" onClick={() => jump("settings")}>
+            设置…<small>⌘,</small>
+          </button>
+          <button
+            className="menuitem"
+            onClick={() => {
+              act("request_quit");
+            }}
+          >
+            退出 Macrun<small>⌘Q</small>
+          </button>
+          {feedback}
+          {exitDialog}
+        </div>
+      </div>
+    );
+  if (pairing)
+    return (
+      <div className="pairing-window">
+        <div className="pairing-feedback">{feedback}</div>
         {exitDialog}
+        <Pairing
+          act={act}
+          running={!!app?.worker_running}
+          onClose={() => {
+            setPairing(false);
+            setPage("settings");
+          }}
+          onManual={() => {
+            setPairing(false);
+            setManualOpen(true);
+            setPage("settings");
+          }}
+          onComplete={(route) => {
+            setPairing(false);
+            setPage(route === "desktop" ? "desktop" : "live");
+          }}
+        />
       </div>
     );
   return (
@@ -419,12 +517,15 @@ function App() {
           </div>
           <div>
             <b>Macrun</b>
-            <small>执行器 · {snapshot?.version || "未启动"}</small>
+            <small>
+              执行器 · {snapshot ? `v${snapshot.version}` : "未启动"}
+            </small>
           </div>
         </div>
         <nav aria-label="主导航">
           {nav.map(([id, text, Icon]) => (
             <button
+              aria-current={page === id ? "page" : undefined}
               className={page === id ? "on" : ""}
               key={id}
               onClick={() => setPage(id)}
@@ -438,16 +539,21 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-status">
-          <b>
-            <span className={`dot ${stateClass}`} />
-            {stateText}
-          </b>
+          <div className="row">
+            <span className={`dot ${connected ? "succeeded" : "failed"}`} />
+            <b>{connected ? "已连接" : "尚未连接"}</b>
+            <span className="mono muted push">
+              {snapshot?.connection.rtt_ms != null
+                ? `${snapshot.connection.rtt_ms} ms`
+                : ""}
+            </span>
+          </div>
           <small className="mono">
             {snapshot?.connection.server || app?.settings.server || "尚未连接"}
           </small>
         </div>
       </aside>
-      <main className="content">
+      <main className={`content page-${page}`} key={page}>
         <div className="drag title-drag" data-tauri-drag-region />
         {!isTauri && (
           <div className="alert">
@@ -456,13 +562,12 @@ function App() {
           </div>
         )}
         {feedback}
-        <Approvals tasks={tasks} act={act} disabled={busy || !available} />
         {page === "live" && (
           <>
             <header className="page-header">
               <div>
                 <h1>现场</h1>
-                <p>服务器上的 Agent 正通过 Macrun 在这台电脑上做的事。</p>
+                <p>服务器上的 Agent 正通过 Macrun 在这台 Mac 上做的事。</p>
               </div>
               <div className="actions">
                 <button disabled={!available || busy} onClick={pause}>
@@ -479,6 +584,7 @@ function App() {
                 </button>
               </div>
             </header>
+            <Approvals tasks={tasks} act={act} disabled={busy || !available} />
             {paused && (
               <div className="alert">
                 已暂停接收新任务。正在运行的任务继续完成；新请求返回 busy。
@@ -519,11 +625,11 @@ function App() {
               <StatusCard
                 title="桌面控制"
                 status={
-                  snapshot?.policy.desktop_enabled ? "unknown" : "cancelled"
+                  snapshot?.policy.desktop_enabled ? "succeeded" : "cancelled"
                 }
                 value={
                   snapshot?.policy.desktop_enabled
-                    ? "已允许桌面请求"
+                    ? `${snapshot?.backends[0]?.name || "桌面控制"} · 已允许`
                     : "桌面控制已关闭"
                 }
                 detail={
@@ -545,6 +651,12 @@ function App() {
                     view={() => choose(t)}
                     cancel={() => control("cancel", { task_id: t.task_id })}
                     disabled={!available || busy}
+                    openDirectory={() =>
+                      act("open_workspace", {
+                        root: t.arguments.cwd || t.arguments.remote_root,
+                        terminal: true,
+                      })
+                    }
                   />
                 ))}
                 {!running.length && (
@@ -651,7 +763,7 @@ function App() {
                     <div className="grow">
                       <div className="mono ellipsis">{title(t)}</div>
                       <small>
-                        {t.kind} · {time(t)}
+                        {kindLabel(t)} · {time(t)}
                       </small>
                     </div>
                     <div className="right">
@@ -672,21 +784,21 @@ function App() {
                     <div className="row between">
                       <div className="row">
                         <Status status={sel.status} />
-                        <span className="tag">{sel.kind}</span>
+                        <span className="tag">{kindLabel(sel)}</span>
                       </div>
                       <small>{time(sel)}</small>
                     </div>
                     <h3 className="mono command">{title(sel)}</h3>
                     {sel.status === "unknown" && (
-                      <div className="alert">
-                        操作可能已经生效，也可能没有。Macrun
-                        不会自动重放。请核对本机状态后再决定下一步。
-                        <button onClick={() => setPage("desktop")}>
-                          截一张当前屏幕核对
-                        </button>
+                      <div className="alert task-explanation">
+                        <Info size={16} />
+                        <span>
+                          操作可能已经生效，也可能没有。Macrun
+                          不会自动重放。请核对本机状态后再决定下一步。
+                        </span>
                       </div>
                     )}
-                    {sel.error && (
+                    {sel.error && sel.status !== "unknown" && (
                       <p className="error-text wrap">{sel.error.message}</p>
                     )}
                     <dl>
@@ -728,6 +840,11 @@ function App() {
                       >
                         打开完整日志
                       </button>
+                      {sel.status === "unknown" && (
+                        <button onClick={() => setPage("desktop")}>
+                          截一张当前屏幕核对
+                        </button>
+                      )}
                       {active(sel) && (
                         <button
                           disabled={!available || busy}
@@ -756,7 +873,7 @@ function App() {
                 <p>通过本机 MCP 后端操作桌面。命令与文件不受这里的开关影响。</p>
               </div>
               <label className="card switch-label">
-                允许桌面控制
+                允许 Agent 操作桌面
                 <input
                   className="switch"
                   type="checkbox"
@@ -778,27 +895,62 @@ function App() {
                       <span className="tag push">
                         {{
                           ready: "已启动",
+                          running: "运行中",
                           busy: "正在使用",
                           not_started: "未启动",
                         }[b.state] || b.state}
                       </span>
                     </div>
                     <p className="mono wrap">{b.command}</p>
-                    <div className="soft">
-                      <small>会话 · {b.tool_count ?? "未读取"} 个工具</small>
-                      <div className="mono wrap">
-                        {b.session || "工具发现后生成"}
+                    <div className="backend-stats">
+                      <div className="soft">
+                        <small>会话</small>
+                        <div className="mono ellipsis" title={b.session}>
+                          {b.session || "尚未生成"}
+                        </div>
+                      </div>
+                      <div className="soft">
+                        <small>工具</small>
+                        <div>{b.tool_count ?? "未读取"}</div>
+                      </div>
+                      <div className="soft">
+                        <small>近期调用</small>
+                        <div>
+                          {
+                            tasks.filter(
+                              (t) =>
+                                t.kind === "mcp.call" &&
+                                t.arguments.server === b.name,
+                            ).length
+                          }
+                        </div>
                       </div>
                     </div>
                     <button
                       disabled={!available || busy}
                       onClick={async () => {
+                        const trigger = document.activeElement as HTMLElement;
                         const r = await control("tools", { server: b.name });
-                        if (r) setTools(r);
+                        if (r) {
+                          dialogReturnFocus.current = trigger;
+                          setTools(r);
+                        }
                       }}
                     >
                       查看工具列表
                     </button>
+                    <button
+                      className="ghost"
+                      disabled={!available || busy}
+                      onClick={() =>
+                        control("restart_backend", { server: b.name })
+                      }
+                    >
+                      重启后端
+                    </button>
+                    <small className="backend-note">
+                      重启会更换会话编号，Agent 需要重新发现工具并重新截图。
+                    </small>
                   </article>
                 ))}
                 {!snapshot?.backends.length && (
@@ -814,29 +966,68 @@ function App() {
                     </button>
                   </div>
                 )}
+                <BackendPanel
+                  snapshot={snapshot}
+                  act={act}
+                  app={app}
+                  mode="advanced"
+                />
               </section>
+              <BackendPanel
+                snapshot={snapshot}
+                act={act}
+                app={app}
+                mode="permissions"
+              />
             </div>
-            <BackendPanel snapshot={snapshot} act={act} app={app} />
-            <Replay tasks={tasks} act={act} />
             <h2 className="section-heading">操作时</h2>
-            <div className="card">
+            <div className="card behavior-card">
+              {(
+                [
+                  [
+                    "show_overlay",
+                    "显示屏幕边框和悬浮提示",
+                    "Agent 操作期间，屏幕四周显示橙色描边，顶部显示正在做什么和停止按钮。",
+                  ],
+                  [
+                    "yield_input",
+                    "我动鼠标或键盘时让出",
+                    "检测到本地输入后暂停新的桌面操作 30 秒；已发出的点击不会撤回。",
+                  ],
+                ] as const
+              ).map(([key, text, detail]) => (
+                <label className="line" key={key}>
+                  <div className="grow">
+                    <b>{text}</b>
+                    <small>{detail}</small>
+                  </div>
+                  <input
+                    className="switch"
+                    type="checkbox"
+                    checked={app?.preferences[key] || false}
+                    disabled={!app || busy}
+                    onChange={(e) =>
+                      act("save_preferences", {
+                        preferences: {
+                          ...app!.preferences,
+                          [key]: e.target.checked,
+                        },
+                      })
+                    }
+                  />
+                </label>
+              ))}
               <div className="line">
-                <div>
+                <div className="grow">
                   <b>紧急停止快捷键</b>
-                  <small>取消所有运行任务、暂停接收，并关闭桌面控制。</small>
-                </div>
-                <kbd className="push">⌃ ⌥ ⌘ .</kbd>
-              </div>
-              <div className="line">
-                <div>
-                  <b>屏幕提示与本地输入让出</b>
                   <small>
-                    桌面调用时显示停止条；输入检测获准后，本机操作会让出 30 秒。
+                    取消所有运行中的任务，暂停接收，并关闭桌面控制。
                   </small>
                 </div>
-                <span className="tag push">已接入</span>
+                <kbd>⌃ ⌥ ⌘ .</kbd>
               </div>
             </div>
+            <Replay tasks={tasks} act={act} onTasks={() => setPage("tasks")} />
           </>
         )}
         {page === "settings" && (
@@ -848,12 +1039,10 @@ function App() {
             act={act}
             refresh={refresh}
             setError={setError}
+            onPair={() => setPairing(true)}
+            manualOpen={manualOpen}
           />
         )}
-        <footer>
-          Macrun Desktop · 开发版本 ·{" "}
-          {isTauri ? "真实本机状态" : "浏览器空状态预览"}
-        </footer>
       </main>
       {exitDialog}
       {tools && (
@@ -924,313 +1113,74 @@ function TaskCard({
   view,
   cancel,
   disabled,
+  openDirectory,
 }: {
   task: Task;
   view: () => void;
   cancel: () => void;
   disabled: boolean;
+  openDirectory: () => void;
 }) {
+  const sync = t.kind === "sync";
   return (
-    <article className="card active-task">
-      <div className="row">
-        <Status status={t.status} />
-        <span className="tag">{t.kind}</span>
+    <article className={`card active-task ${sync ? "sync-task" : ""}`}>
+      <div className="row task-meta">
+        <span className={`dot ${t.status}`} />
+        <span className={`tag ${sync ? "succeeded" : "running"}`}>
+          {kindLabel(t)}
+        </span>
         <small>
-          已用时 <span className="mono">{duration(t)}</span>
+          {label(t.status)} · 已用时 <span className="mono">{duration(t)}</span>
         </small>
-      </div>
-      <h3 className="mono command">{title(t)}</h3>
-      <small className="mono wrap">
-        {t.arguments.cwd || t.arguments.remote_root || ""} ·{" "}
-        {t.task_id.slice(0, 8)}…
-      </small>
-      {t.progress ? (
-        <p className="muted">
-          已收到 {t.progress.received} / {t.progress.total} 个文件 ·{" "}
-          {t.progress.bytes} 字节
-        </p>
-      ) : (
-        <TerminalTail text={t.output_tail || "等待任务输出…"} />
-      )}
-      <div className="actions">
-        <button onClick={view}>
-          查看完整输出 <ArrowUpRight size={14} />
-        </button>
-        <button disabled={disabled} className="danger push" onClick={cancel}>
-          取消任务
-        </button>
-      </div>
-    </article>
-  );
-}
-function SettingsPage({
-  app,
-  snapshot,
-  busy,
-  available,
-  act,
-  refresh,
-  setError,
-}: {
-  app: AppState | null;
-  snapshot: Snapshot | null;
-  busy: boolean;
-  available: boolean;
-  act: (c: string, a?: Record<string, unknown>, s?: string) => Promise<unknown>;
-  refresh: () => Promise<void>;
-  setError: (s: string) => void;
-}) {
-  const [settings, setSettings] = useState(app?.settings || emptySettings),
-    [dirty, setDirty] = useState(false);
-  useEffect(() => {
-    if (app && !dirty) setSettings(app.settings);
-  }, [app, dirty]);
-  const update = (k: keyof Settings, v: string) => {
-    setDirty(true);
-    setSettings((s) => ({ ...s, [k]: v }));
-  };
-  return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>设置与安全</h1>
-          <p>连接 · 安全边界 · 通用 · 诊断</p>
-        </div>
-      </header>
-      <Pairing act={act} running={!!app?.worker_running} />
-      <SafetyPanel
-        snapshot={snapshot}
-        act={act}
-        disabled={busy || !available}
-      />
-      <h2>手动连接（兼容已有部署）</h2>
-      <form
-        className="card connection-form"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const saved = await act(
-            "save_settings",
-            { settings },
-            "连接配置已保存",
-          );
-          if (saved !== undefined) setDirty(false);
-        }}
-      >
-        <div className="alert">
-          已配对连接使用系统钥匙串；手动连接支持现有证书与令牌文件。
-        </div>
-        {(
-          [
-            ["server", "服务器地址", "server.example:7443"],
-            ["cert", "服务器证书路径", "/absolute/path/cert.der"],
-            ["token_file", "令牌文件路径", "/absolute/path/token"],
-            [
-              "backend_config",
-              "桌面后端配置（可选）",
-              "/absolute/path/worker.toml",
-            ],
-          ] as const
-        ).map(([k, l, p]) => (
-          <label className="field" key={k}>
-            <span>{l}</span>
-            <input
-              required={
-                k !== "backend_config" &&
-                !(k === "token_file" && settings.keychain_account)
-              }
-              value={settings[k]}
-              placeholder={p}
-              onChange={(e) => update(k, e.target.value)}
-              disabled={app?.worker_running}
-            />
-          </label>
-        ))}
-        <small>
-          凭据导入系统钥匙串，不在页面显示令牌内容。执行器使用独立的数据目录。
-        </small>
-        <div className="actions">
-          <button type="submit" disabled={busy || app?.worker_running}>
-            保存配置
-          </button>
-          <button
-            className="primary"
-            type="button"
-            disabled={
-              busy ||
-              dirty ||
-              !app?.settings.server ||
-              app?.worker_running ||
-              app?.legacy_running
-            }
-            onClick={() => act("start_worker", {}, "已请求启动执行器")}
-          >
-            启动并连接
-          </button>
-          <button
-            className="danger"
-            type="button"
-            disabled={busy || !available || !!snapshot?.active_count}
-            onClick={() => act("stop_worker", {}, "已请求断开连接")}
-          >
-            断开连接
-          </button>
-        </div>
-        {!!snapshot?.active_count && (
-          <small>有任务运行时，请先“全部停止”，等待任务结束后再断开。</small>
+        {t.progress && (
+          <small className="push">
+            {t.progress.total} 个文件中已收到 {t.progress.received} 个 ·{" "}
+            {Math.round(t.progress.bytes / 1024)} KB
+          </small>
         )}
-      </form>
-      <h2 className="section-heading">安全边界</h2>
-      <div className="card">
-        <div className="line">
-          <div>
-            <b>执行器内的控制</b>
-            <small>
-              暂停接收、全部停止、桌面控制开关已接入。控制接口不作为远程工具暴露。
-            </small>
-          </div>
-        </div>
-        <div className="line">
-          <div>
-            <b>环境变量值不写入任务参数记录</b>
-            <small>
-              参数只保留变量名及遮盖值；命令自身输出的秘密仍可能出现在日志。
-            </small>
-          </div>
-        </div>
-        <div className="line">
-          <div>
-            <b>目录白名单与命令确认</b>
-            <small>
-              工作目录及确认规则由执行器检查。Shell
-              仍有本机用户权限，不属于系统沙箱。
-            </small>
-          </div>
-          <span className="tag push">已接入</span>
-        </div>
       </div>
-      <h2 className="section-heading">通用</h2>
-      <section className="card">
-        {app &&
-          (
-            [
-              ["show_overlay", "桌面操作时显示屏幕提示"],
-              ["yield_input", "本机输入时让出 30 秒"],
-              ["keep_awake", "桌面操作期间防止自动休眠"],
-              ["notifications", "失败、超时或未知时通知"],
-              ["auto_connect", "应用启动时自动连接"],
-            ] as const
-          ).map(([key, label]) => (
-            <label className="line" key={key}>
-              {label}
-              <input
-                type="checkbox"
-                checked={app.preferences[key]}
-                disabled={busy}
-                onChange={(e) =>
-                  act("save_preferences", {
-                    preferences: {
-                      ...app.preferences,
-                      [key]: e.target.checked,
-                    },
-                  })
-                }
-              />
-            </label>
-          ))}
-      </section>
-      {app?.legacy_running && (
-        <div className="alert">
-          检测到旧 LaunchAgent
-          dev.macrun.worker。为避免重复运行，已禁用新执行器启动。迁移会备份并停用旧服务，请先确认旧服务没有运行中的任务。
+      <h3 className="mono command">
+        {sync ? (
           <button
-            disabled={busy}
-            onClick={() => {
-              if (
-                window.confirm(
-                  "确认旧服务没有运行中的任务？迁移将备份并停止旧 LaunchAgent，旧数据会保留。",
-                )
-              )
-                act("migrate_legacy", {}, "迁移完成，可以启动桌面连接");
-            }}
+            className="sync-title-button"
+            onClick={view}
+            aria-label={`查看同步详情：${title(t)}`}
           >
-            备份并迁移旧服务
+            {title(t)}
+          </button>
+        ) : (
+          title(t)
+        )}
+      </h3>
+      {sync ? (
+        <small>
+          同步只更新文件，不会自动触发构建。完成前请勿依赖这个目录的内容。
+        </small>
+      ) : (
+        <>
+          <small className="mono wrap">
+            {t.arguments.cwd || t.arguments.remote_root || ""} · task{" "}
+            {t.task_id.slice(0, 8)}…
+          </small>
+          <TerminalTail text={t.output_tail || "等待任务输出…"} />
+        </>
+      )}
+      {!sync && (
+        <div className="actions">
+          <button onClick={view}>
+            {sync ? "查看同步详情" : "查看完整输出"}
+          </button>
+          {(t.arguments.cwd || t.arguments.remote_root) && (
+            <button className="ghost" onClick={openDirectory}>
+              在终端打开目录
+            </button>
+          )}
+          <button disabled={disabled} className="danger push" onClick={cancel}>
+            取消任务
           </button>
         </div>
       )}
-      <div className="card">
-        <label className="line">
-          <div className="grow">
-            <b>登录时启动</b>
-            <small>图形登录后启动桌面应用，不安装后台系统服务。</small>
-          </div>
-          <input
-            type="checkbox"
-            className="switch"
-            disabled={busy}
-            checked={app?.autostart || false}
-            onChange={async (e) => {
-              await act("autostart", { enabled: e.target.checked });
-              refresh().catch((e) => setError(String(e)));
-            }}
-          />
-        </label>
-        <div className="line">
-          <div>
-            <b>关闭窗口后继续在菜单栏运行</b>
-            <small>
-              通过“退出 Macrun”停止执行器；应用异常退出后 worker
-              会检测到父进程管道关闭。
-            </small>
-          </div>
-          <span className="tag push">已启用</span>
-        </div>
-      </div>
-      <h2 className="section-heading">诊断</h2>
-      <button
-        onClick={() => act("diagnostics", {}, "诊断包已导出并在访达中定位")}
-      >
-        导出脱敏诊断包
-      </button>
-      <button onClick={() => act("connection_check", {}, "连接检查完成")}>
-        逐项检查连接
-      </button>
-      <div className="card">
-        <div className="line">
-          <span className="muted">执行器版本</span>
-          <span className="mono">
-            {snapshot?.version || "未启动"} · 协议 {snapshot?.protocol || "—"}
-          </span>
-        </div>
-        <div className="line">
-          <span className="muted">数据目录</span>
-          <span className="mono wrap">
-            {app?.data_dir || "仅在桌面应用中可用"}
-          </span>
-        </div>
-        <div className="line">
-          <button
-            disabled={busy}
-            onClick={() => act("open_log", { taskId: null })}
-          >
-            <Terminal size={15} />
-            查看运行日志
-          </button>
-          <button
-            disabled={busy || !available}
-            onClick={() =>
-              act(
-                "control",
-                { action: "snapshot", args: {} },
-                "本机控制连接正常",
-              )
-            }
-          >
-            <RefreshCw size={15} />
-            检查本机连接
-          </button>
-        </div>
-      </div>
-    </>
+    </article>
   );
 }
 createRoot(document.getElementById("root")!).render(<App />);
