@@ -36,7 +36,7 @@ INTERVAL_MS ?= 1000
 
 .PHONY: help deps doctor build build-client build-worker build-server server-image \
         check fmt fmt-check lint test smoke cross-smoke install init serve worker \
-        status mcp sync sync-watch docker-check
+        status mcp sync sync-watch docker-check desktop-deps desktop-build desktop-dev
 
 help: ## Show common commands and defaults
 	@awk 'BEGIN {FS = ":.*## "; print "Usage: make <target> [NAME=value]\n"} /^[a-zA-Z_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -63,6 +63,16 @@ build: ## Build the current OS binary (release by default; PROFILE=debug support
 build-client: build ## Build native CLI / Mac client (run on Mac for a Mac binary)
 
 build-worker: build ## Build native worker (same binary as client and server)
+
+desktop-deps: ## Prepare macOS desktop dependencies (cached npm install, Rust if missing)
+	@./scripts/desktop-deps.sh
+
+desktop-build: desktop-deps ## Build Macrun Desktop.app (PROFILE=debug for faster builds)
+	@cd desktop && unset CARGO_TARGET_DIR && npm run desktop:build $(if $(filter debug,$(PROFILE)),-- --debug,)
+	@printf '\nApplication: %s/desktop/src-tauri/target/$(PROFILE)/bundle/macos/Macrun Desktop.app\n' '$(CURDIR)'
+
+desktop-dev: desktop-deps ## Run desktop development app with frontend hot reload; Ctrl+C to stop
+	@cd desktop && unset CARGO_TARGET_DIR && npm run desktop:dev
 
 docker-check:
 	@$(DOCKER) info >/dev/null 2>&1 || { echo 'Start Docker Desktop / OrbStack / Docker Engine first'; exit 1; }

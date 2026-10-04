@@ -6,7 +6,19 @@ Tauri 2 + React + TypeScript，按 `docs/desktop/` v2 设计开发，托管现�
 
 ## 构建与开发
 
-需要 Node.js 22、npm、Rust、Xcode Command Line Tools。
+在项目根目录直接运行：
+
+```sh
+make desktop-build                # 编译优化版 .app
+make desktop-dev                  # 启动开发应用，前端热更新
+make desktop-build PROFILE=debug  # 编译更快的调试版 .app
+```
+
+首次使用需要安装 Node.js 22.12+（包含 npm）和 Xcode Command Line Tools（`xcode-select --install`）。命令会检查环境，缺少 Rust 时沿用项目脚本安装；自动安装锁定版本的前端依赖，并构建、打包 worker。依赖未变化时跳过 npm 安装。首次下载需要联网。
+
+优化版应用位于 `desktop/src-tauri/target/release/bundle/macos/Macrun Desktop.app`，调试版将 `release` 换成 `debug`。在访达中双击即可运行。`desktop-dev` 在前台运行，按 Ctrl+C 停止；它启动本机桌面端，不自动创建远端服务，首次连接仍需要配对。开发模式会记住本机配置，已开启自动连接时会按已有配置连接。
+
+下面的 npm 命令仍可直接使用：
 
 ```sh
 cd desktop

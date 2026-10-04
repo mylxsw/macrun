@@ -53,6 +53,8 @@ The diagram shows the common Linux → Mac setup. The executable also supports L
 
 The macOS desktop client is under full acceptance testing. See [desktop setup](desktop/README.md) and the [acceptance checklist](docs/desktop/completion-checklist.md) for build instructions, invitation pairing, safety controls and verification limits.
 
+From the repository root: `make desktop-build` builds the macOS app; `make desktop-dev` starts the development app with hot reload. Use `PROFILE=debug` for a faster debug build.
+
 ## Get started
 
 The shortest path is to **connect the two machines and run one command**, then add your agent and optional desktop tools.

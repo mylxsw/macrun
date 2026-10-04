@@ -53,6 +53,8 @@ Macrun 提供了完成这件事所需的工具：
 
 macOS 桌面端正在进行完整验收，构建、邀请配对、安全设置及验证边界见 [桌面说明](desktop/README.md) 和 [验收清单](docs/desktop/completion-checklist.md)。
 
+在项目根目录运行 `make desktop-build` 编译 macOS 应用，运行 `make desktop-dev` 启动开发应用（支持热更新）。需要更快编译时使用 `make desktop-build PROFILE=debug`。
+
 ## 开始使用
 
 最容易理解的起点是：**先连接两台机器，在 Mac 上成功执行一条命令**，再接入 Agent 和可选的桌面工具。
