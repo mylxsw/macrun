@@ -45,6 +45,12 @@ enum Cmd {
         data: PathBuf,
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Private local control socket for the desktop application.
+        #[arg(long)]
+        control_socket: Option<PathBuf>,
+        /// Stop the worker and its tasks when the desktop parent closes stdin.
+        #[arg(long)]
+        parent_pipe: bool,
     },
     /// Expose generic tools to Claude Code using stdio MCP.
     Mcp,
@@ -113,14 +119,21 @@ async fn entry() -> anyhow::Result<()> {
             token_file,
             data,
             config,
+            control_socket,
+            parent_pipe,
         } => {
-            return macrun::worker::worker(macrun::worker::Options {
-                server,
-                cert,
-                token_file,
-                data,
-                config,
-            })
+            return macrun::worker::worker_managed(
+                macrun::worker::Options {
+                    server,
+                    cert,
+                    token_file,
+                    data,
+                    config,
+                },
+                control_socket,
+                None,
+                parent_pipe,
+            )
             .await;
         }
         Cmd::Mcp => return frontend::mcp(cli.socket, root).await,

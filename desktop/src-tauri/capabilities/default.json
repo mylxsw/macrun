@@ -1,0 +1,6 @@
+{
+  "identifier": "desktop",
+  "description": "Local Macrun windows only",
+  "windows": ["main", "tray"],
+  "permissions": ["core:default"]
+}

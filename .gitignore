@@ -13,3 +13,11 @@
 
 # Build outputs for manual distribution
 /dist/
+
+# Desktop development and bundled worker artifacts
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/target/
+/desktop/src-tauri/binaries/
+
+/desktop/src-tauri/gen/

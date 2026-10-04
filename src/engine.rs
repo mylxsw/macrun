@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncWriteExt,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, watch},
 };
 use tokio_util::sync::CancellationToken;
 type Slot = Arc<Mutex<Option<Client>>>;
@@ -21,10 +21,47 @@ pub struct Engine {
     submissions: Mutex<()>,
     tasks: Mutex<BTreeMap<String, CancellationToken>>,
     backends: BTreeMap<String, Slot>,
+    policy: Mutex<Policy>,
+    changes: watch::Sender<u64>,
+    fingerprint_key: [u8; 32],
+}
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Policy {
+    pub paused: bool,
+    pub desktop_enabled: bool,
+}
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            paused: false,
+            desktop_enabled: true,
+        }
+    }
+}
+fn redact_arguments(a: &Value) -> Value {
+    let mut a = a.clone();
+    if let Some(env) = a.get_mut("env").and_then(Value::as_object_mut) {
+        for value in env.values_mut() {
+            *value = json!("••••");
+        }
+    }
+    a
 }
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
         std::fs::create_dir_all(data.join("tasks"))?;
+        let key_path = data.join("request-key");
+        let key = if key_path.exists() {
+            std::fs::read(&key_path)?
+        } else {
+            let mut bytes = uuid::Uuid::new_v4().as_bytes().to_vec();
+            bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
+            wire::private_write(&key_path, &bytes)?;
+            bytes
+        };
+        let fingerprint_key: [u8; 32] = key
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("invalid request key"))?;
         for entry in std::fs::read_dir(data.join("tasks"))? {
             let dir = entry?.path();
             let p = dir.join("result.json");
@@ -32,6 +69,15 @@ impl Engine {
                 continue;
             }
             let mut v: Value = serde_json::from_slice(&std::fs::read(&p)?)?;
+            if v.get("arguments").is_some() && v.get("request_fingerprint").is_none() {
+                v["request_fingerprint"] = json!(
+                    blake3::keyed_hash(&fingerprint_key, &serde_json::to_vec(&v["arguments"])?)
+                        .to_hex()
+                        .to_string()
+                );
+                v["arguments"] = redact_arguments(&v["arguments"]);
+                wire::atomic_json(&p, &v)?;
+            }
             if ["accepted", "running"].contains(&v["status"].as_str().unwrap_or("")) {
                 v["status"] = json!("unknown");
                 v["ended_at"] = json!(now());
@@ -53,13 +99,228 @@ impl Engine {
             .keys()
             .map(|n| (n.clone(), Arc::new(Mutex::new(None))))
             .collect();
+        let policy = if data.join("desktop-policy.json").exists() {
+            serde_json::from_slice(&std::fs::read(data.join("desktop-policy.json"))?)?
+        } else {
+            Policy::default()
+        };
+        let (changes, _) = watch::channel(0);
         Ok(Arc::new(Self {
             data,
             config,
             submissions: Mutex::new(()),
             tasks: Mutex::new(BTreeMap::new()),
             backends,
+            policy: Mutex::new(policy),
+            changes,
+            fingerprint_key,
         }))
+    }
+    fn fingerprint(&self, a: &Value) -> Result<String> {
+        Ok(
+            blake3::keyed_hash(&self.fingerprint_key, &serde_json::to_vec(a)?)
+                .to_hex()
+                .to_string(),
+        )
+    }
+    pub fn changed(&self) {
+        self.changes.send_modify(|n| *n = n.wrapping_add(1));
+    }
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+    pub async fn policy(&self) -> Policy {
+        self.policy.lock().await.clone()
+    }
+    async fn check_admission(&self, kind: &str) -> Result<()> {
+        let p = self.policy.lock().await;
+        if p.paused {
+            return Err(crate::model::Fault::new("busy", "worker paused by local user").into());
+        }
+        if kind == "mcp.call" && !p.desktop_enabled {
+            return Err(crate::model::Fault::new(
+                "desktop_disabled",
+                "desktop control disabled by local user",
+            )
+            .into());
+        }
+        Ok(())
+    }
+    /// Only the local control endpoint can change policy. Admission and stopping are serialized.
+    pub async fn set_policy(
+        &self,
+        paused: Option<bool>,
+        desktop: Option<bool>,
+        stop: bool,
+    ) -> Result<Value> {
+        let _admission = self.submissions.lock().await;
+        let mut p = self.policy.lock().await;
+        let mut next = p.clone();
+        if let Some(v) = paused {
+            next.paused = v;
+        }
+        if let Some(v) = desktop {
+            next.desktop_enabled = v;
+        }
+        if stop {
+            next.paused = true;
+            next.desktop_enabled = false;
+        }
+        // Fail closed in memory even if persisting an emergency stop fails.
+        if stop {
+            *p = next.clone();
+            for cancel in self.tasks.lock().await.values() {
+                cancel.cancel();
+            }
+            self.changed();
+        }
+        wire::atomic_json(&self.data.join("desktop-policy.json"), &next)?;
+        *p = next;
+        self.changed();
+        Ok(json!({"policy":*p,"cancel_requested":stop}))
+    }
+    pub async fn begin_external(
+        &self,
+        kind: &str,
+        args: Value,
+    ) -> Result<(String, CancellationToken)> {
+        let _guard = self.submissions.lock().await;
+        self.check_admission(kind).await?;
+        let ident = id();
+        let cancel = CancellationToken::new();
+        let args = if kind.starts_with("file.") {
+            // Never record upload bytes or arbitrary file contents.
+            json!({"path":args["path"],"destination":args["destination"]})
+        } else {
+            args
+        };
+        wire::atomic_json(
+            &self.directory(&ident)?.join("result.json"),
+            &json!({"task_id":ident,"kind":kind,"arguments":args,"status":"running","started_at":now()}),
+        )?;
+        self.tasks
+            .lock()
+            .await
+            .insert(ident.clone(), cancel.clone());
+        self.changed();
+        Ok((ident, cancel))
+    }
+    pub async fn external_progress(&self, ident: &str, progress: Value) -> Result<()> {
+        let p = self.directory(ident)?.join("result.json");
+        let mut v: Value = serde_json::from_slice(&tokio::fs::read(&p).await?)?;
+        v["progress"] = progress;
+        wire::atomic_json(&p, &v)?;
+        self.changed();
+        Ok(())
+    }
+    pub async fn finish_external(
+        &self,
+        ident: &str,
+        error: Option<String>,
+        code: Option<&str>,
+    ) -> Result<()> {
+        let p = self.directory(ident)?.join("result.json");
+        let mut v: Value = serde_json::from_slice(&tokio::fs::read(&p).await?)?;
+        let cancelled = self
+            .tasks
+            .lock()
+            .await
+            .get(ident)
+            .is_some_and(|c| c.is_cancelled());
+        v["status"] = json!(if cancelled {
+            "cancelled"
+        } else if code == Some("timed_out") {
+            "timed_out"
+        } else if error.is_some() {
+            "failed"
+        } else {
+            "succeeded"
+        });
+        v["ended_at"] = json!(now());
+        if let Some(message) = error {
+            v["error"] = json!({"message":message});
+        }
+        let result = wire::atomic_json(&p, &v);
+        self.tasks.lock().await.remove(ident);
+        self.changed();
+        result
+    }
+    pub async fn active_count(&self) -> usize {
+        self.tasks.lock().await.len()
+    }
+    pub async fn shutdown(&self) -> Result<()> {
+        {
+            let _admission = self.submissions.lock().await;
+            self.policy.lock().await.paused = true;
+            for cancel in self.tasks.lock().await.values() {
+                cancel.cancel();
+            }
+            self.changed();
+        }
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while self.active_count().await > 0 {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("tasks did not stop in time"))?;
+        for slot in self.backends.values() {
+            let mut client = slot.lock().await;
+            if let Some(c) = client.as_mut() {
+                c.stop().await;
+            }
+            *client = None;
+        }
+        Ok(())
+    }
+    pub async fn local_snapshot(&self) -> Result<Value> {
+        let mut tasks = Vec::new();
+        for entry in std::fs::read_dir(self.data.join("tasks"))? {
+            let path = entry?.path().join("result.json");
+            if let Ok(bytes) = std::fs::read(path)
+                && let Ok(mut v) = serde_json::from_slice::<Value>(&bytes)
+            {
+                v.as_object_mut().map(|m| m.remove("request_fingerprint"));
+                v["arguments"] = redact_arguments(&v["arguments"]);
+                // Tool results can contain images and secrets; retrieve only on explicit request.
+                if v["kind"] == "mcp.call" {
+                    v.as_object_mut().map(|m| m.remove("result"));
+                }
+                tasks.push(v);
+            }
+        }
+        tasks.sort_by_key(|v| std::cmp::Reverse(v["started_at"].as_u64().unwrap_or(0)));
+        let total = tasks.len();
+        tasks.truncate(200);
+        for v in &mut tasks {
+            let ident = v["task_id"].as_str().unwrap_or("");
+            let p = self.directory(ident)?.join("output.log");
+            if let Ok(meta) = tokio::fs::metadata(&p).await {
+                let offset = meta.len().saturating_sub(8192);
+                if let Ok(out) = crate::files::handle(
+                    "file.read",
+                    &json!({"path":p,"offset":offset,"length":8192,"text":true}),
+                )
+                .await
+                {
+                    v["output_tail"] = out["text"].clone();
+                }
+            }
+        }
+        let mut backends = Vec::new();
+        for (name, slot) in &self.backends {
+            let (state, session) = match slot.try_lock() {
+                Ok(c) => (
+                    if c.is_some() { "ready" } else { "not_started" },
+                    c.as_ref().map(|c| c.generation.clone()),
+                ),
+                Err(_) => ("busy", None),
+            };
+            backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command}));
+        }
+        Ok(
+            json!({"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+        )
     }
     fn directory(&self, id: &str) -> Result<PathBuf> {
         uuid::Uuid::parse_str(id)?;
@@ -96,7 +357,13 @@ impl Engine {
                 self.backend_request(&a, "tools/list", &CancellationToken::new())
                     .await
             }
-            _ if kind.starts_with("file.") => crate::files::handle(kind, &a).await,
+            _ if kind.starts_with("file.") => {
+                let (ident, cancel) = self.begin_external(kind, a.clone()).await?;
+                let r = tokio::select! { r=crate::files::handle(kind,&a)=>r, _=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled")) };
+                self.finish_external(&ident, r.as_ref().err().map(ToString::to_string), None)
+                    .await?;
+                r
+            }
             _ => bail!("unknown operation: {kind}"),
         }
     }
@@ -131,18 +398,20 @@ impl Engine {
         let path = dir.join("result.json");
         if path.exists() {
             let v: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-            if v["kind"] != kind || v["arguments"] != a {
+            if v["kind"] != kind || v["request_fingerprint"] != json!(self.fingerprint(&a)?) {
                 bail!("request_id already belongs to a different operation");
             }
             return Ok(json!({"task_id":task_id,"status":v["status"],"duplicate":true}));
         }
-        let initial = json!({"task_id":task_id,"kind":kind,"arguments":a,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
+        self.check_admission(kind).await?;
+        let initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
         wire::atomic_json(&path, &initial)?;
         let cancel = CancellationToken::new();
         self.tasks
             .lock()
             .await
             .insert(task_id.clone(), cancel.clone());
+        self.changed();
         let engine = self.clone();
         let ident = task_id.clone();
         let kind = kind.to_owned();
@@ -151,6 +420,10 @@ impl Engine {
             result["status"] = json!("running");
             let outcome = async {
                 wire::atomic_json(&path, &result)?;
+                engine.changed();
+                if cancel.is_cancelled() {
+                    bail!("cancelled before dispatch");
+                }
                 if kind == "exec.start" {
                     engine.command(&a, &dir, &cancel).await
                 } else {
@@ -173,6 +446,8 @@ impl Engine {
                     let text = e.to_string();
                     result["status"] = json!(if kind == "mcp.call"
                         && !text.starts_with("stale_session")
+                        && !text.starts_with("desktop_disabled")
+                        && !text.starts_with("cancelled before")
                     {
                         "unknown"
                     } else if cancel.is_cancelled() {
@@ -199,6 +474,7 @@ impl Engine {
                 }),
             );
             engine.tasks.lock().await.remove(&ident);
+            engine.changed();
         });
         Ok(
             json!({"task_id":task_id,"status":"accepted","result_path":self.directory(&task_id)?.join("result.json")}),
@@ -264,6 +540,12 @@ impl Engine {
             }
         } else if method == "tools/call" {
             bail!("stale_session: mcp.call requires session from mcp.tools");
+        }
+        if cancel.is_cancelled() {
+            bail!("cancelled before backend dispatch");
+        }
+        if method == "tools/call" && !self.policy.lock().await.desktop_enabled {
+            bail!("desktop_disabled before backend dispatch");
         }
         let operation = async {
             if guard.is_none() {

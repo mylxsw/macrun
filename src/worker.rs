@@ -22,6 +22,14 @@ pub struct Options {
     pub config: Option<PathBuf>,
 }
 pub async fn worker(opts: Options) -> Result<()> {
+    worker_managed(opts, None, None, false).await
+}
+pub async fn worker_managed(
+    opts: Options,
+    control: Option<PathBuf>,
+    injected_token: Option<String>,
+    parent_pipe: bool,
+) -> Result<()> {
     let _lock = wire::lock(&opts.data)?;
     let config: WorkerConfig = if let Some(p) = &opts.config {
         toml::from_str(&std::fs::read_to_string(p)?)?
@@ -31,9 +39,39 @@ pub async fn worker(opts: Options) -> Result<()> {
     let engine = Engine::open(opts.data.clone(), config)?;
     let sync_lock = Arc::new(Mutex::new(()));
     let endpoint = wire::client(&opts.cert)?;
-    let token = std::fs::read_to_string(&opts.token_file)?
-        .trim()
-        .to_string();
+    let token = if let Some(token) = injected_token {
+        token
+    } else {
+        std::fs::read_to_string(&opts.token_file)?
+            .trim()
+            .to_string()
+    };
+    anyhow::ensure!(!token.is_empty(), "empty connection token");
+    let shutdown = CancellationToken::new();
+    if parent_pipe {
+        let stop = shutdown.clone();
+        // A dedicated thread must not hold Tokio runtime shutdown open.
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = [0u8; 1];
+            let _ = std::io::stdin().read(&mut buf);
+            stop.cancel();
+        });
+    }
+    let (connection, rx) = tokio::sync::watch::channel(crate::local::ConnectionState::initial(
+        opts.server.to_string(),
+    ));
+    let local_task = control.map(|socket| {
+        let e = engine.clone();
+        let s = shutdown.clone();
+        tokio::spawn(async move {
+            let r = crate::local::serve(socket, e, rx, s.clone()).await;
+            if r.is_err() {
+                s.cancel();
+            }
+            r
+        })
+    });
     let instance = id();
     let mut retry = 1;
     loop {
@@ -50,12 +88,18 @@ pub async fn worker(opts: Options) -> Result<()> {
                 &instance,
                 engine.clone(),
                 sync_lock.clone(),
+                &connection,
             )
             .await
         };
-        tokio::select! {r=attempt=>{crate::logging::event("worker", "reconnecting", json!({"status":if r.is_err(){"disconnected"}else{"closed"},"retry_seconds":retry}));},_=tokio::signal::ctrl_c()=>break}
-        tokio::select! {_=tokio::time::sleep(Duration::from_secs(retry))=>{},_=tokio::signal::ctrl_c()=>break}
+        tokio::select! {r=attempt=>{connection.send_modify(|s|{s.state="disconnected".into();s.since=now();s.rtt_ms=None;s.error=r.as_ref().err().map(ToString::to_string);});crate::logging::event("worker", "reconnecting", json!({"status":if r.is_err(){"disconnected"}else{"closed"},"retry_seconds":retry}));},_=tokio::signal::ctrl_c()=>break,_=shutdown.cancelled()=>break}
+        tokio::select! {_=tokio::time::sleep(Duration::from_secs(retry))=>{},_=tokio::signal::ctrl_c()=>break,_=shutdown.cancelled()=>break}
         retry = (retry * 2).min(5);
+    }
+    shutdown.cancel();
+    engine.shutdown().await?;
+    if let Some(task) = local_task {
+        task.await??;
     }
     endpoint.close(0u32.into(), b"worker stopped");
     Ok(())
@@ -67,6 +111,7 @@ async fn session(
     instance: &str,
     engine: Arc<Engine>,
     sync_lock: Arc<Mutex<()>>,
+    connection: &tokio::sync::watch::Sender<crate::local::ConnectionState>,
 ) -> Result<()> {
     let (mut out, mut input) = conn.open_bi().await?;
     let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance});
@@ -89,6 +134,12 @@ async fn session(
         "connected",
         json!({"server":opts.server.to_string(),"instance":instance}),
     );
+    connection.send_modify(|s| {
+        s.state = "connected".into();
+        s.since = now();
+        s.rtt_ms = Some(conn.rtt().as_millis() as u64);
+        s.error = None;
+    });
     let mut rx = wire::read_channel::<_, Control>(input);
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     let mut last = now();
@@ -96,7 +147,7 @@ async fn session(
         tokio::select! {
             m=rx.recv()=>{if let Control::Heartbeat{..}=m.ok_or_else(||anyhow::anyhow!("control closed"))?? {last=now();}},
             stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();tokio::spawn(async move {if handle(out,input,c,o,e,lock).await.is_err(){crate::logging::event("worker", "request_error", json!({"reason":"request_decode_or_transport_failed"}));}});},
-            _=tick.tick()=>{if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
+            _=tick.tick()=>{connection.send_modify(|s|s.rtt_ms=Some(conn.rtt().as_millis() as u64));if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
             _=conn.closed()=>break,
         }
     }
@@ -118,7 +169,10 @@ async fn handle(
         let reply = match r {
             Ok(value) => Reply::Status { value },
             Err(e) => Reply::Error {
-                error: Fault::new("operation_failed", e),
+                error: e
+                    .downcast_ref::<Fault>()
+                    .cloned()
+                    .unwrap_or_else(|| Fault::new("operation_failed", e)),
             },
         };
         log.send(&mut out, &reply).await?;
@@ -137,6 +191,24 @@ async fn handle(
         out.finish()?;
         return Ok(());
     };
+    let (ident, cancel) = match engine
+        .begin_external(
+            "sync",
+            json!({"remote_root":task.project.remote_root,"job_id":task.job_id}),
+        )
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            let error = e
+                .downcast_ref::<Fault>()
+                .cloned()
+                .unwrap_or_else(|| Fault::new("operation_failed", e));
+            wire::send(&mut out, &Event::Done { error: Some(error) }).await?;
+            out.finish()?;
+            return Ok(());
+        }
+    };
     let (tx, mut rx) = mpsc::channel(64);
     let writer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -146,14 +218,24 @@ async fn handle(
         }
         let _ = out.finish();
     });
-    let cancel = CancellationToken::new();
-    let r = receive_sync(&task, &mut input, &conn, &opts, &cancel, &tx).await;
+    let r = receive_sync(
+        &task, &mut input, &conn, &opts, &cancel, &tx, &engine, &ident,
+    )
+    .await;
+    engine
+        .finish_external(
+            &ident,
+            r.as_ref().err().map(ToString::to_string),
+            r.as_ref().err().map(|e| e.code.as_str()),
+        )
+        .await?;
     log.status(if r.is_ok() { "succeeded" } else { "failed" });
     let _ = tx.send(Event::Done { error: r.err() }).await;
     drop(tx);
     let _ = writer.await;
     Ok(())
 }
+#[allow(clippy::too_many_arguments)]
 async fn receive_sync(
     task: &Task,
     input: &mut quinn::RecvStream,
@@ -161,6 +243,8 @@ async fn receive_sync(
     opts: &Options,
     cancel: &CancellationToken,
     tx: &mpsc::Sender<Event>,
+    engine: &Engine,
+    ident: &str,
 ) -> Outcome<()> {
     if let Some(manifest) = task.manifest.clone() {
         progress(tx, "syncing").await;
@@ -178,6 +262,14 @@ async fn receive_sync(
             .await
             .map_err(disconnected)?;
             let mut bytes = 0;
+            let mut files = 0;
+            engine
+                .external_progress(
+                    ident,
+                    json!({"received":0,"total":receiver.needed.len(),"bytes":0}),
+                )
+                .await
+                .map_err(sync_error)?;
             let mut remaining: std::collections::BTreeSet<_> =
                 receiver.needed.iter().cloned().collect();
             while !remaining.is_empty() {
@@ -212,6 +304,14 @@ async fn receive_sync(
                 }
                 receiver.install(&h.path, &temp)?;
                 bytes += copied;
+                files += 1;
+                engine
+                    .external_progress(
+                        ident,
+                        json!({"received":files,"total":receiver.needed.len(),"bytes":bytes}),
+                    )
+                    .await
+                    .map_err(sync_error)?;
             }
             let Event::SyncCommit { manifest } = wire::recv(input).await.map_err(disconnected)?
             else {

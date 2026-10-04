@@ -12,3 +12,5 @@ pub mod files;
 pub mod frontend;
 
 pub mod logging;
+
+pub mod local;

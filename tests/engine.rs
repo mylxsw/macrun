@@ -72,3 +72,136 @@ async fn command_timeout_and_cancel_are_queryable() {
         );
     }
 }
+
+#[tokio::test]
+async fn local_pause_preserves_running_tasks_and_deduplication() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = Engine::open(dir.path().into(), WorkerConfig::default()).unwrap();
+    let args = json!({"request_id":id(),"command":"sleep 0.2; echo completed","cwd":dir.path()});
+    e.handle("exec.start", args.clone()).await.unwrap();
+    e.set_policy(Some(true), None, false).await.unwrap();
+    assert_eq!(
+        e.handle("exec.start", args.clone()).await.unwrap()["duplicate"],
+        true
+    );
+    let rejected = e
+        .handle(
+            "exec.start",
+            json!({"command":"echo forbidden","cwd":dir.path()}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        rejected
+            .downcast_ref::<macrun::model::Fault>()
+            .unwrap()
+            .code,
+        "busy"
+    );
+    assert_eq!(
+        wait(&e, args["request_id"].as_str().unwrap()).await["status"],
+        "succeeded"
+    );
+    assert!(
+        e.handle(
+            "file.write",
+            json!({"path":dir.path().join("no"),"data":"eA=="})
+        )
+        .await
+        .is_err()
+    );
+    assert!(!dir.path().join("no").exists());
+    assert!(e.begin_external("sync", json!({})).await.is_err());
+    e.set_policy(Some(false), None, false).await.unwrap();
+    assert!(e.handle("file.read",json!({"path":dir.path().join("tasks").join(args["request_id"].as_str().unwrap()).join("output.log"),"text":true})).await.is_ok());
+}
+
+#[tokio::test]
+async fn emergency_stop_cancels_commands_and_sync_and_persists_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = Engine::open(dir.path().into(), WorkerConfig::default()).unwrap();
+    let task = id();
+    e.handle(
+        "exec.start",
+        json!({"request_id":task,"command":"sleep 30","cwd":dir.path()}),
+    )
+    .await
+    .unwrap();
+    let (sync, cancel) = e
+        .begin_external("sync", json!({"remote_root":"/tmp/example"}))
+        .await
+        .unwrap();
+    e.set_policy(None, None, true).await.unwrap();
+    assert!(cancel.is_cancelled());
+    e.finish_external(&sync, Some("cancelled".into()), None)
+        .await
+        .unwrap();
+    assert_eq!(wait(&e, &task).await["status"], "cancelled");
+    assert!(e.policy().await.paused);
+    assert!(!e.policy().await.desktop_enabled);
+    drop(e);
+    let e = Engine::open(dir.path().into(), WorkerConfig::default()).unwrap();
+    assert!(e.policy().await.paused);
+    assert!(!e.policy().await.desktop_enabled);
+}
+
+#[tokio::test]
+async fn environment_values_are_not_persisted_but_still_part_of_deduplication() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = Engine::open(dir.path().into(), WorkerConfig::default()).unwrap();
+    let task = id();
+    let mut args = json!({"request_id":task,"command":"test -n \"$SECRET\"","cwd":dir.path(),"env":{"SECRET":"private-value-123"}});
+    e.handle("exec.start", args.clone()).await.unwrap();
+    let v = wait(&e, &task).await;
+    assert_eq!(v["arguments"]["env"]["SECRET"], "••••");
+    let raw =
+        std::fs::read_to_string(dir.path().join("tasks").join(&task).join("result.json")).unwrap();
+    assert!(!raw.contains("private-value-123"));
+    assert!(
+        !e.local_snapshot()
+            .await
+            .unwrap()
+            .to_string()
+            .contains("private-value-123")
+    );
+    args["env"]["SECRET"] = json!("different");
+    assert!(e.handle("exec.start", args).await.is_err());
+}
+
+#[tokio::test]
+async fn remote_cannot_change_local_controls() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = WorkerConfig::default();
+    config.mcp.insert(
+        "computer".into(),
+        macrun::config::Backend {
+            command: "unused".into(),
+            args: vec![],
+            env: Default::default(),
+            cwd: None,
+        },
+    );
+    let e = Engine::open(dir.path().into(), config).unwrap();
+    e.set_policy(None, Some(false), false).await.unwrap();
+    let err = e
+        .handle(
+            "mcp.call",
+            json!({"server":"computer","tool":"click","session":"none"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.downcast_ref::<macrun::model::Fault>().unwrap().code,
+        "desktop_disabled"
+    );
+    assert!(e.handle("desktop", json!({"enabled":true})).await.is_err());
+    assert!(e.handle("pause", json!({"paused":false})).await.is_err());
+    let r = e
+        .handle("exec.start", json!({"command":"true","cwd":dir.path()}))
+        .await
+        .unwrap();
+    assert_eq!(
+        wait(&e, r["task_id"].as_str().unwrap()).await["status"],
+        "succeeded"
+    );
+}
