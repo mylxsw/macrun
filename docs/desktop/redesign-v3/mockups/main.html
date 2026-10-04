@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v3 · 现场</title>
+<link rel="stylesheet" href="v3.css">
+<link rel="stylesheet" href="window.css">
+<script>if (location.hash === "#dark") document.documentElement.classList.add("dark");</script>
+</head>
+<body>
+<div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav>
+      <a class="on"><svg class="i" viewBox="0 0 16 16"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg>现场<span class="badge">3</span></a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M5 4h9M5 8h9M5 12h9M2 4h.01M2 8h.01M2 12h.01"/></svg>任务<span class="badge warn">2</span></a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg>桌面控制</a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7-3-1-5.5-3.5-5.5-7v-4z"/></svg>安全与设置</a>
+    </nav>
+    <div class="side-foot">
+      <div class="row"><span class="dot ok"></span><b>gulu-server</b><span class="grow"></span><span class="mono faint">34 ms</span></div>
+      <div class="faint" style="font-size:11px;margin-top:2px">QUIC · 已连接 2 小时 · v0.2.0</div>
+    </div>
+  </aside>
+  <main>
+    <header class="tb">
+      <h1>现场</h1>
+      <span class="chip"><span class="dot run"></span>2 个任务运行中</span>
+      <span class="grow"></span>
+      <span class="row" style="font-size:12.5px;gap:7px">接收新任务<span class="switch on"></span></span>
+      <span class="btn stop">停止全部 <span style="opacity:.75;font-weight:400">⌃⌥⌘.</span></span>
+    </header>
+    <div class="content">
+      <section class="appr">
+        <div class="row">
+          <span class="ring"></span>
+          <b>需要你确认</b><span class="muted">· 41 秒后过期并告诉 Agent “expired”</span>
+          <span class="grow"></span><span class="faint" style="font-size:12px">1 / 2</span>
+          <span class="btn sm">‹</span><span class="btn sm">›</span>
+        </div>
+        <div class="mono cmd">ps aux | grep -i -E "macrun" | grep -v grep | head; ls -la "/Applications/Macrun Desktop.app/Contents/MacOS" 2&gt;&amp;1; system_profiler SPDisplaysDataType | grep -i resolution</div>
+        <div class="row">
+          <span class="chip warn">管道</span><span class="chip warn">未知程序 system_profiler</span>
+          <span class="mono faint" style="font-size:11.5px">/tmp</span>
+          <span class="grow"></span>
+          <span class="btn">拒绝</span>
+          <span class="btn">15 分钟内允许同类</span>
+          <span class="btn primary">允许一次</span>
+        </div>
+      </section>
+
+      <section class="strip3">
+        <div><span class="dot ok"></span><div class="grow"><b>连接</b><p>gulu-server · 34 ms · 2 小时无中断</p></div><span class="faint">›</span></div>
+        <div><span class="dot ok"></span><div class="grow"><b>执行器</b><p>接收中 · 协议 2 · 2 运行 / 1 待确认</p></div><span class="faint">›</span></div>
+        <div><span class="dot act"></span><div class="grow"><b>桌面控制</b><p>computer · 观察直接执行，操作显示提示</p></div><span class="faint">›</span></div>
+      </section>
+
+      <div class="cols">
+        <div>
+          <div class="sh"><h2>正在进行</h2><span class="faint">待确认的请求只在上方出现一次</span></div>
+          <div class="card">
+            <div class="task">
+              <span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M3 4l3 4-3 4M8 12h5"/></svg></span>
+              <div class="grow">
+                <div class="row"><span class="mono ell grow" style="font-size:12.5px">cargo test --workspace --locked</span><span class="mono muted">1:42</span><span class="btn sm danger">取消</span></div>
+                <div class="mono faint" style="font-size:11.5px">~/work/macrun · 命令 · 7f3a91c2</div>
+                <div class="term" style="margin-top:7px">test engine::approval::expires ... ok<br>test engine::approval::denied_is_terminal ... ok<br>test files::rejects_symlink_escape ... <span style="color:#f2b33d">running</span></div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg></span>
+              <div class="grow">
+                <div class="row"><span class="ell grow"><b style="font-weight:500">get_window_state</b> <span class="muted">· Macrun Desktop 主窗口</span></span><span class="chip">观察</span><span class="mono muted">0:01</span></div>
+                <div class="row" style="margin-top:7px;align-items:flex-start">
+                  <div class="thumb" style="width:150px;height:92px"><div class="win" style="left:10%;top:12%;width:80%;height:76%"></div></div>
+                  <div class="muted" style="font-size:12px;line-height:1.6">桌面任务显示画面与参数，不显示空的终端框。<br>结果：截图 1280×812，0 个可访问元素<br><span class="btn ghost" style="padding:0">在任务中打开回放 ›</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="task">
+              <span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4M12.5 1.5V4H10M3.5 14.5V12H6"/></svg></span>
+              <div class="grow">
+                <div class="row"><span class="ell grow">同步 → <span class="mono">~/work/Counter</span></span><span class="mono muted">0:06</span></div>
+                <div class="faint" style="font-size:11.5px">扫描完成 · 已收到 3 / 5 个文件 · 18.4 KB</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sh" style="margin-top:18px"><h2>刚完成</h2><span class="btn ghost">全部任务 ›</span></div>
+          <div class="card list">
+            <div><span class="dot ok"></span><span class="mono ell grow">list_windows</span><span class="muted">桌面</span><span class="mono faint">22:23</span></div>
+            <div><span class="dot err"></span><span class="mono ell grow">swift build -c release</span><span style="color:var(--err)">退出码 1</span><span class="mono faint">22:19</span></div>
+            <div><span class="dot warn"></span><span class="mono ell grow">click “Run” · Xcode</span><span style="color:var(--warn)">未知 · 不会重放</span><span class="mono faint">22:12</span></div>
+            
+          </div>
+        </div>
+
+        <div>
+          <div class="sh"><h2>今天</h2><span class="faint">按任务编号计</span></div>
+          <div class="card stats">
+            <div><b>38</b><span>完成</span></div>
+            <div><b style="color:var(--err)">1</b><span>失败</span></div>
+            <div><b style="color:var(--warn)">2</b><span>需核对</span></div>
+            <div><b>4</b><span>拒绝/过期</span></div>
+          </div>
+
+          <div class="sh" style="margin-top:18px"><h2>需要关注</h2></div>
+          <div class="card list tall">
+            <div><span class="dot warn"></span><div class="grow"><div class="ell">click “Run” 结果未知</div><div class="faint" style="font-size:11.5px">执行器重启时进行中 · 可能已生效</div></div><span class="btn sm">截屏核对</span></div>
+            <div><span class="dot err"></span><div class="grow"><div class="ell">工作区 gul-199-ios-v4 同步超时</div><div class="faint" style="font-size:11.5px">22:18 · 300 秒内未完成</div></div><span class="btn sm">查看</span></div>
+          </div>
+
+          <div class="sh" style="margin-top:18px"><h2>工作区</h2><span class="btn ghost">全部 6 ›</span></div>
+          <div class="card list tall">
+            <div><svg class="i muted" viewBox="0 0 16 16"><path d="M1.5 4.5v8h13v-7H8L6.5 3.5h-5z"/></svg><div class="grow"><div class="ell"><b style="font-weight:500">macrun</b></div><div class="mono faint ell" style="font-size:11px">…/codes/vibe/macrun</div></div><span class="faint" style="font-size:11.5px">2 分钟前</span></div>
+            <div><svg class="i muted" viewBox="0 0 16 16"><path d="M1.5 4.5v8h13v-7H8L6.5 3.5h-5z"/></svg><div class="grow"><div class="ell"><b style="font-weight:500">Counter</b></div><div class="mono faint ell" style="font-size:11px">~/work/Counter</div></div><span class="faint" style="font-size:11.5px">同步中</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

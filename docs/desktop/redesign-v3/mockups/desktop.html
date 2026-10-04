@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v3 · 桌面控制</title>
+<link rel="stylesheet" href="v3.css">
+<link rel="stylesheet" href="window.css">
+<script>if (location.hash === "#dark") document.documentElement.classList.add("dark");</script>
+</head>
+<body>
+<style>
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tier{border:.5px solid var(--line);border-radius:10px;padding:12px 14px}
+.tier h3{margin:0;font-size:13px;font-weight:600}
+.tier p{margin:4px 0 10px;font-size:12px;color:var(--muted);min-height:36px}
+.tier .tools{font:11px/1.6 var(--mono);color:var(--faint);margin-top:10px}
+.seg{display:flex;background:var(--chip);border-radius:7px;padding:2px}
+.seg span{flex:1;text-align:center;font-size:12px;padding:3px 0;border-radius:5px;color:var(--muted)}
+.seg span.on{background:var(--bg);color:var(--text);box-shadow:0 .5px 2px rgba(0,0,0,.15)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.perm{display:flex;align-items:center;gap:10px;padding:9px 13px;font-size:12.5px}
+.perm+.perm{border-top:.5px solid var(--line)}
+.ok-i{color:var(--ok)}.warn-i{color:var(--warn)}
+.replay{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.replay .thumb{height:92px}
+.replay .cap{font-size:11px;margin-top:4px}
+</style>
+<div class="win"><aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg>现场<span class="badge">3</span></a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M5 4h9M5 8h9M5 12h9M2 4h.01M2 8h.01M2 12h.01"/></svg>任务<span class="badge warn">2</span></a>
+      <a class="on"><svg class="i" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg>桌面控制</a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7-3-1-5.5-3.5-5.5-7v-4z"/></svg>安全与设置</a>
+    </nav>
+    <div class="side-foot">
+      <div class="row"><span class="dot ok"></span><b>gulu-server</b><span class="grow"></span><span class="mono faint">34 ms</span></div>
+      <div class="faint" style="font-size:11px;margin-top:2px">QUIC · 已连接 2 小时 · v0.2.0</div>
+    </div>
+  </aside>
+<main>
+<header class="tb"><h1>桌面控制</h1><span class="chip"><span class="dot ok"></span>computer · 56 个工具 · 会话第 7 代</span><span class="grow"></span><span class="row" style="font-size:12.5px;gap:7px">允许 Agent 使用桌面<span class="switch on"></span></span><span class="btn stop">停止全部</span></header>
+<div class="content">
+<div class="sh"><h2>Agent 能对这台 Mac 做什么</h2><span class="faint">按后端声明的风险等级与只读标注自动归类，可逐个工具改写</span></div>
+<div class="tiers">
+<div class="tier"><h3>观察 · 看屏幕和窗口</h3><p>截图、读取窗口和可访问性树。会看到其他应用里的内容，例如聊天窗口。</p><div class="seg"><span>禁止</span><span>先确认</span><span class="on">允许并提示</span></div><div class="tools">get_window_state · get_desktop_state · zoom · list_windows · 共 14 个</div></div>
+<div class="tier"><h3>操作 · 点击和输入</h3><p>点击、输入、按键、滚动、拖动、切换窗口。显示橙色边框，动鼠标即让出 30 秒。</p><div class="seg"><span>禁止</span><span>先确认</span><span class="on">允许并提示</span></div><div class="tools">click · type_text · press_key · scroll · drag · 共 31 个</div></div>
+<div class="tier" style="border-color:var(--warn-line)"><h3>高风险 · 不可撤回</h3><p>结束进程、读写剪贴板、下载文件、回放录制。默认每次都要你确认。</p><div class="seg"><span>禁止</span><span class="on">先确认</span><span>允许并提示</span></div><div class="tools">kill_app · clipboard_read · browser_download · replay_trajectory · 共 11 个</div></div>
+</div>
+<div class="note" style="max-width:none;margin-top:10px;background:var(--bg-sub);box-shadow:none;color:var(--muted)">实测现状：一条 <span class="mono">ps aux | grep</span> 需要人工确认，而整屏截图 <span class="mono">get_desktop_state</span> 和读取任意窗口无需确认就执行了。v3 把命令和桌面放进同一套“观察 / 操作 / 高风险”分级，每次观察都会在菜单栏亮起“观察中”。</div>
+<div class="two">
+<div><div class="sh"><h2>系统权限</h2><span class="btn ghost">重新检查</span></div>
+<div class="card">
+<div class="perm"><svg class="i ok-i" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg><div class="grow"><b style="font-weight:500">computer 后端 · 辅助功能</b><div class="faint" style="font-size:11.5px">后端实测已授权 · 22:23</div></div></div>
+<div class="perm"><svg class="i ok-i" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg><div class="grow"><b style="font-weight:500">computer 后端 · 屏幕录制</b><div class="faint" style="font-size:11.5px">最近一次截图成功 · 1280×812</div></div></div>
+<div class="perm"><svg class="i warn-i" viewBox="0 0 16 16"><path d="M8 3v6M8 12v.01"/></svg><div class="grow"><b style="font-weight:500">屏幕已锁定</b><div class="faint" style="font-size:11.5px">截图只有桌面背景，点击无法送达；待确认请求会过期</div></div><span class="btn sm">保持唤醒</span></div>
+<div class="perm"><svg class="i ok-i" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg><div class="grow"><b style="font-weight:500">Macrun · 输入监听（用于让出）</b><div class="faint" style="font-size:11.5px">已授权</div></div></div>
+</div></div>
+<div><div class="sh"><h2>后端</h2><span class="btn ghost">添加 / 编辑</span></div>
+<div class="card" style="padding:12px 14px">
+<div class="row"><b>computer</b><span class="chip">运行中</span><span class="grow"></span><span class="btn sm">工具列表</span><span class="btn sm">重启</span></div>
+<div class="mono faint ell" style="margin-top:6px">/Applications/CuaDriver.app/Contents/MacOS/cua-driver mcp</div>
+<div class="faint" style="font-size:11.5px;margin-top:6px">重启会更换会话编号，Agent 需要重新发现工具并重新截图。</div>
+</div></div>
+</div>
+<div class="sh" style="margin-top:18px"><h2>最近操作</h2><span class="btn ghost">在任务中查看 ›</span></div>
+<div class="replay">
+<div><div class="thumb"><div class="win" style="left:10%;top:12%;width:80%;height:76%"></div></div><div class="cap mono ell">get_window_state · 22:23</div></div>
+<div><div class="thumb"><div class="win" style="left:10%;top:12%;width:80%;height:76%"></div><div class="click" style="left:30%;top:40%"></div></div><div class="cap mono ell">click · 22:12</div></div>
+<div><div class="thumb"><div class="win" style="left:20%;top:10%;width:60%;height:80%"></div></div><div class="cap mono ell">zoom · 18:39</div></div>
+<div><div class="thumb"><div class="win" style="left:10%;top:12%;width:80%;height:76%"></div><div class="click" style="left:70%;top:66%"></div></div><div class="cap mono ell">click · 18:38</div></div>
+<div><div class="thumb" style="display:grid;place-items:center;color:var(--faint);font-size:11.5px">无截图 · list_windows</div><div class="cap mono ell">list_windows · 18:37</div></div>
+</div>
+</div></main></div></body></html>

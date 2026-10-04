@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v3 · 菜单栏</title>
+<link rel="stylesheet" href="v3.css">
+<style>
+body { width: 1240px; padding: 28px 32px 36px; }
+.strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 26px; }
+.bar { height: 30px; border-radius: 7px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 12px; font: 13px var(--font); color: #1d1d1f; background: rgba(246,246,246,.92); box-shadow: 0 0 0 .5px rgba(0,0,0,.12); }
+.bar.d { background: rgba(32,32,34,.92); color: #f2f2f2; }
+.bar .sys { opacity: .55; font-size: 12px; }
+.cap { font-size: 11.5px; margin-top: 6px; color: #4a4a4f; text-align: center; }
+.cap b { color: #1d1d1f; }
+.glyph { width: 20px; height: 16px; flex: none; }
+.pill { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px 0 4px; border-radius: 9px; font: 600 11px var(--font); color: #fff; }
+.pill.act { background: var(--act); }
+.pill.warn { background: #d99000; }
+.boards { display: grid; grid-template-columns: 330px 330px 330px; gap: 26px; align-items: start; }
+.panel { width: 330px; background: var(--bg); color: var(--text); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+.dark.panel { background: rgba(38,38,40,.97); }
+.ph { padding: 12px 14px 10px; display: flex; align-items: center; gap: 10px; }
+.ph h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.ph p { margin: 1px 0 0; font-size: 11.5px; color: var(--muted); }
+.sec { padding: 8px 14px; border-top: .5px solid var(--line); }
+.approval { margin: 0 10px 10px; border: .5px solid var(--warn-line); background: var(--warn-bg); border-radius: 9px; padding: 10px 11px; }
+.approval .cmd { font: 12px/1.5 var(--mono); color: var(--text); margin: 6px 0 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
+.split { display: inline-flex; }
+.split .btn:first-child { border-radius: 6px 0 0 6px; }
+.split .btn:last-child { border-radius: 0 6px 6px 0; padding: 0 6px; border-left: .5px solid rgba(255,255,255,.35); }
+.menu { position: absolute; right: 10px; top: 206px; width: 238px; background: var(--bg); border-radius: 8px; box-shadow: var(--shadow); padding: 5px; font-size: 12.5px; z-index: 3; }
+.menu div { padding: 5px 9px; border-radius: 5px; }
+.menu div.h { background: var(--accent); color: #fff; }
+.menu small { display: block; font-size: 11px; opacity: .75; }
+.act-row { display: flex; align-items: center; gap: 9px; padding: 6px 0; }
+.act-row .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--chip); color: var(--muted); flex: none; }
+.act-row .t { font-size: 12.5px; }
+.act-row .s { font-size: 11px; color: var(--muted); }
+.tog { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12.5px; }
+.foot { display: flex; gap: 4px; padding: 7px 8px; border-top: .5px solid var(--line); background: var(--bg-sub); }
+.foot .btn { flex: 1; justify-content: center; }
+.notif { width: 360px; border-radius: 14px; background: rgba(245,245,247,.97); box-shadow: var(--shadow); padding: 11px 12px; display: flex; gap: 10px; font-size: 12.5px; position: relative; }
+.notif .app { width: 32px; height: 32px; border-radius: 8px; background: #1d1d1f; color: #fff; display: grid; place-items: center; font: 600 13px var(--mono); flex: none; }
+.notif-actions { display: flex; flex-direction: column; border-left: .5px solid #d4d4d8; margin: -11px -12px -11px 6px; }
+.notif-actions div { flex: 1; display: grid; place-items: center; padding: 0 16px; font-size: 12.5px; }
+.notif-actions div + div { border-top: .5px solid #d4d4d8; }
+.col h4 { font: 600 13px var(--font); color: #2b2b2e; margin: 0 0 8px; }
+.notes { display: grid; gap: 8px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<h2 class="board-title">菜单栏图标：单色模板图形，形状表达状态，颜色只留给“需要人”的时刻</h2>
+<p class="board-sub">macOS 按菜单栏明暗自动反色。空闲与工作中不着色；待确认用琥珀胶囊并显示数量，桌面操作中显示橙色“操作中”，与屏幕边框同色。</p>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="g" viewBox="0 0 20 16"><rect x="1" y="1.5" width="18" height="13" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 5.5l2.6 2.5L5 10.5M9.5 10.8h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="strip">
+  <div><div class="bar"><svg class="glyph"><use href="#g"/></svg><span class="sys">周六 22:24</span></div><div class="cap"><b>空闲</b> · 只有外框图形</div></div>
+  <div><div class="bar"><svg class="glyph" viewBox="0 0 20 16"><use href="#g"/><circle cx="17.5" cy="3" r="2.6" fill="currentColor" stroke="rgba(246,246,246,1)" stroke-width="1.2"/></svg><span class="sys">周六 22:24</span></div><div class="cap"><b>工作中</b> · 右上角实心点（单色）</div></div>
+  <div><div class="bar"><svg class="glyph"><use href="#g"/></svg><span class="pill warn">● 1</span><span class="sys">22:24</span></div><div class="cap"><b>待确认</b> · 琥珀胶囊 + 数量</div></div>
+  <div><div class="bar d"><svg class="glyph"><use href="#g"/></svg><span class="pill act">● 操作中</span><span class="sys">22:24</span></div><div class="cap"><b>桌面操作 / 观察中</b> · 深色菜单栏同样清楚</div></div>
+  <div><div class="bar"><svg class="glyph" viewBox="0 0 20 16" style="opacity:.45"><use href="#g"/><path d="M2 15L18 1" stroke="currentColor" stroke-width="1.5"/></svg><span class="sys">22:24</span></div><div class="cap"><b>断线</b> · 斜线 + 半透明</div></div>
+  <div><div class="bar d"><svg class="glyph" viewBox="0 0 20 16"><rect x="1" y="1.5" width="18" height="13" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 5v6M12.5 5v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span class="sys">22:24</span></div><div class="cap"><b>已暂停</b> · 暂停符号替换终端符号</div></div>
+</div>
+
+<div class="boards">
+  <!-- A: approval + working, light -->
+  <div class="col">
+    <h4>A · 有待确认请求（浅色）</h4>
+    <div style="position:relative">
+    <div class="panel">
+      <div class="ph">
+        <span class="dot warn"></span>
+        <div class="grow"><h3>需要你确认 1 条命令</h3><p>另有 2 个任务在运行 · 已连接 34 ms</p></div>
+        <span class="btn sm stop">停止全部</span>
+      </div>
+      <div class="approval">
+        <div class="row"><span class="label" style="color:var(--warn)">命令 · 风险：管道、未知程序</span><span class="grow"></span><span class="ring"></span><span class="mono" style="font-size:11px;color:var(--warn)">41s</span></div>
+        <div class="cmd">ps aux | grep -i -E "macrun" | grep -v grep | head; ls -la "/Applications/Macrun Desktop.app/Contents/MacOS"</div>
+        <div class="mono faint" style="font-size:11px">/tmp · 来自 Claude Code @ gulu-server</div>
+        <div class="row" style="margin-top:9px">
+          <span class="btn sm">拒绝</span><span class="grow"></span>
+          <span class="split"><span class="btn sm primary">允许一次</span><span class="btn sm primary">▾</span></span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="label" style="margin-bottom:2px">正在进行</div>
+        <div class="act-row"><span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M3 4l3 4-3 4M8 12h5"/></svg></span><div class="grow"><div class="t mono ell">cargo test --workspace</div><div class="s">~/work/macrun · 1:42</div></div><span class="dot run"></span></div>
+        <div class="act-row"><span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.5-4M14 8a6 6 0 0 1-10.5 4M12.5 1.5V4H10M3.5 14.5V12H6"/></svg></span><div class="grow"><div class="t ell">同步 → ~/work/Counter</div><div class="s">已收到 3 / 5 个文件 · 0:06</div></div><span class="dot run"></span></div>
+      </div>
+      <div class="sec">
+        <div class="tog"><span class="grow">接收新任务</span><span class="switch on"></span></div>
+        <div class="tog"><span class="grow">允许 Agent 操作桌面</span><span class="switch on"></span></div>
+      </div>
+      <div class="foot"><span class="btn sm ghost">打开 Macrun</span><span class="btn sm ghost">设置…</span><span class="btn sm ghost">退出</span></div>
+    </div>
+    <div class="menu">
+      <div class="h">允许一次</div>
+      <div>15 分钟内允许 <span class="mono">ps</span> 同类命令<small>程序名相同、目录在 /tmp 内</small></div>
+      <div>本次连接内允许此目录的命令<small>断线或重启后失效，可在设置中撤销</small></div>
+    </div>
+    </div>
+  </div>
+
+  <!-- B: desktop control active, dark -->
+  <div class="col">
+    <h4>B · Agent 正在操作桌面（深色）</h4>
+    <div class="panel dark">
+      <div class="ph">
+        <span class="dot act"></span>
+        <div class="grow"><h3>正在操作桌面</h3><p>computer · 第 6 步 · 已连接 34 ms</p></div>
+        <span class="btn sm stop">停止全部</span>
+      </div>
+      <div class="sec" style="border-top:0;padding-top:0">
+        <div class="thumb" style="height:120px">
+          <div class="win" style="left:18%;top:16%;width:64%;height:70%;background:#2a2a2d"></div>
+          <div class="click" style="left:62%;top:58%"></div>
+        </div>
+        <div class="row" style="margin-top:7px"><span class="mono ell grow">click · “运行测试” 按钮</span><span class="faint" style="font-size:11px">2 秒前</span></div>
+        <div class="faint" style="font-size:11px;margin-top:2px">动鼠标或键盘会让出 30 秒 · <span class="kbd">⌃⌥⌘.</span> 全部停止</div>
+      </div>
+      <div class="sec">
+        <div class="label" style="margin-bottom:2px">正在进行</div>
+        <div class="act-row"><span class="ic"><svg class="i" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg></span><div class="grow"><div class="t ell">桌面 · click</div><div class="s">Xcode · 0:01</div></div><span class="dot act"></span></div>
+      </div>
+      <div class="sec">
+        <div class="tog"><span class="grow">接收新任务</span><span class="switch on"></span></div>
+        <div class="tog"><span class="grow">允许 Agent 操作桌面</span><span class="switch on"></span></div>
+      </div>
+      <div class="foot"><span class="btn sm ghost">打开 Macrun</span><span class="btn sm ghost">设置…</span><span class="btn sm ghost">退出</span></div>
+    </div>
+  </div>
+
+  <!-- C: compact states -->
+  <div class="col">
+    <h4>C · 空闲 / 断线 / 暂停时只保留必要内容</h4>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="ph"><span class="dot ok"></span><div class="grow"><h3>空闲 · 等待 Agent</h3><p>今天 38 个任务，1 个失败 · 已连接 34 ms</p></div></div>
+      <div class="sec">
+        <div class="tog"><span class="grow">接收新任务</span><span class="switch on"></span></div>
+        <div class="tog"><span class="grow">允许 Agent 操作桌面</span><span class="switch"></span></div>
+      </div>
+      <div class="foot"><span class="btn sm ghost">打开 Macrun</span><span class="btn sm ghost">设置…</span><span class="btn sm ghost">退出</span></div>
+    </div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="ph"><span class="dot err"></span><div class="grow"><h3>未连接服务器</h3><p>UDP 7443 无响应 · 3 次重试 · 下次 12 秒后</p></div><span class="btn sm primary">重新连接</span></div>
+      <div class="foot"><span class="btn sm ghost">连接诊断</span><span class="btn sm ghost">打开 Macrun</span><span class="btn sm ghost">退出</span></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><span class="dot off"></span><div class="grow"><h3>已暂停接收新任务</h3><p>Agent 的新请求会收到 busy · 1 个任务仍在运行</p></div><span class="btn sm">恢复</span></div>
+      <div class="foot"><span class="btn sm ghost">打开 Macrun</span><span class="btn sm ghost">设置…</span><span class="btn sm ghost">退出</span></div>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:400px 1fr;gap:26px;margin-top:28px;align-items:start">
+  <div class="col">
+    <h4>D · 面板关着、人不在电脑前：系统通知可以直接审批</h4>
+    <div class="notif">
+      <div class="app">&gt;_</div>
+      <div class="grow" style="min-width:0"><b>Macrun · 需要确认命令</b><div class="mono ell" style="margin-top:2px">git push origin fixture-branch</div><div class="muted" style="font-size:11.5px">~/work/Counter · 60 秒后视为过期</div></div>
+      <div class="notif-actions"><div>允许</div><div>拒绝</div></div>
+    </div>
+  </div>
+  <div class="notes" style="grid-template-columns:1fr 1fr;margin-top:24px">
+    <div class="note"><b>为什么停止放在右上角：</b>现版本“全部停止”是第五行的普通菜单项，图标像复选框。v3 中它在每种忙碌状态的面板标题行都可见，红底，与快捷键 ⌃⌥⌘. 一致。</div>
+    <div class="note"><b>为什么去掉“最近 3 条”和服务器地址：</b>菜单栏只回答“现在要不要我”。历史在主窗口；IP 在屏幕共享时会泄露，改为只显示延迟，地址放到设置。</div>
+    <div class="note"><b>开关与动作分开：</b>“接收新任务”“允许操作桌面”是持续状态，用开关；“停止全部”“重新连接”是一次性动作，用按钮。现版本三者都长得像菜单项。</div>
+    <div class="note"><b>过期和拒绝分开告诉 Agent：</b>实测请求无人处理 60 秒后，Agent 只收到 “denied: approval rejected or expired”。v3 返回 expired，Agent 可以稍后重试或改问人。</div>
+  </div>
+</div>
+</body>
+</html>
