@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 桌面操作提示</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.pulse{animation:p 1.4s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+</style>
+</helmet>
+<div class="app" style="width: 640px; height: 400px; box-sizing: border-box; background: #C9CDD2; position: relative; overflow: hidden; box-shadow: inset 0 0 0 3px #E8590C">
+  <div style="position: absolute; left: 50%; top: 36%; transform: translate(-50%, -50%); width: 180px; height: 240px; background: #2B2B29; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.25)">
+    <div class="mono" style="color: #fff; text-align: right; font-size: 30px; padding: 22px 16px 8px">408</div>
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 10px">
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37"></span>
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37"></span>
+      <span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #5A5A57"></span><span style="height: 26px; border-radius: 50%; background: #F09A37; box-shadow: 0 0 0 3px rgba(232,89,12,.55)"></span>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: rgba(26,26,25,.92); color: #fff; border-radius: 999px; padding: 7px 8px 7px 16px; box-shadow: 0 8px 24px rgba(0,0,0,.25); white-space: nowrap">
+    <span class="pulse" style="width: 9px; height: 9px; border-radius: 50%; background: #FF7A2F"></span>
+    <span><span style="font-weight: 600">Agent 正在操作这台 Mac</span><span style="color: #BDBCB6"> · 点击 “=”</span></span>
+    <span class="mono" style="color: #BDBCB6; font-size: 12px">⌃⌥⌘.</span>
+    <button style="font: inherit; border: 0; background: #fff; color: #1A1A19; border-radius: 999px; padding: 4px 12px; cursor: pointer; font-weight: 550">停止</button>
+  </div>
+
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 14px; background: rgba(255,255,255,.9); border-radius: 10px; padding: 10px 14px; font-size: 12px; color: #4A4945">
+    屏幕四周的橙色描边和顶部悬浮条只在桌面操作期间出现，不会出现在截图里。点“停止”或按快捷键会取消运行中的任务并关闭桌面控制。你一动鼠标，后续操作自动让出 30 秒。
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":400}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

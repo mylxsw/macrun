@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 桌面控制</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#FBFBFA}
+a{color:#2F5BEA}a:hover{color:#1F44C2}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}
+.nav a:hover{background:#E7E6E1;color:#1A1A19}
+.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}
+.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#F4F4F1}
+.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}
+.btn.ghost:hover{background:#EFEFEB}
+.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}
+.row{display:flex;align-items:center;gap:10px}
+.sw{appearance:none;-webkit-appearance:none;width:36px;height:22px;border-radius:22px;background:#CFCEC8;position:relative;cursor:pointer;margin:0;flex-shrink:0}
+.sw:checked{background:#1A1A19}
+.sw::before{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw:checked::before{left:17px}
+.sw:focus-visible{outline:2px solid #2F5BEA;outline-offset:2px}
+.line{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid #F0EFEB}
+</style>
+</helmet>
+<div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 22px">
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 300px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">桌面控制</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">让 Agent 通过本机 computer-use 工具截图、点击和输入。命令与文件不受这里的开关影响。</p>
+      </div>
+      <label class="card row" style="padding: 8px 12px; cursor: pointer">
+        <span style="font-weight: 550">{{masterLabel}}</span>
+        <input type="checkbox" class="sw" checked="{{enabled}}" onChange="{{toggle}}">
+      </label>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+      <section style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">后端</h2>
+        <div class="card" style="padding: 16px">
+          <div class="row">
+            <div style="width: 36px; height: 36px; border-radius: 9px; background: #F1F0EC; display: grid; place-items: center"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"></rect><path d="M6 13.5h4"></path></svg></div>
+            <div style="min-width: 0">
+              <div style="font-weight: 600">computer <span class="label" style="font-weight: 400">· CuaDriver 0.26.0</span></div>
+              <div class="label mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">/Applications/CuaDriver.app/…/cua-driver mcp</div>
+            </div>
+            <span class="tag" style="margin-left: auto; background: #EAF6EF; color: #1F6B45">运行中</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px">
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">会话</div><div class="mono" style="font-weight: 500">#7</div></div>
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">工具</div><div class="mono" style="font-weight: 500">23</div></div>
+            <div style="background: #F7F7F4; border-radius: 8px; padding: 8px 10px"><div class="label">今天调用</div><div class="mono" style="font-weight: 500">64</div></div>
+          </div>
+          <div class="row" style="margin-top: 14px; flex-wrap: wrap">
+            <button class="btn">查看工具列表</button>
+            <button class="btn ghost">重启后端</button>
+          </div>
+          <div class="label" style="margin-top: 8px">重启会更换会话编号，Agent 需要重新发现工具并重新截图。</div>
+        </div>
+        <button class="btn" style="align-self: flex-start"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>添加 MCP 后端</button>
+      </section>
+
+      <section style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-size: 15px; font-weight: 600">这台 Mac 是否具备条件</h2>
+        <div class="card">
+          <sc-for list="{{checks}}" as="c" hint-placeholder-count="4">
+            <div class="line">
+              <span style="width: 22px; height: 22px; border-radius: 50%; background: {{c.bg}}; color: {{c.fg}}; display: grid; place-items: center; flex-shrink: 0">
+                <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 13px; height: 13px"><path d="{{c.icon}}"></path></svg>
+              </span>
+              <div style="min-width: 0; flex-grow: 1">
+                <div style="font-weight: 550">{{c.name}}</div>
+                <div class="label">{{c.detail}}</div>
+              </div>
+              <sc-if value="{{c.fix}}" hint-placeholder-val="{{false}}"><button class="btn">{{c.fixLabel}}</button></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 15px; font-weight: 600">操作时</h2>
+      <div class="card">
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">显示屏幕边框和悬浮提示</div><div class="label">Agent 操作期间，屏幕四周显示橙色描边，顶部显示正在做什么和停止按钮。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+        <label class="line" style="cursor: pointer">
+          <div style="flex-grow: 1"><div style="font-weight: 550">我动鼠标或键盘时让出</div><div class="label">检测到本地输入后暂停新的桌面操作 30 秒；已发出的点击不会撤回。</div></div>
+          <input type="checkbox" class="sw" defaultChecked="{{true}}">
+        </label>
+        <div class="line" style="border-bottom: 0">
+          <div style="flex-grow: 1"><div style="font-weight: 550">紧急停止快捷键</div><div class="label">取消所有运行中的任务，暂停接收，并关闭桌面控制。</div></div>
+          <span class="mono" style="border: 1px solid #DAD9D4; border-radius: 6px; padding: 3px 9px; background: #F7F7F4">⌃ ⌥ ⌘ .</span>
+        </div>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 10px">
+      <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">最近操作</h2><span class="label">13:58 · 打开计算器并计算 12 × 34</span><a href="Tasks.dc.html" style="margin-left: auto; font-size: 12.5px; text-decoration: none">在任务中查看</a></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+        <sc-for list="{{frames}}" as="f" hint-placeholder-count="4">
+          <figure class="card" style="margin: 0; overflow: hidden">
+            <div style="aspect-ratio: 16 / 10; background: #E9E8E3; position: relative; display: grid; place-items: center">
+              <div style="width: 38%; height: 62%; background: #2B2B29; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.18)"></div>
+              <span style="position: absolute; left: {{f.x}}; top: {{f.y}}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #E8590C; background: rgba(232,89,12,.18); display: {{f.mark}}"></span>
+              <span class="label" style="position: absolute; left: 8px; bottom: 6px; font-size: 11px">[截图]</span>
+            </div>
+            <figcaption style="padding: 9px 11px">
+              <div class="row" style="gap: 6px"><span class="mono label">{{f.n}}</span><span style="font-weight: 550">{{f.title}}</span></div>
+              <div class="label mono">{{f.detail}}</div>
+            </figcaption>
+          </figure>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const enabled = !(this.state && this.state.off);
+    const ok = { bg: '#EAF6EF', fg: '#1F6B45', icon: 'M4 8.5l2.5 2.5L12 5.5', fix: false };
+    const warn = { bg: '#FFF3DC', fg: '#7A4B00', icon: 'M8 4.5v4M8 11.5h.01', fix: true };
+    return {
+      enabled: enabled,
+      masterLabel: enabled ? '允许 Agent 操作桌面' : '桌面控制已关闭',
+      toggle: () => this.setState({ off: enabled }),
+      checks: [
+        Object.assign({ name: '辅助功能', detail: 'CuaDriver 已获授权，可以点击和输入' }, ok),
+        Object.assign({ name: '屏幕录制', detail: '已授权 · 上次实拍验证 13:58' }, ok),
+        Object.assign({ name: '图形登录会话', detail: '当前用户已登录，屏幕未锁定' }, ok),
+        Object.assign({ name: '防止自动休眠', detail: '睡眠后连接与桌面操作都会中断', fixLabel: '保持唤醒' }, warn)
+      ],
+      frames: [
+        { n: '01', title: '打开计算器', detail: 'open_app · 0.8s', x: '50%', y: '50%', mark: 'none' },
+        { n: '02', title: '点击 “1” “2”', detail: 'click ×2 · 0.6s', x: '41%', y: '58%', mark: 'block' },
+        { n: '03', title: '点击 “=”', detail: 'click (412, 288)', x: '58%', y: '70%', mark: 'block' },
+        { n: '04', title: '截图核对', detail: '结果 408 · 1.2s', x: '50%', y: '30%', mark: 'none' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

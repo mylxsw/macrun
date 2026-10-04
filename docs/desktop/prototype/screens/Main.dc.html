@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 现场</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#FBFBFA}
+a{color:#2F5BEA}a:hover{color:#1F44C2}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}
+.nav a:hover{background:#E7E6E1;color:#1A1A19}
+.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}
+.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#F4F4F1}
+.btn.danger{color:#B4321C;border-color:#E9C3BA}
+.btn.danger:hover{background:#FCF1EE}
+.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}
+.btn.ghost:hover{background:#EFEFEB}
+.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}
+.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre}
+.row{display:flex;align-items:center;gap:10px}
+.pulse{animation:p 1.6s ease-in-out infinite}
+@keyframes p{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 22px">
+
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 280px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">现场</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">服务器上的 Agent 正通过 Macrun 在这台 Mac 上做的事。</p>
+      </div>
+      <div class="row" style="flex-wrap: wrap">
+        <sc-if value="{{paused}}" hint-placeholder-val="{{false}}">
+          <button class="btn" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l8 5-8 5z"></path></svg>恢复接收</button>
+        </sc-if>
+        <sc-if value="{{notPaused}}" hint-placeholder-val="{{true}}">
+          <button class="btn" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5v9M10 3.5v9"></path></svg>暂停接收新任务</button>
+        </sc-if>
+        <button class="btn danger"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"></rect></svg>全部停止<span class="mono" style="font-size: 11px; color: #B4321C; opacity: .75">⌃⌥⌘.</span></button>
+      </div>
+    </header>
+
+    <sc-if value="{{paused}}" hint-placeholder-val="{{false}}">
+      <div class="row" style="background: #FFF6E5; border: 1px solid #F1DDB3; color: #7A4B00; border-radius: 9px; padding: 10px 14px">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5v9M10 3.5v9"></path></svg>
+        <span>已暂停接收新任务。正在运行的 1 个命令会继续完成；新请求会立即返回 <span class="mono">busy</span>，Agent 可稍后重试。</span>
+      </div>
+    </sc-if>
+
+    <section aria-label="三条状态" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px">
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span class="label">连接</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">已连接服务器</div>
+        <div class="label" style="margin-top: 2px">QUIC · 38 ms · 已稳定 3 小时 12 分</div>
+      </div>
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: {{workerDot}}"></span><span class="label">执行器</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">{{workerTitle}}</div>
+        <div class="label" style="margin-top: 2px">{{workerDetail}}</div>
+      </div>
+      <div class="card" style="padding: 14px 16px">
+        <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span class="label">桌面控制</span></div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 6px">CuaDriver 就绪</div>
+        <div class="label" style="margin-top: 2px">辅助功能、屏幕录制已授权 · 屏幕未锁定</div>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start">
+
+      <section style="flex: 999 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+        <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">正在进行</h2><span class="tag">2</span></div>
+
+        <article class="card" style="padding: 16px">
+          <div class="row" style="flex-wrap: wrap">
+            <span class="dot pulse" style="background: #2F5BEA"></span>
+            <span class="tag" style="background: #EAF0FF; color: #2449C8">命令</span>
+            <span class="label">运行中 · 已用时 <span class="mono" style="color: #1A1A19">2:14</span></span>
+            <span class="label" style="margin-left: auto">阶段：编译测试目标</span>
+          </div>
+          <div class="mono" style="font-size: 14px; margin: 10px 0 4px; word-break: break-all">xcodebuild test -scheme Counter -destination 'platform=macOS'</div>
+          <div class="label mono">~/work/Counter · task 3f2a91c0…</div>
+          <div class="term mono" style="margin-top: 12px">CompileSwift normal arm64 CounterView.swift
+CompileSwift normal arm64 CounterModel.swift
+Ld Counter.app/Contents/MacOS/Counter
+Test Suite 'CounterTests' started
+  ✓ testIncrement (0.004s)
+  ✓ testReset (0.002s)
+  … testPersistence</div>
+          <div class="row" style="margin-top: 12px; flex-wrap: wrap">
+            <a href="Tasks.dc.html" class="btn" style="text-decoration: none">查看完整输出</a>
+            <button class="btn ghost">在终端打开目录</button>
+            <button class="btn danger" style="margin-left: auto">取消任务</button>
+          </div>
+        </article>
+
+        <article class="card" style="padding: 16px">
+          <div class="row" style="flex-wrap: wrap">
+            <span class="dot pulse" style="background: #2F5BEA"></span>
+            <span class="tag" style="background: #EEF6F0; color: #1F6B45">同步</span>
+            <span class="label">接收中 · 已用时 <span class="mono" style="color: #1A1A19">0:03</span></span>
+            <span class="label" style="margin-left: auto">5 个文件中已收到 3 个 · 18 KB</span>
+          </div>
+          <div style="font-size: 14px; margin: 10px 0 2px; font-weight: 550">Counter → <span class="mono" style="font-weight: 400">~/work/Counter</span></div>
+          <div class="label">同步只更新文件，不会自动触发构建。完成前请勿依赖这个目录的内容。</div>
+        </article>
+      </section>
+
+      <aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px">
+        <section style="display: flex; flex-direction: column; gap: 10px">
+          <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">工作区</h2><span class="label" style="margin-left: auto">由服务器同步过来的目录</span></div>
+          <div class="card">
+            <sc-for list="{{workspaces}}" as="w" hint-placeholder-count="3">
+              <div style="padding: 12px 14px; border-bottom: 1px solid #F0EFEB; display: flex; gap: 10px; align-items: flex-start">
+                <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px; color: #6B6A66"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg>
+                <div style="min-width: 0; flex-grow: 1">
+                  <div style="font-weight: 550">{{w.name}}</div>
+                  <div class="label mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.path}}</div>
+                  <div class="label" style="margin-top: 2px">{{w.meta}}</div>
+                </div>
+                <span class="dot" style="background: {{w.dot}}; margin-top: 6px"></span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+
+        <section style="display: flex; flex-direction: column; gap: 10px">
+          <div class="row"><h2 style="margin: 0; font-size: 15px; font-weight: 600">刚刚</h2><a href="Tasks.dc.html" style="margin-left: auto; font-size: 12.5px; text-decoration: none">全部任务</a></div>
+          <div class="card" style="padding: 6px 0">
+            <sc-for list="{{recent}}" as="r" hint-placeholder-count="6">
+              <div style="display: flex; gap: 10px; align-items: center; padding: 7px 14px">
+                <span class="mono label" style="width: 54px; flex-shrink: 0">{{r.time}}</span>
+                <span class="dot" style="background: {{r.dot}}"></span>
+                <span style="min-width: 0; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.text}}</span>
+                <span class="label mono">{{r.dur}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div class="label">今天 42 个任务：成功 38 · 失败 2 · 未知 1 · 取消 1</div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"paused":{"editor":"boolean","default":false},"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const paused = (this.state && this.state.paused != null) ? this.state.paused : !!this.props.paused;
+    return {
+      paused: paused,
+      notPaused: !paused,
+      togglePause: () => this.setState({ paused: !paused }),
+      workerDot: paused ? '#C98A00' : '#1F9D5C',
+      workerTitle: paused ? '已暂停接收' : '运行中 · 接收任务',
+      workerDetail: paused ? '仍有 1 个命令在执行 · 协议 2' : 'v0.2.0 · 协议 2 · 由 Macrun Desktop 托管',
+      workspaces: [
+        { name: 'Counter', path: '~/work/Counter', meta: '同步中 · 上次完成 2 分钟前 · 128 个文件', dot: '#2F5BEA' },
+        { name: 'macrun-site', path: '~/work/macrun-site', meta: '3 小时前同步 · 412 个文件', dot: '#B7B6B0' },
+        { name: 'notes-api', path: '~/work/notes-api', meta: '昨天 22:41 同步失败：路径冲突', dot: '#C2361F' }
+      ],
+      recent: [
+        { time: '14:02:13', dot: '#2F5BEA', text: '开始 xcodebuild test -scheme Counter', dur: '2:14' },
+        { time: '14:02:11', dot: '#1F9D5C', text: '同步 Counter · 2 个文件', dur: '1.8s' },
+        { time: '13:58:40', dot: '#1F9D5C', text: '桌面 · 截图（计算器）', dur: '1.2s' },
+        { time: '13:58:37', dot: '#1F9D5C', text: '桌面 · 点击按钮 “=”', dur: '0.3s' },
+        { time: '13:51:02', dot: '#C2361F', text: 'make test · 退出码 2', dur: '1:03' },
+        { time: '13:40:19', dot: '#B26A00', text: '桌面 · 点击 · 结果未知（执行器重启）', dur: '—' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

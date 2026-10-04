@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 任务</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#FBFBFA}
+a{color:#2F5BEA}a:hover{color:#1F44C2}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13.5px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;color:#4A4945;text-decoration:none}
+.nav a:hover{background:#E7E6E1;color:#1A1A19}
+.nav a.on{background:#FFFFFF;color:#1A1A19;box-shadow:0 0 0 1px #E3E2DD,0 1px 2px rgba(0,0,0,.05);font-weight:550}
+.btn{font:inherit;font-size:13px;min-height:32px;padding:0 12px;border-radius:7px;border:1px solid #DAD9D4;background:#fff;color:#1A1A19;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#F4F4F1}
+.btn.danger{color:#B4321C;border-color:#E9C3BA}
+.btn.danger:hover{background:#FCF1EE}
+.btn.ghost{border-color:transparent;background:transparent;color:#4A4945}
+.btn.ghost:hover{background:#EFEFEB}
+.card{background:#fff;border:1px solid #E6E5E1;border-radius:10px}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.tag{font-size:11.5px;padding:1px 7px;border-radius:5px;background:#F1F0EC;color:#4A4945;white-space:nowrap}
+.term{background:#161615;color:#D2D1CB;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre}
+.row{display:flex;align-items:center;gap:10px}
+.chip{font:inherit;font-size:12.5px;min-height:30px;padding:0 11px;border-radius:999px;border:1px solid #E1E0DB;background:#fff;color:#4A4945;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.chip:hover{background:#F4F4F1}
+.chip.on{background:#1A1A19;border-color:#1A1A19;color:#fff}
+.item{font:inherit;text-align:left;width:100%;border:0;background:transparent;color:inherit;cursor:pointer;display:flex;gap:10px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid #F0EFEB}
+.item:hover{background:#F7F7F4}
+.item.on{background:#F0F3FE}
+.kv{display:grid;grid-template-columns:88px minmax(0,1fr);row-gap:6px;column-gap:12px}
+</style>
+</helmet>
+<div class="app" style="display: flex; flex-wrap: wrap; min-height: 900px; background: #FBFBFA">
+
+  <nav class="nav" aria-label="主导航" style="flex: 1 1 220px; max-width: 100%; box-sizing: border-box; background: #F2F2EF; border-right: 1px solid #E6E5E1; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px">
+    <div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px 18px">
+      <span class="dot" style="width: 12px; height: 12px; background: #EE6A5F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #F5BE4F"></span>
+      <span class="dot" style="width: 12px; height: 12px; background: #62C655"></span>
+    </div>
+    <div class="row" style="padding: 0 6px 18px">
+      <div style="width: 30px; height: 30px; border-radius: 8px; background: #1A1A19; color: #fff; display: grid; place-items: center">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      </div>
+      <div>
+        <div style="font-weight: 600; font-size: 14.5px">Macrun</div>
+        <div class="label" style="font-size: 11.5px">执行器 · v0.2.0</div>
+      </div>
+    </div>
+    <a href="Main.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h2.5"></path></svg>现场<span style="margin-left: auto; font-size: 11.5px; color: #2F5BEA; font-weight: 600">2</span></a>
+    <a href="Tasks.dc.html" class="on"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"></path></svg>任务</a>
+    <a href="Desktop.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>桌面控制</a>
+    <a href="Settings.dc.html"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l5 2v4.1c0 3-2.1 5.3-5 6.3-2.9-1-5-3.3-5-6.3V3.8z"></path></svg>设置与安全</a>
+    <div style="flex-grow: 1; min-height: 24px"></div>
+    <div style="background: #fff; border: 1px solid #E3E2DD; border-radius: 9px; padding: 10px 12px">
+      <div class="row" style="gap: 8px"><span class="dot" style="background: #1F9D5C"></span><span style="font-weight: 550">已连接</span><span class="label mono" style="margin-left: auto">38 ms</span></div>
+      <div class="label mono" style="margin-top: 4px">203.0.113.10:7443</div>
+    </div>
+  </nav>
+
+  <main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 16px">
+    <header style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px">
+      <div style="flex: 1 1 280px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em">任务</h1>
+        <p style="margin: 4px 0 0; color: #6B6A66">每个任务按编号只记一次。查询、心跳和重复请求不计数。</p>
+      </div>
+      <label style="flex: 0 1 300px; display: flex; align-items: center; gap: 8px; border: 1px solid #DAD9D4; background: #fff; border-radius: 8px; padding: 0 10px; min-height: 34px">
+        <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="color: #6B6A66"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5l3 3"></path></svg>
+        <span style="position: absolute; left: -9999px">搜索任务</span>
+        <input type="search" placeholder="命令、目录或任务编号" style="border: 0; outline: none; font: inherit; flex-grow: 1; min-width: 0; background: transparent">
+      </label>
+    </header>
+
+    <div role="group" aria-label="按状态筛选" style="display: flex; flex-wrap: wrap; gap: 6px">
+      <sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+        <button class="{{f.cls}}" onClick="{{f.pick}}"><span class="dot" style="background: {{f.dot}}"></span>{{f.label}}<span class="mono" style="opacity: .7">{{f.count}}</span></button>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+      <section aria-label="任务列表" class="card" style="flex: 1 1 360px; min-width: 0; overflow: hidden">
+        <sc-for list="{{list}}" as="t" hint-placeholder-count="8">
+          <button class="{{t.cls}}" onClick="{{t.pick}}">
+            <span class="dot" style="background: {{t.dot}}; margin-top: 6px"></span>
+            <span style="min-width: 0; flex-grow: 1">
+              <span class="mono" style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px">{{t.title}}</span>
+              <span class="label" style="display: block">{{t.kind}} · {{t.when}}</span>
+            </span>
+            <span style="text-align: right; flex-shrink: 0">
+              <span style="display: block; font-size: 12px; color: {{t.fg}}; font-weight: 550">{{t.stLabel}}</span>
+              <span class="label mono" style="display: block">{{t.dur}}</span>
+            </span>
+          </button>
+        </sc-for>
+        <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+          <div class="label" style="padding: 28px; text-align: center">这个状态下没有任务</div>
+        </sc-if>
+      </section>
+
+      <section aria-label="任务详情" class="card" style="flex: 999 1 420px; min-width: 0; padding: 20px">
+        <div class="row" style="flex-wrap: wrap">
+          <span class="tag" style="background: {{sel.bg}}; color: {{sel.fg}}; font-weight: 550">{{sel.stLabel}}</span>
+          <span class="tag">{{sel.kind}}</span>
+          <span class="label" style="margin-left: auto">{{sel.when}}</span>
+        </div>
+        <div class="mono" style="font-size: 15px; margin: 12px 0 16px; word-break: break-all">{{sel.title}}</div>
+
+        <div style="background: {{sel.bg}}; color: {{sel.fg}}; border-radius: 8px; padding: 11px 14px; display: flex; gap: 10px; align-items: flex-start">
+          <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="margin-top: 2px"><circle cx="8" cy="8" r="6"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+          <span>{{sel.explain}}</span>
+        </div>
+
+        <div class="kv" style="margin-top: 18px">
+          <span class="label">工作目录</span><span class="mono" style="word-break: break-all">{{sel.cwd}}</span>
+          <span class="label">耗时</span><span class="mono">{{sel.dur}}</span>
+          <span class="label">退出码</span><span class="mono">{{sel.exit}}</span>
+          <span class="label">任务编号</span><span class="mono" style="word-break: break-all">{{sel.taskId}}</span>
+        </div>
+
+        <div class="row" style="margin: 20px 0 8px"><span class="label">输出</span><span class="label" style="margin-left: auto">{{sel.outNote}}</span></div>
+        <div class="term mono">{{sel.output}}</div>
+
+        <div class="row" style="margin-top: 16px; flex-wrap: wrap">
+          <button class="btn">复制任务编号</button>
+          <button class="btn">打开完整日志</button>
+          <sc-if value="{{sel.isUnknown}}" hint-placeholder-val="{{false}}">
+            <button class="btn">截一张当前屏幕核对</button>
+          </sc-if>
+          <sc-if value="{{sel.isRunning}}" hint-placeholder-val="{{false}}">
+            <button class="btn danger" style="margin-left: auto">取消任务</button>
+          </sc-if>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      running:   { label: '运行中', dot: '#2F5BEA', bg: '#EAF0FF', fg: '#2449C8' },
+      succeeded: { label: '成功',   dot: '#1F9D5C', bg: '#EAF6EF', fg: '#1F6B45' },
+      failed:    { label: '失败',   dot: '#C2361F', bg: '#FCEDEA', fg: '#A12B17' },
+      unknown:   { label: '未知',   dot: '#D08A0B', bg: '#FFF3DC', fg: '#7A4B00' },
+      timed_out: { label: '超时',   dot: '#8A8984', bg: '#F1F0EC', fg: '#4A4945' },
+      cancelled: { label: '已取消', dot: '#8A8984', bg: '#F1F0EC', fg: '#4A4945' }
+    };
+    const tasks = [
+      { id: 'a', st: 'running', kind: '命令', title: "xcodebuild test -scheme Counter -destination 'platform=macOS'", when: '14:02:13 开始', dur: '2:14', exit: '—', cwd: '~/work/Counter', taskId: '3f2a91c0-5b7e-4d1a-9c2e-8a0f4b61c912',
+        explain: '正在运行。输出实时追加，阶段来自命令自身的输出，不估算百分比。', outNote: '实时',
+        output: "Test Suite 'CounterTests' started\n  ✓ testIncrement (0.004s)\n  ✓ testReset (0.002s)\n  … testPersistence" },
+      { id: 'b', st: 'unknown', kind: '桌面 · computer.click', title: 'click  x=412 y=288  (按钮 “=”)', when: '13:40:19', dur: '—', exit: '—', cwd: '—', taskId: 'c81d07aa-2f13-4b8e-a5d4-1e9b7f02d6c4',
+        explain: '执行器在这次点击进行中重启，点击可能已经发生，也可能没有。Macrun 不会自动重放。先截图确认界面，再决定是否用新的请求编号重新操作。', outNote: '无输出',
+        output: "error: worker_restarted\nExecution interrupted; effects may have occurred.\nNever automatically replay." },
+      { id: 'c', st: 'succeeded', kind: '命令', title: 'swift build -c release', when: '13:55:02', dur: '41s', exit: '0', cwd: '~/work/Counter', taskId: '9e4b2c11-0d7a-4f3e-b812-5c6a9d0e7f33',
+        explain: '命令正常结束，退出码 0。', outNote: '最后 4 行',
+        output: "Compiling Counter CounterModel.swift\nCompiling Counter CounterView.swift\nLinking Counter\nBuild complete! (40.86s)" },
+      { id: 'd', st: 'failed', kind: '命令', title: 'make test', when: '13:51:02', dur: '1:03', exit: '2', cwd: '~/work/notes-api', taskId: '41f0e9b3-8c25-4a6d-9e07-b3d2a1c84f50',
+        explain: '命令以退出码 2 结束。以下是输出的最后几行，完整日志可下载。', outNote: '最后 4 行',
+        output: "--- FAIL: TestCreateNote (0.02s)\n    store_test.go:48: expected 201, got 500\nFAIL\nmake: *** [test] Error 2" },
+      { id: 'e', st: 'succeeded', kind: '桌面 · computer.screenshot', title: 'screenshot  display=main', when: '13:58:40', dur: '1.2s', exit: '—', cwd: '—', taskId: '5a7c3e90-1b4d-4f2a-8e6c-0d9b2f71a3e8',
+        explain: '截图已作为图片返回给 Agent。', outNote: '图片 · 2560×1600 · 612 KB',
+        output: '[image/png 已返回，内容在“桌面控制 › 最近操作”中查看]' },
+      { id: 'f', st: 'timed_out', kind: '命令', title: 'npm run e2e', when: '12:20:47', dur: '10:00', exit: '—', cwd: '~/work/macrun-site', taskId: 'e2b6d4f8-7a1c-4e39-b05d-6f8c2a9e1d07',
+        explain: '超过请求设置的 600 秒上限，整个进程组已被终止。', outNote: '最后 3 行',
+        output: "Running 48 tests using 4 workers\n  [chromium] › checkout.spec.ts:12:3 › pays with card\n(no output for 540s)" },
+      { id: 'g', st: 'cancelled', kind: '命令', title: 'tail -f /tmp/app.log', when: '11:02:15', dur: '4:31', exit: '—', cwd: '/tmp', taskId: '07d9a3b1-6e5f-4c28-91ab-3f4e8d2c6b19',
+        explain: '由 Agent 调用 task_cancel 取消，进程组已停止。', outNote: '最后 2 行',
+        output: "[11:06:44] GET /health 200\n[11:06:46] GET /health 200" },
+      { id: 'h', st: 'succeeded', kind: '同步', title: 'Counter → ~/work/Counter', when: '14:02:11', dur: '1.8s', exit: '—', cwd: '~/work/Counter', taskId: 'job 6c1e8f42-…',
+        explain: '同步完成：2 个文件更新，0 个删除。同步不会自动触发构建。', outNote: '变更',
+        output: "M  Sources/CounterModel.swift\nM  Tests/CounterTests.swift" }
+    ];
+    const filter = (this.state && this.state.filter) || 'all';
+    const selId = (this.state && this.state.sel) || 'b';
+    const groups = [
+      { key: 'all', label: '全部', dot: '#1A1A19', test: () => true },
+      { key: 'running', label: '运行中', dot: S.running.dot, test: (t) => t.st === 'running' },
+      { key: 'succeeded', label: '成功', dot: S.succeeded.dot, test: (t) => t.st === 'succeeded' },
+      { key: 'failed', label: '失败', dot: S.failed.dot, test: (t) => t.st === 'failed' },
+      { key: 'unknown', label: '未知', dot: S.unknown.dot, test: (t) => t.st === 'unknown' },
+      { key: 'ended', label: '取消 / 超时', dot: '#8A8984', test: (t) => t.st === 'cancelled' || t.st === 'timed_out' }
+    ];
+    const g = groups.find((x) => x.key === filter) || groups[0];
+    const shown = tasks.filter(g.test);
+    const decorate = (t) => Object.assign({}, t, { stLabel: S[t.st].label, dot: S[t.st].dot, bg: S[t.st].bg, fg: S[t.st].fg,
+      isUnknown: t.st === 'unknown', isRunning: t.st === 'running' });
+    const selRaw = tasks.find((t) => t.id === selId) || tasks[0];
+    return {
+      filters: groups.map((x) => ({ label: x.label, dot: x.key === filter ? '#FFFFFF' : x.dot, count: tasks.filter(x.test).length,
+        cls: x.key === filter ? 'chip on' : 'chip', pick: () => this.setState({ filter: x.key }) })),
+      list: shown.map((t) => Object.assign(decorate(t), { cls: t.id === selRaw.id ? 'item on' : 'item', pick: () => this.setState({ sel: t.id }) })),
+      empty: shown.length === 0,
+      sel: decorate(selRaw)
+    };
+  }
+}
+</script>
+</body>
+</html>

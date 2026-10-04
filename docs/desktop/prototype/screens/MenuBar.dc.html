@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun · 菜单栏面板</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#2F5BEA}a:hover{color:#1F44C2}
+.app{font-family:'Geist','PingFang SC','Hiragino Sans GB',system-ui,sans-serif;color:#1A1A19;font-size:13px;line-height:1.5}
+.mono{font-family:'Geist Mono','SF Mono',ui-monospace,monospace}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.label{font-size:12px;color:#6B6A66;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.row{display:flex;align-items:center;gap:10px}
+.mi{font:inherit;box-sizing:border-box;width:100%;text-align:left;border:0;background:transparent;color:#1A1A19;border-radius:6px;padding:0 10px;min-height:32px;display:flex;align-items:center;gap:10px;cursor:pointer}
+.mi:hover{background:#2F5BEA;color:#fff}
+.mi:hover .k{color:#DCE5FF}
+.k{margin-left:auto;color:#8A8984;font-size:12px}
+.sep{height:1px;background:#E6E5E1;margin:5px 10px}
+.state{font:inherit;font-size:12px;border:1px solid #D5D4CE;background:#fff;border-radius:999px;padding:4px 10px;cursor:pointer;color:#4A4945}
+.state.on{background:#1A1A19;color:#fff;border-color:#1A1A19}
+</style>
+</helmet>
+<div class="app" style="width: 400px; height: 640px; box-sizing: border-box; background: #D9DCE0; position: relative; overflow: hidden">
+  <div style="height: 28px; background: rgba(246,246,244,.9); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; font-size: 12.5px; font-weight: 500">
+    <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,.1); border-radius: 5px; padding: 1px 6px">
+      <svg class="i" viewBox="0 0 16 16" aria-hidden="true" style="width: 15px; height: 15px"><path d="M3 5l3 3-3 3M8 11h5"></path></svg>
+      <span class="dot" style="width: 6px; height: 6px; background: {{iconDot}}"></span>
+    </span>
+    <span>周六 14:04</span>
+  </div>
+
+  <div style="position: absolute; right: 12px; top: 34px; width: 340px; background: rgba(250,250,249,.98); border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 12px 32px rgba(0,0,0,.18); padding: 6px">
+    <div style="padding: 10px 10px 8px">
+      <div class="row">
+        <span class="dot" style="background: {{dot}}"></span>
+        <span style="font-weight: 600; font-size: 14px">{{headline}}</span>
+      </div>
+      <div class="label" style="margin-top: 2px; padding-left: 18px">{{sub}}</div>
+    </div>
+
+    <sc-if value="{{working}}" hint-placeholder-val="{{true}}">
+      <div style="margin: 2px 4px 6px; background: #fff; border: 1px solid #E6E5E1; border-radius: 9px; padding: 10px 12px">
+        <div class="row"><span class="label">命令 · 运行中</span><span class="mono label" style="margin-left: auto; color: #1A1A19">2:14</span></div>
+        <div class="mono" style="font-size: 12.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">xcodebuild test -scheme Counter</div>
+        <div class="row" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #F0EFEB"><span class="label">同步 · Counter</span><span class="label" style="margin-left: auto">3 / 5 个文件</span></div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{approval}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 2px 4px 6px; background: #FFF6E5; border: 1px solid #F1DDB3; border-radius: 9px; padding: 10px 12px">
+        <div class="label" style="color: #7A4B00">Agent 请求执行风险命令 · 剩余 52 秒</div>
+        <div class="mono" style="font-size: 12.5px; margin: 4px 0 2px; word-break: break-all">git push origin feature/menu-bar</div>
+        <div class="label">~/work/Counter · 匹配规则 <span class="mono">git push *</span></div>
+        <div class="row" style="margin-top: 10px">
+          <button onClick="{{deny}}" style="font: inherit; flex: 1; min-height: 30px; border: 1px solid #D5D4CE; background: #fff; border-radius: 7px; cursor: pointer">拒绝</button>
+          <button onClick="{{allow}}" style="font: inherit; flex: 1; min-height: 30px; border: 0; background: #1A1A19; color: #fff; border-radius: 7px; cursor: pointer">允许一次</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{offline}}" hint-placeholder-val="{{false}}">
+      <div style="margin: 2px 4px 6px; background: #FCEDEA; border: 1px solid #F0CFC7; color: #A12B17; border-radius: 9px; padding: 10px 12px">
+        <div style="font-weight: 550">服务器 UDP 7443 无响应</div>
+        <div style="font-size: 12px; margin-top: 2px">每 5 秒自动重试 · 第 14 次。断线前在运行的 1 个任务仍在本机继续。</div>
+      </div>
+    </sc-if>
+
+    <button class="mi" onClick="{{togglePause}}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="{{pauseIcon}}"></path></svg>{{pauseLabel}}</button>
+    <button class="mi" style="color: inherit"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"></rect></svg>全部停止<span class="k mono">⌃⌥⌘.</span></button>
+    <button class="mi"><svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5l4 11 1.7-4.6L13.5 7z"></path></svg>允许桌面控制<span class="k">✓</span></button>
+    <div class="sep"></div>
+    <div style="padding: 4px 10px 2px" class="label">最近</div>
+    <sc-for list="{{recent}}" as="r" hint-placeholder-count="3">
+      <button class="mi"><span class="dot" style="background: {{r.dot}}"></span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.text}}</span><span class="k mono">{{r.t}}</span></button>
+    </sc-for>
+    <div class="sep"></div>
+    <a href="Main.dc.html" class="mi" style="text-decoration: none">打开 Macrun<span class="k mono">⌘O</span></a>
+    <button class="mi">设置…<span class="k mono">⌘,</span></button>
+    <button class="mi">退出 Macrun<span class="k mono">⌘Q</span></button>
+  </div>
+
+  <div role="group" aria-label="评审用：切换状态" style="position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+    <span class="label" style="color: #4A4945">评审用状态：</span>
+    <sc-for list="{{states}}" as="s" hint-placeholder-count="4">
+      <button class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"initial":{"editor":"enum","options":["working","approval","idle","offline"],"default":"working"},"$preview":{"width":400,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    let s = (this.state && this.state.s) || this.props.initial || 'working';
+    const paused = !!(this.state && this.state.paused);
+    const map = {
+      working: { dot: '#2F5BEA', headline: 'Agent 正在工作', sub: '2 个任务进行中 · 203.0.113.10' },
+      approval: { dot: '#D08A0B', headline: '需要你确认', sub: '1 个命令等待批准' },
+      idle: { dot: '#1F9D5C', headline: '已连接，空闲', sub: '今天 42 个任务 · 上次活动 6 分钟前' },
+      offline: { dot: '#C2361F', headline: '与服务器断开', sub: '已断开 1 分 10 秒' }
+    };
+    const m = map[s];
+    const labels = { working: '工作中', approval: '待确认', idle: '空闲', offline: '断线' };
+    return {
+      dot: paused ? '#8A8984' : m.dot,
+      iconDot: paused ? '#8A8984' : m.dot,
+      headline: paused ? '已暂停接收新任务' : m.headline,
+      sub: paused ? '运行中的任务会继续完成' : m.sub,
+      working: s === 'working', approval: s === 'approval', offline: s === 'offline',
+      pauseLabel: paused ? '恢复接收任务' : '暂停接收新任务',
+      pauseIcon: paused ? 'M5 3l8 5-8 5z' : 'M6 3.5v9M10 3.5v9',
+      togglePause: () => this.setState({ paused: !paused }),
+      allow: () => this.setState({ s: 'working' }),
+      deny: () => this.setState({ s: 'idle' }),
+      recent: [
+        { dot: '#1F9D5C', text: '同步 Counter · 2 个文件', t: '14:02' },
+        { dot: '#C2361F', text: 'make test · 退出码 2', t: '13:51' },
+        { dot: '#D08A0B', text: '桌面点击 · 结果未知', t: '13:40' }
+      ],
+      states: ['working', 'approval', 'idle', 'offline'].map((k) => ({ label: labels[k], cls: k === s ? 'state on' : 'state', pick: () => this.setState({ s: k }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>
