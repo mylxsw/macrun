@@ -92,6 +92,7 @@ function fixture() {
     },
     data_dir: "/test/macrun",
     legacy_running: false,
+    legacy_detected: false,
     autostart: false,
     platform: "macos",
     snapshot: {
@@ -467,4 +468,52 @@ test("first launch pairing yields to a native settings navigation", async () => 
   expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "配对服务器" }));
   expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy();
+});
+
+test.each([true, false])(
+  "legacy configuration takes users to migration without pairing (running=%s)",
+  async (running) => {
+    app.settings.server = "";
+    app.worker_running = false;
+    app.legacy_detected = true;
+    app.legacy_running = running;
+    const user = userEvent.setup();
+    await mount();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "设置与安全" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
+    const migrate = screen.getByRole("button", { name: "迁移", exact: true });
+    expect(
+      bridge.invoke.mock.calls.some(
+        ([command]) => command === "migrate_legacy" || command === "pair",
+      ),
+    ).toBe(false);
+    await user.click(migrate);
+    expect(screen.getByRole("dialog", { name: "迁移旧执行器" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "迁移", exact: true })).toBe(
+      migrate,
+    );
+    expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
+    expect(
+      bridge.invoke.mock.calls.some(
+        ([command]) => command === "migrate_legacy" || command === "pair",
+      ),
+    ).toBe(false);
+  },
+);
+
+test("an existing desktop connection opens the live page even with legacy files present", async () => {
+  app.legacy_detected = true;
+  await mount();
+  expect(screen.getByRole("heading", { level: 1, name: "现场" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.some(
+      ([command]) => command === "migrate_legacy" || command === "pair",
+    ),
+  ).toBe(false);
 });

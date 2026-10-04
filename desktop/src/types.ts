@@ -67,6 +67,7 @@ export type AppState = {
   settings: Settings;
   data_dir: string;
   legacy_running: boolean;
+  legacy_detected?: boolean;
   autostart: boolean;
   platform: string;
 };

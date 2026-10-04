@@ -83,6 +83,7 @@ struct Runtime {
     settings: Mutex<Settings>,
     preferences: Mutex<Preferences>,
     exiting: AtomicBool,
+    starting: AtomicBool,
     desired_running: AtomicBool,
     migrating: AtomicBool,
     window_layout: Mutex<WindowLayout>,
@@ -313,14 +314,73 @@ fn legacy_running() -> bool {
         false
     }
 }
+
+fn legacy_plist_exists(launch_agents: &std::path::Path) -> bool {
+    // Match the migration reader, which accepts a valid link to a plist file.
+    std::fs::metadata(launch_agents.join("dev.macrun.worker.plist"))
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
 #[tauri::command]
 fn app_state(app: tauri::AppHandle, rt: tauri::State<Runtime>) -> Value {
+    let legacy_loaded = legacy_running();
+    let legacy_detected = legacy_loaded
+        || std::env::var_os("HOME").is_some_and(|home| {
+            legacy_plist_exists(&PathBuf::from(home).join("Library/LaunchAgents"))
+        });
     let mut child = rt.child.lock().unwrap();
     let running = child
         .as_mut()
         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_running(),"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
+    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_loaded,"legacy_detected":legacy_detected,"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
 }
+
+#[cfg(test)]
+mod legacy_detection_tests {
+    use super::legacy_plist_exists;
+
+    #[test]
+    fn detects_only_the_original_legacy_plist() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(!legacy_plist_exists(directory.path()));
+        std::fs::write(
+            directory
+                .path()
+                .join("dev.macrun.worker.plist.macrun-disabled"),
+            b"disabled backup",
+        )
+        .unwrap();
+        assert!(!legacy_plist_exists(directory.path()));
+        std::fs::write(
+            directory.path().join("dev.macrun.worker.plist"),
+            b"original configuration",
+        )
+        .unwrap();
+        assert!(legacy_plist_exists(directory.path()));
+    }
+
+    #[test]
+    fn accepts_valid_plist_links_but_rejects_directories_and_broken_links() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("dev.macrun.worker.plist")).unwrap();
+        assert!(!legacy_plist_exists(directory.path()));
+
+        let linked = tempfile::tempdir().unwrap();
+        let target = linked.path().join("saved.plist");
+        std::fs::write(&target, b"saved configuration").unwrap();
+        std::os::unix::fs::symlink(&target, linked.path().join("dev.macrun.worker.plist")).unwrap();
+        assert!(legacy_plist_exists(linked.path()));
+
+        let broken = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            broken.path().join("missing.plist"),
+            broken.path().join("dev.macrun.worker.plist"),
+        )
+        .unwrap();
+        assert!(!legacy_plist_exists(broken.path()));
+    }
+}
+
 #[tauri::command]
 fn save_settings(
     mut settings: Settings,
@@ -369,12 +429,89 @@ fn save_settings(
 fn toml_config(path: &str) -> Result<macrun::config::WorkerConfig> {
     Ok(toml::from_str(&std::fs::read_to_string(path)?)?)
 }
+
+struct StartAttempt<'a>(&'a AtomicBool);
+
+impl<'a> StartAttempt<'a> {
+    fn begin(starting: &'a AtomicBool) -> std::result::Result<Self, String> {
+        starting
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "执行器正在启动，请先完成系统授权并等待结果".to_owned())?;
+        Ok(Self(starting))
+    }
+}
+
+impl Drop for StartAttempt<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+async fn read_credential_in_background(
+    read: impl FnOnce() -> std::result::Result<Vec<u8>, String> + Send + 'static,
+) -> std::result::Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(read)
+        .await
+        .map_err(|_| "读取连接凭据的后台任务异常，请重试连接".to_owned())?
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn startup_attempt_blocks_duplicates_and_releases_after_failure() {
+        let starting = AtomicBool::new(false);
+        let attempt = StartAttempt::begin(&starting).unwrap();
+        assert!(StartAttempt::begin(&starting).is_err());
+        drop(attempt);
+        let failure: std::result::Result<(), String> = (|| {
+            let _attempt = StartAttempt::begin(&starting)?;
+            Err("test failure".into())
+        })();
+        assert!(failure.is_err());
+        assert!(!starting.load(Ordering::SeqCst));
+        assert!(StartAttempt::begin(&starting).is_ok());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn credential_read_runs_off_the_calling_thread_and_preserves_errors() {
+        let caller = std::thread::current().id();
+        let result = read_credential_in_background(move || {
+            assert_ne!(std::thread::current().id(), caller);
+            Ok(vec![1, 2, 3])
+        })
+        .await
+        .unwrap();
+        assert_eq!(result, vec![1, 2, 3]);
+        let error = read_credential_in_background(|| Err("test read refused".into()))
+            .await
+            .unwrap_err();
+        assert_eq!(error, "test read refused");
+    }
+}
+
 #[tauri::command]
 async fn start_worker(
     app: tauri::AppHandle,
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
+    let _attempt = StartAttempt::begin(&rt.starting)?;
     let cfg = rt.settings.lock().unwrap().clone();
+    {
+        let mut child = rt.child.lock().unwrap();
+        if rt.migrating.load(Ordering::SeqCst) {
+            return Err("正在迁移旧执行器，请稍后连接".into());
+        }
+        if rt.exiting.load(Ordering::SeqCst) {
+            return Err("应用正在退出，未启动执行器".into());
+        }
+        if let Some(child) = child.as_mut()
+            && child.try_wait().map_err(|e| e.to_string())?.is_none()
+        {
+            return Err("执行器已经运行".into());
+        }
+    }
     if !cfg.certificate_fingerprint.is_empty() {
         let bytes = std::fs::read(&cfg.cert).map_err(|e| e.to_string())?;
         if blake3::hash(&bytes).to_hex().as_str() != cfg.certificate_fingerprint {
@@ -391,6 +528,20 @@ async fn start_worker(
             "检测到旧 LaunchAgent。请先完成迁移，避免重复运行；本版本不会自动停止旧服务。".into(),
         );
     }
+    // Keychain may wait for a system authorization dialog. Do not hold the
+    // lifecycle lock or block an async executor thread during that wait.
+    let token = if cfg.keychain_account.is_empty() {
+        None
+    } else {
+        let account = cfg.keychain_account.clone();
+        Some(
+            read_credential_in_background(move || {
+                security_framework::passwords::get_generic_password("dev.macrun.desktop", &account)
+                    .map_err(|_| "无法从钥匙串读取连接凭据，请重试连接或重新配对".to_owned())
+            })
+            .await?,
+        )
+    };
     let result: Result<()> = (|| {
         let mut slot = rt.child.lock().unwrap();
         anyhow::ensure!(
@@ -401,8 +552,8 @@ async fn start_worker(
             !rt.exiting.load(Ordering::SeqCst),
             "应用正在退出，未启动执行器"
         );
-        // DNS lookup can outlive a migration or a connection edit. Never spawn
-        // with the obsolete credentials captured before that await.
+        // DNS and Keychain authorization can outlive a migration or connection
+        // edit. Never spawn with credentials captured before that await.
         anyhow::ensure!(
             *rt.settings.lock().unwrap() == cfg,
             "连接配置已变化，请重新连接"
@@ -471,17 +622,6 @@ async fn start_worker(
             command.arg("--config").arg(&cfg.backend_config);
         }
         *rt.snapshot.lock().unwrap() = Value::Null;
-        let token = if cfg.keychain_account.is_empty() {
-            None
-        } else {
-            Some(
-                security_framework::passwords::get_generic_password(
-                    "dev.macrun.desktop",
-                    &cfg.keychain_account,
-                )
-                .map_err(|_| anyhow::anyhow!("无法从钥匙串读取连接凭据，请重新配对"))?,
-            )
-        };
         if token.is_some() {
             command.arg("--token-stdin");
         }
@@ -732,6 +872,7 @@ fn main() {
                 settings: Mutex::new(settings),
                 preferences: Mutex::new(preferences),
                 exiting: AtomicBool::new(false),
+                starting: AtomicBool::new(false),
                 desired_running: AtomicBool::new(false),
                 migrating: AtomicBool::new(false),
                 window_layout: Mutex::new(WindowLayout::default()),

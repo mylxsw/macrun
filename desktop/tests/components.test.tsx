@@ -610,3 +610,57 @@ test("migration yields Escape and Tab to a dialog rendered above it", async () =
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(props.act).not.toHaveBeenCalled();
 });
+
+test("a stopped legacy configuration has a prominent migration entry and survives cancellation", async () => {
+  const props = migrationProps(),
+    user = userEvent.setup();
+  render(
+    <SettingsPage
+      {...props}
+      app={{ ...app, legacy_running: false, legacy_detected: true }}
+    />,
+  );
+  const banner = screen.getByRole("region", { name: "旧版 Macrun 迁移" });
+  expect(within(banner).getByText("检测到旧版 Macrun")).toBeTruthy();
+  expect(
+    within(banner).getByText(
+      "已有配置，无需重新配对。迁移后保留任务记录和同步状态，由桌面应用统一管理。",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(banner).getByText("已找到旧版配置，旧执行器当前未运行。"),
+  ).toBeTruthy();
+  const safetySection = screen
+    .getByRole("heading", { name: "安全边界", exact: true })
+    .closest("section")!;
+  expect(
+    banner.compareDocumentPosition(safetySection) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  expect(props.act).not.toHaveBeenCalled();
+  const migrate = within(banner).getByRole("button", {
+    name: "迁移",
+    exact: true,
+  });
+  await user.click(migrate);
+  await user.click(screen.getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("region", { name: "旧版 Macrun 迁移" })).toBe(banner);
+  expect(document.activeElement).toBe(migrate);
+  expect(props.act).not.toHaveBeenCalled();
+});
+
+test("the migration banner distinguishes a running legacy service and hides when absent", () => {
+  const props = migrationProps();
+  const { rerender } = render(<SettingsPage {...props} />);
+  expect(
+    screen.getByText("旧执行器正在运行；迁移前请确认任务已经结束。"),
+  ).toBeTruthy();
+  rerender(
+    <SettingsPage
+      {...props}
+      app={{ ...app, legacy_running: false, legacy_detected: false }}
+    />,
+  );
+  expect(screen.queryByRole("region", { name: "旧版 Macrun 迁移" })).toBeNull();
+});

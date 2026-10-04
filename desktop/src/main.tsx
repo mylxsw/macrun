@@ -168,7 +168,10 @@ function App() {
     setApp(a);
     if (firstLoad.current) {
       firstLoad.current = false;
-      if (!a.settings.server && !tray && !overlay && !border) setPairing(true);
+      if (!a.settings.server && !tray && !overlay && !border) {
+        if (a.legacy_detected || a.legacy_running) setPage("settings");
+        else setPairing(true);
+      }
     }
     if (a.snapshot) setSnapshot(a.snapshot);
   };

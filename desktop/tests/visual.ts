@@ -13,6 +13,10 @@ if (!import.meta.env.DEV || (window as any).__TAURI_INTERNALS__) {
 
 const query = new URLSearchParams(location.search);
 const overlay = query.has("overlay");
+const pairing = query.has("pairing");
+const legacy = query.get("legacy");
+const legacyDetected = legacy === "running" || legacy === "stopped";
+const configured = overlay || (!pairing && !legacyDetected);
 const failure = query.get("error");
 const callbacks = new Map<
   number,
@@ -60,14 +64,18 @@ if (overlay) {
   snapshot.active_count = 1;
   snapshot.total_tasks = 1;
 }
-const app: AppState = {
-  worker_running: overlay,
-  snapshot: overlay ? snapshot : null,
+const app: AppState & { legacy_detected: boolean } = {
+  worker_running: configured,
+  snapshot: configured ? snapshot : null,
   settings: {
-    server: overlay ? snapshot.connection.server : "",
-    cert: "",
-    token_file: "",
-    backend_config: "",
+    server: configured ? snapshot.connection.server : "",
+    cert: configured ? "/tmp/macrun-visual-fixture/certificate.der" : "",
+    token_file: configured ? "/dev/null" : "",
+    backend_config: configured ? "/tmp/macrun-visual-fixture/worker.toml" : "",
+    keychain_account: configured ? "fixture-only" : "",
+    certificate_fingerprint: configured
+      ? "4fa19c07-fixture-not-a-real-fingerprint"
+      : "",
   },
   preferences: {
     show_overlay: true,
@@ -77,7 +85,8 @@ const app: AppState = {
     auto_connect: false,
   },
   data_dir: "/tmp/macrun-visual-fixture",
-  legacy_running: false,
+  legacy_detected: legacyDetected,
+  legacy_running: legacy === "running",
   autostart: false,
   platform: "macos",
 };
@@ -112,6 +121,27 @@ async function invoke(command: string, args: Record<string, any> = {}) {
     return unregisterListener(args.event, args.eventId);
   if (command === "app_state") return structuredClone(app);
   if (["set_main_mode", "resize_panel"].includes(command)) return null;
+  if (command === "migrate_legacy") {
+    if (failure === "migration")
+      throw new Error("测试迁移失败：原配置已保留，旧服务状态未变化");
+    if (!app.legacy_detected) throw new Error("测试夹具未检测到旧版配置");
+    app.settings = {
+      ...app.settings,
+      server: snapshot.connection.server,
+      cert: "/tmp/macrun-visual-fixture/migration/certificate.der",
+      token_file: "/dev/null",
+      backend_config: "/tmp/macrun-visual-fixture/migration/worker.toml",
+      keychain_account: "fixture-only",
+      certificate_fingerprint: "4fa19c07-fixture-not-a-real-fingerprint",
+    };
+    app.legacy_detected = false;
+    app.legacy_running = false;
+    return {
+      backup: "/tmp/macrun-visual-fixture/migration/launchagent.plist.bak",
+      disabled: "/tmp/macrun-visual-fixture/launchagent.plist.macrun-disabled",
+      note: "模拟迁移完成；路径仅用于界面展示，不会创建文件。",
+    };
+  }
   if (command === "pair") {
     if (
       failure === "pair" ||
@@ -136,6 +166,9 @@ async function invoke(command: string, args: Record<string, any> = {}) {
   }
   if (command === "start_worker") {
     if (failure === "start") throw new Error("测试执行器启动失败");
+    if (app.legacy_running)
+      throw new Error("测试旧执行器仍在运行，请先完成迁移");
+    if (!app.settings.server) throw new Error("测试连接尚未配置");
     app.worker_running = true;
     app.snapshot = snapshot;
     queueMicrotask(update);

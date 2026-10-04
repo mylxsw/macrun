@@ -86,6 +86,36 @@ export function SettingsPage({
           ))}
         </nav>
       </header>
+      {(app?.legacy_running || app?.legacy_detected) && (
+        <section
+          className="legacy-alert legacy-migration-banner"
+          aria-label="旧版 Macrun 迁移"
+        >
+          <CircleAlert size={16} />
+          <div className="legacy-migration-copy">
+            <b>检测到旧版 Macrun</b>
+            <p>
+              已有配置，无需重新配对。迁移后保留任务记录和同步状态，由桌面应用统一管理。
+            </p>
+            <small>
+              {app.legacy_running
+                ? "旧执行器正在运行；迁移前请确认任务已经结束。"
+                : "已找到旧版配置，旧执行器当前未运行。"}
+            </small>
+          </div>
+          <button
+            ref={migrationTrigger}
+            className="primary"
+            disabled={busy}
+            onClick={() => {
+              setError("");
+              setMigrationOpen(true);
+            }}
+          >
+            迁移
+          </button>
+        </section>
+      )}
       <section className="settings-section" id="safety">
         <div>
           <h2>安全边界</h2>
@@ -256,27 +286,7 @@ export function SettingsPage({
       </section>
       <section className="settings-section" id="general">
         <h2>通用</h2>
-        {app?.legacy_running && (
-          <div className="legacy-alert">
-            <CircleAlert size={16} />
-            <span>
-              检测到旧的 LaunchAgent{" "}
-              <span className="mono">dev.macrun.worker</span> 仍在运行。迁移后由
-              Macrun Desktop 统一管理，原服务配置会备份，旧数据会保留。
-            </span>
-            <button
-              ref={migrationTrigger}
-              className="primary"
-              disabled={busy}
-              onClick={() => {
-                setError("");
-                setMigrationOpen(true);
-              }}
-            >
-              迁移
-            </button>
-          </div>
-        )}
+
         <div className="card">
           <label className="feature-line">
             <div className="grow">
