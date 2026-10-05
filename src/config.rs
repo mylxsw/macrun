@@ -58,6 +58,8 @@ pub struct Backend {
 #[serde(default, deny_unknown_fields)]
 pub struct WorkerConfig {
     pub mcp: BTreeMap<String, Backend>,
+    /// Backends default to the shared physical desktop. Equal names serialize.
+    pub resource_groups: BTreeMap<String, String>,
 }
 pub fn expand(s: &str) -> PathBuf {
     if let Some(s) = s.strip_prefix("~/") {

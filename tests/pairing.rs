@@ -55,6 +55,49 @@ async fn real_quic_exchange_redeems_only_once() {
     server.abort();
     let _ = server.await;
 }
+
+#[tokio::test]
+async fn real_tcp_exchange_keeps_authentication_and_single_use() {
+    let d = tempfile::tempdir().unwrap();
+    wire::init_tls(d.path()).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let server = tokio::spawn(macrun::server::serve_with_tcp(
+        "127.0.0.1:0".parse().unwrap(),
+        d.path().join("cli.sock"),
+        d.path().into(),
+        Some(addr),
+    ));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let uri = pairing::create(d.path(), format!("tcp://{addr}")).unwrap();
+    let (_, token) = pairing::exchange(&uri, &d.path().join("client.der"))
+        .await
+        .unwrap();
+    assert!(pairing::authorized(d.path(), &token));
+    assert!(
+        pairing::exchange(&uri, &d.path().join("client.der"))
+            .await
+            .is_err()
+    );
+    let conn = macrun::transport::connect_tcp(&addr.to_string(), &d.path().join("cert.der"))
+        .await
+        .unwrap();
+    let (mut send, mut recv) = conn.open_bi().await.unwrap();
+    wire::send(
+        &mut send,
+        &serde_json::json!({"type":"hello","token":"wrong","protocol":macrun::model::PROTOCOL,"instance":"test","status":{}}),
+    )
+    .await
+    .unwrap();
+    // Reject followed by immediate connection close may arrive as EOF. Neither
+    // transport may admit the unauthorized Hello or return Welcome.
+    if let Ok(reply) = wire::recv::<_, serde_json::Value>(&mut recv).await {
+        assert_eq!(reply["type"], "reject");
+    }
+    server.abort();
+    let _ = server.await;
+}
 #[test]
 fn expired_server_record_and_concurrent_redemption_are_rejected() {
     let d = tempfile::tempdir().unwrap();

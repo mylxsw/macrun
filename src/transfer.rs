@@ -84,9 +84,9 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let cancel = record.as_ref().map(|(_, c)| c.clone()).unwrap_or_default();
     let operation = async {
         let _lease = if kind == "file.upload" {
-            Some(crate::workspace::Lease::acquire(std::slice::from_ref(
-                &path,
-            ))?)
+            Some(Arc::new(crate::workspace::Lease::acquire(
+                std::slice::from_ref(&path),
+            )?))
         } else {
             None
         };
@@ -111,6 +111,13 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             ));
             let journal = temporary.with_extension("macrun-meta");
             let identity = json!({"path":path,"size":size,"hash":expected});
+            if let Some((ident, _)) = &record {
+                wire::persist(
+                    &engine.directory(ident)?.join("transfer.json"),
+                    &json!({"destination":path,"transfer_id":transfer_id}),
+                )
+                .await?;
+            }
             if journal.exists() {
                 let previous: Value = serde_json::from_slice(&tokio::fs::read(&journal).await?)?;
                 ensure!(
@@ -130,14 +137,26 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 use tokio::io::AsyncSeekExt;
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
                 status(out,json!({"ready":true,"size":size-offset,"offset":offset,"prefix_hash":prefix,"transfer_id":transfer_id})).await?;
-                copy(input,&mut file,size-offset,&cancel).await?;
+                let copied=copy(input,&mut file,size-offset,&cancel).await;
+                // Drain Tokio's pending filesystem write before exposing a
+                // resumable offset or releasing the destination lease.
+                file.flush().await?;
+                copied?;
                 file.sync_all().await?;
                 drop(file);
                 let p=temporary.clone();
                 let hash=crate::wire::blocking(move||crate::sync::hash(&p)).await??;
                 ensure!(hash==expected,"transfer checksum mismatch");
-                tokio::fs::rename(&temporary,&path).await?;
-                tokio::fs::remove_file(&journal).await?;
+                // Cancellation cannot release the destination lease while an
+                // already-started publish is still running on a blocking thread.
+                let (from,to,meta,lease)=(temporary.clone(),path.clone(),journal.clone(),_lease.clone());
+                crate::wire::blocking(move || {
+                    let _lease=lease;
+                    std::fs::rename(from,&to)?;
+                    if let Some(parent)=to.parent(){std::fs::File::open(parent)?.sync_all()?;}
+                    std::fs::remove_file(meta)?;
+                    Ok::<_,anyhow::Error>(())
+                }).await??;
                 Ok::<_,anyhow::Error>(json!({"bytes":size,"transferred_bytes":size-offset,"hash":hash,"transfer_id":transfer_id}))
             }.await;
             if result
@@ -157,13 +176,28 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             ensure!(offset <= before.len(), "offset exceeds file length");
             use tokio::io::AsyncSeekExt;
             file.seek(std::io::SeekFrom::Start(offset)).await?;
-            let version = format!("{}:{:?}", before.len(), before.modified()?);
+            let version = format!(
+                "{}:{}:{}:{}:{}:{}:{}",
+                before.dev(),
+                before.ino(),
+                before.len(),
+                before.mtime(),
+                before.mtime_nsec(),
+                before.ctime(),
+                before.ctime_nsec()
+            );
             if let Some(expected) = args["version"].as_str() {
                 ensure!(expected == version, "source_changed: file version differs");
             }
+            let prefix_hash = if offset > 0 {
+                file.seek(std::io::SeekFrom::Start(0)).await?;
+                Some(copy(&mut file, &mut tokio::io::sink(), offset, &cancel).await?)
+            } else {
+                None
+            };
             status(
                 out,
-                json!({"ready":true,"size":before.len()-offset,"version":version,"offset":offset}),
+                json!({"ready":true,"size":before.len()-offset,"version":version,"offset":offset,"prefix_hash":prefix_hash}),
             )
             .await?;
             let hash = copy(&mut file, out, before.len() - offset, &cancel).await?;
@@ -213,8 +247,8 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
 pub async fn relay(
     socket: &mut tokio::net::UnixStream,
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transport::SendStream,
+    recv: &mut crate::transport::RecvStream,
     kind: &str,
 ) -> Result<bool> {
     let ready = wire::recv::<_, Reply>(recv).await?;
@@ -349,5 +383,89 @@ pub async fn upload(
     .await?;
     let end = response(&mut stream).await?;
     ensure!(end["hash"] == hash, "upload checksum mismatch");
+    Ok(end)
+}
+
+/// Partial output is never published. A retry checks both source version and
+/// the retained prefix before appending any bytes, including after local edits.
+pub async fn download_resumable(
+    socket: &Path,
+    workspace: &Path,
+    remote: &str,
+    local: &Path,
+    client: Option<&str>,
+) -> Result<Value> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let lock_path = local.with_extension("macrun-download-lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(lock_path)?;
+    fs2::FileExt::try_lock_exclusive(&lock)?;
+    let part = local.with_extension("macrun-download");
+    let journal = local.with_extension("macrun-download-meta");
+    let identity = json!({"socket":socket,"workspace":workspace,"remote":remote,"client":client});
+    let existing = journal.exists();
+    if !existing {
+        ensure!(
+            !part.exists(),
+            "partial download has no metadata; choose another destination or remove the abandoned partial"
+        );
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&part)?;
+    fs2::FileExt::try_lock_exclusive(&file)?;
+    let offset = file.metadata()?.len();
+    let mut args = json!({"path":remote,"offset":offset});
+    if existing {
+        let record: Value = serde_json::from_slice(&tokio::fs::read(&journal).await?)?;
+        ensure!(
+            record["identity"] == identity,
+            "partial download belongs to another source"
+        );
+        args["version"] = record["version"].clone();
+    }
+    if !existing {
+        wire::persist(&journal, &json!({"identity":identity,"version":null})).await?;
+    }
+    let mut stream = connect(socket, workspace, "file.download", args, client).await?;
+    let ready = response(&mut stream).await?;
+    let bytes = ready["size"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("missing download size"))?;
+    if offset > 0 {
+        let p = part.clone();
+        let hash = wire::blocking(move || crate::sync::hash(&p)).await??;
+        ensure!(
+            ready["prefix_hash"] == hash,
+            "download prefix mismatch; partial file or source changed"
+        );
+    }
+    wire::persist(
+        &journal,
+        &json!({"identity":identity,"version":ready["version"]}),
+    )
+    .await?;
+    let mut file = tokio::fs::File::from_std(file);
+    let copied = copy(&mut stream, &mut file, bytes, &CancellationToken::new()).await;
+    file.flush().await?;
+    let hash = copied?;
+    let end = response(&mut stream).await?;
+    ensure!(
+        end["hash"] == hash && file.metadata().await?.len() == offset + bytes,
+        "download checksum or size mismatch"
+    );
+    file.sync_all().await?;
+    tokio::fs::rename(&part, local).await?;
+    tokio::fs::remove_file(&journal).await?;
     Ok(end)
 }

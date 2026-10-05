@@ -568,6 +568,17 @@ async fn read_credential_in_background(
 mod startup_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn single_server_resolution_preserves_selected_transport() {
+        for prefix in ["", "tcp://", "auto://"] {
+            let address = resolved_worker_address(&format!("{prefix}127.0.0.1:7443"))
+                .await
+                .unwrap();
+            assert_eq!(address, format!("{prefix}127.0.0.1:7443"));
+        }
+        assert!(resolved_worker_address("missing-port").await.is_err());
+    }
+
     #[test]
     fn configuration_edits_reject_start_migration_and_exit_before_any_file_changes() {
         let directory = tempfile::tempdir().unwrap();
@@ -631,6 +642,20 @@ mod startup_tests {
     }
 }
 
+async fn resolved_worker_address(address: &str) -> std::result::Result<String, String> {
+    let prefix = ["tcp://", "auto://"]
+        .into_iter()
+        .find(|p| address.starts_with(p))
+        .unwrap_or("");
+    let host = &address[prefix.len()..];
+    let resolved = tokio::net::lookup_host(host)
+        .await
+        .map_err(|e| format!("服务器地址无效：{e}"))?
+        .find(|a| a.is_ipv4())
+        .ok_or("当前版本需要 IPv4 地址")?;
+    Ok(format!("{prefix}{resolved}"))
+}
+
 #[tauri::command]
 async fn start_worker(
     app: tauri::AppHandle,
@@ -659,13 +684,7 @@ async fn start_worker(
         }
     }
     let address = if cfg.connections.is_empty() {
-        Some(
-            tokio::net::lookup_host(&cfg.server)
-                .await
-                .map_err(|e| format!("服务器地址无效：{e}"))?
-                .find(|a| a.is_ipv4())
-                .ok_or("当前版本需要 IPv4 地址")?,
-        )
+        Some(resolved_worker_address(&cfg.server).await?)
     } else {
         None
     }; // Multi-server workers resolve each address independently.
@@ -815,9 +834,7 @@ async fn start_worker(
         } else {
             command.args([
                 "--server",
-                &address
-                    .context("missing single-server address")?
-                    .to_string(),
+                &address.context("missing single-server address")?,
                 "--cert",
                 &cfg.cert,
                 "--token-file",

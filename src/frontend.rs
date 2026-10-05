@@ -26,7 +26,9 @@ pub async fn request_for(
     if !args.is_object() {
         bail!("arguments must be a JSON object");
     }
-    if ["exec.start", "mcp.call"].contains(&kind) && args.get("request_id").is_none() {
+    if ["exec.start", "mcp.call", "desktop.sequence"].contains(&kind)
+        && args.get("request_id").is_none()
+    {
         args["request_id"] = json!(id());
     }
     if let Some(client) = client
@@ -76,7 +78,7 @@ pub fn tools() -> Vec<Value> {
         tool(
             "exec_start",
             "Start a worker-owned shell command. Optional wait_ms (up to 1000) returns a completed result when ready. Save task_id; poll task_get. Reuse the same UUID request_id after uncertain delivery, never a new ID. No implicit synchronization.",
-            json!({"command":string,"cwd":string,"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string}),
+            json!({"command":string,"cwd":string,"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string,"snapshot":{"type":"boolean"}}),
             &["command", "cwd", "request_id"],
         ),
         tool(
@@ -138,6 +140,12 @@ pub fn tools() -> Vec<Value> {
             "Start a local MCP tool call. Optional wait_ms (up to 1000) waits briefly for completion. Requires session from mcp_tools. Poll task_get. Calls to one backend execute serially. No Cua-specific changes to arguments.",
             json!({"server":string,"tool":string,"arguments":{"type":"object"},"session":string,"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
             &["server", "tool", "session", "request_id"],
+        ),
+        tool(
+            "desktop_sequence",
+            "Execute up to 16 ordered backend steps with a shared resource lease, per-step approval and stop-on-error/condition. Never replay after unknown. Returns a task ID.",
+            json!({"server":string,"session":string,"request_id":string,"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"tool":string,"arguments":{"type":"object"},"expect":{"type":"object","properties":{"pointer":string,"equals":{}}}},"required":["tool"]}},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600},"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
+            &["server", "session", "request_id", "steps"],
         ),
         tool(
             "sync_start",
@@ -356,7 +364,7 @@ async fn rpc_response(
                         .or_else(|| client.clone());
                     let enhanced = matches!(
                         kind.as_str(),
-                        "task.get" | "task.wait" | "exec.start" | "mcp.call"
+                        "task.get" | "task.wait" | "exec.start" | "mcp.call" | "desktop.sequence"
                     ) && crate::transfer::capable(&socket, &root, target.as_deref())
                         .await
                         .unwrap_or(false);

@@ -93,6 +93,10 @@ pub enum Control {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
+    NeedObjects {
+        objects: Vec<crate::sync_transfer::Offer>,
+        last: bool,
+    },
     ManifestMatch {
         matched: bool,
     },

@@ -210,6 +210,8 @@ impl Receiver {
         strict: bool,
     ) -> Outcome<Self> {
         fs::create_dir_all(root).map_err(err)?;
+        crate::retention::incoming(root, crate::model::now().saturating_sub(86_400_000))
+            .map_err(err)?;
         crate::workspace::invalidate(root).map_err(err)?;
         fs::create_dir_all(state).map_err(err)?;
         let old = read_manifest(&state.join("manifest.json"))?;

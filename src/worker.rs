@@ -224,16 +224,8 @@ async fn run_connection(
     loop {
         let attempt = async {
             connection.send_modify(|s|{s.state="connecting".into();s.checks=json!({"transport":false,"certificate":false,"authentication":false,"protocol":false});});
-            let address = tokio::time::timeout(
-                Duration::from_secs(5),
-                tokio::net::lookup_host(&state.opts.server),
-            )
-            .await??
-            .find(|a| a.is_ipv4())
-            .ok_or_else(|| anyhow::anyhow!("server has no IPv4 address"))?;
             let conn =
-                tokio::time::timeout(Duration::from_secs(5), endpoint.connect(address, "macrun")?)
-                    .await??;
+                crate::transport::connect(&endpoint, &state.opts.server, &state.opts.cert).await?;
             connection.send_modify(|s| {
                 s.checks["transport"] = json!(true);
                 s.checks["certificate"] = json!(true);
@@ -247,7 +239,7 @@ async fn run_connection(
     endpoint.close(0u32.into(), b"worker stopped");
     Ok(())
 }
-async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
+async fn session(conn: crate::transport::Connection, state: &Session) -> Result<()> {
     let Session {
         opts,
         token,
@@ -260,7 +252,7 @@ async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
     } = state;
     let (mut out, mut input) = conn.open_bi().await?;
     out.set_priority(10)?;
-    let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1","binary_transfer_v1","artifact_refs_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
+    let status = json!({"ready":true,"transport":conn.name(),"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1", "sync_delta_pack_v1","binary_transfer_v1","artifact_refs_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
     wire::send(
         &mut out,
         &Control::Hello {
@@ -289,7 +281,7 @@ async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
     connection.send_modify(|s| {
         s.state = "connected".into();
         s.since = now();
-        s.rtt_ms = Some(conn.rtt().as_millis() as u64);
+        s.rtt_ms = conn.rtt().map(|r| r.as_millis() as u64);
         s.error = None;
     });
     let mut rx = wire::read_channel::<_, Control>(input);
@@ -299,16 +291,16 @@ async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
         tokio::select! {
             m=rx.recv()=>{if let Control::Heartbeat{..}=m.ok_or_else(||anyhow::anyhow!("control closed"))?? {last=now();}},
             stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();let source=connection_id.to_owned();tokio::spawn(async move {if handle(out,input,c,o,e,lock,source).await.is_err(){crate::logging::event("worker", "request_error", json!({"reason":"request_decode_or_transport_failed"}));}});},
-            _=tick.tick()=>{connection.send_modify(|s|s.rtt_ms=Some(conn.rtt().as_millis() as u64));if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
+            _=tick.tick()=>{connection.send_modify(|s|s.rtt_ms=conn.rtt().map(|r|r.as_millis() as u64));if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
             _=conn.closed()=>break,
         }
     }
     Ok(())
 }
 async fn handle(
-    mut out: quinn::SendStream,
-    mut input: quinn::RecvStream,
-    conn: quinn::Connection,
+    mut out: crate::transport::SendStream,
+    mut input: crate::transport::RecvStream,
+    conn: crate::transport::Connection,
     opts: Options,
     engine: Arc<Engine>,
     lock: Arc<Mutex<()>>,
@@ -465,8 +457,8 @@ async fn handle(
 #[allow(clippy::too_many_arguments)]
 async fn receive_sync(
     task: &Task,
-    input: &mut quinn::RecvStream,
-    conn: &quinn::Connection,
+    input: &mut crate::transport::RecvStream,
+    conn: &crate::transport::Connection,
     opts: &Options,
     cancel: &CancellationToken,
     tx: &mpsc::Sender<Event>,
@@ -500,103 +492,137 @@ async fn receive_sync(
                 .map_err(sync_error)??,
             );
             let prepare_ms = before.elapsed().as_millis();
-            if streamed {
-                for paths in receiver.needed.chunks(256) {
+            let mut bytes = 0;
+            let mut files = 0;
+            let mut reused_bytes = 0;
+            let mut packs = 0;
+            if task.request.args["optimized_sync"] == true {
+                let r = receiver.clone();
+                let guard = lease.clone();
+                let offers = crate::wire::blocking(move || {
+                    let _guard = guard;
+                    crate::sync_transfer::offers(&r)
+                })
+                .await
+                .map_err(sync_error)?
+                .map_err(sync_error)?;
+                crate::sync_transfer::send_offers(tx, &offers)
+                    .await
+                    .map_err(sync_error)?;
+                let stats =
+                    crate::sync_transfer::receive(input, receiver.clone(), &offers, lease.clone())
+                        .await
+                        .map_err(sync_error)?;
+                bytes = stats.bytes;
+                files = stats.files;
+                reused_bytes = stats.reused_bytes;
+                packs = stats.packs;
+            } else {
+                if streamed {
+                    for paths in receiver.needed.chunks(256) {
+                        tx.send(Event::NeedPage {
+                            paths: paths.to_vec(),
+                            last: false,
+                        })
+                        .await
+                        .map_err(disconnected)?;
+                    }
                     tx.send(Event::NeedPage {
-                        paths: paths.to_vec(),
-                        last: false,
+                        paths: vec![],
+                        last: true,
+                    })
+                    .await
+                    .map_err(disconnected)?;
+                } else {
+                    tx.send(Event::Need {
+                        paths: receiver.needed.clone(),
                     })
                     .await
                     .map_err(disconnected)?;
                 }
-                tx.send(Event::NeedPage {
-                    paths: vec![],
-                    last: true,
-                })
-                .await
-                .map_err(disconnected)?;
-            } else {
-                tx.send(Event::Need {
-                    paths: receiver.needed.clone(),
-                })
-                .await
-                .map_err(disconnected)?;
-            }
-            let mut bytes = 0;
-            let mut files = 0;
-            engine
-                .external_progress(
-                    ident,
-                    json!({"received":0,"total":receiver.needed.len(),"bytes":0}),
-                )
-                .await
-                .map_err(sync_error)?;
-            let mut remaining: std::collections::BTreeSet<_> =
-                receiver.needed.iter().cloned().collect();
-            let mut progress_at = std::time::Instant::now();
-            while !remaining.is_empty() {
-                let mut uni = if streamed {
-                    None
-                } else {
-                    Some(conn.accept_uni().await.map_err(disconnected)?)
-                };
-                let stream = if let Some(s) = uni.as_mut() {
-                    s
-                } else {
-                    &mut *input
-                };
-                let h: FileHeader = wire::recv(stream).await.map_err(disconnected)?;
-                if h.job_id != task.job_id || !remaining.remove(&h.path) {
-                    return Err(Fault::new("sync_failed", "unexpected file stream"));
-                }
-                let Some(Entry::File { size, .. }) = receiver.manifest.entries.get(&h.path) else {
-                    return Err(Fault::new("sync_failed", "unexpected entry"));
-                };
-                if h.size != *size {
-                    return Err(Fault::new("sync_failed", "size mismatch"));
-                }
-                let tempdir = root.join(".macrun/incoming");
-                tokio::fs::create_dir_all(&tempdir)
+
+                engine
+                    .external_progress(
+                        ident,
+                        json!({"received":0,"total":receiver.needed.len(),"bytes":0}),
+                    )
                     .await
                     .map_err(sync_error)?;
-                let temp = tempdir.join(id());
-                let mut f = tokio::fs::File::create(&temp).await.map_err(sync_error)?;
-                let copied = tokio::io::copy(
-                    &mut tokio::io::AsyncReadExt::take(
-                        stream,
-                        if streamed { *size } else { size + 1 },
-                    ),
-                    &mut f,
-                )
-                .await
-                .map_err(sync_error)?;
-                f.flush().await.map_err(sync_error)?;
-                f.sync_all().await.map_err(sync_error)?;
-                drop(f);
-                if copied != *size {
-                    return Err(Fault::new("sync_failed", "truncated file"));
-                }
-                let installer = receiver.clone();
-                let guard = lease.clone();
-                crate::wire::blocking(move || {
-                    let _guard = guard;
-                    installer.install(&h.path, &temp)
-                })
-                .await
-                .map_err(sync_error)??;
-                bytes += copied;
-                files += 1;
-                if remaining.is_empty() || progress_at.elapsed() >= Duration::from_millis(250) {
-                    engine
+                let mut remaining: std::collections::BTreeSet<_> =
+                    receiver.needed.iter().cloned().collect();
+                let mut progress_at = std::time::Instant::now();
+                while !remaining.is_empty() {
+                    let mut uni = if streamed {
+                        None
+                    } else {
+                        Some(conn.accept_uni().await.map_err(disconnected)?)
+                    };
+                    let stream = if let Some(s) = uni.as_mut() {
+                        s
+                    } else {
+                        &mut *input
+                    };
+                    let h: FileHeader = wire::recv(stream).await.map_err(disconnected)?;
+                    if h.job_id != task.job_id || !remaining.remove(&h.path) {
+                        return Err(Fault::new("sync_failed", "unexpected file stream"));
+                    }
+                    let Some(Entry::File { size, .. }) = receiver.manifest.entries.get(&h.path)
+                    else {
+                        return Err(Fault::new("sync_failed", "unexpected entry"));
+                    };
+                    if h.size != *size {
+                        return Err(Fault::new("sync_failed", "size mismatch"));
+                    }
+                    let tempdir = root.join(".macrun/incoming");
+                    tokio::fs::create_dir_all(&tempdir)
+                        .await
+                        .map_err(sync_error)?;
+                    let temp = tempdir.join(id());
+                    let mut f = tokio::fs::File::create(&temp).await.map_err(sync_error)?;
+                    let copied = tokio::io::copy(
+                        &mut tokio::io::AsyncReadExt::take(
+                            stream,
+                            if streamed { *size } else { size + 1 },
+                        ),
+                        &mut f,
+                    )
+                    .await
+                    .map_err(sync_error)?;
+                    f.flush().await.map_err(sync_error)?;
+                    f.sync_all().await.map_err(sync_error)?;
+                    drop(f);
+                    if copied != *size {
+                        return Err(Fault::new("sync_failed", "truncated file"));
+                    }
+                    let installer = receiver.clone();
+                    let guard = lease.clone();
+                    crate::wire::blocking(move || {
+                        let _guard = guard;
+                        installer.install(&h.path, &temp)
+                    })
+                    .await
+                    .map_err(sync_error)??;
+                    bytes += copied;
+                    files += 1;
+                    if remaining.is_empty() || progress_at.elapsed() >= Duration::from_millis(250) {
+                        engine
                         .external_progress(
                             ident,
                             json!({"received":files,"total":receiver.needed.len(),"bytes":bytes}),
                         )
                         .await
                         .map_err(sync_error)?;
-                    progress_at = std::time::Instant::now();
+                        progress_at = std::time::Instant::now();
+                    }
                 }
             }
+            engine
+                .external_progress(
+                    ident,
+                    json!({"received":files,"total":receiver.needed.len(),"bytes":bytes}),
+                )
+                .await
+                .map_err(sync_error)?;
             let manifest = if streamed {
                 let Event::ConfirmManifest { digest } =
                     wire::recv(input).await.map_err(disconnected)?
@@ -625,7 +651,7 @@ async fn receive_sync(
             .await
             .map_err(sync_error)??;
             let generation = crate::workspace::generation(&root).map_err(sync_error)?;
-            detail(tx,json!({"generation":generation,"workspace_root":root,"sync":{"files":receiver.needed.len(),"bytes":bytes,"skipped":receiver.manifest.skipped,"prepare_ms":prepare_ms,"commit_ms":before.elapsed().as_millis()}})).await;
+            detail(tx,json!({"generation":generation,"workspace_root":root,"sync":{"files":receiver.needed.len(),"bytes":bytes,"reused_bytes":reused_bytes,"packs":packs,"skipped":receiver.manifest.skipped,"prepare_ms":prepare_ms,"commit_ms":before.elapsed().as_millis()}})).await;
             Ok(())
         };
         tokio::select! {result=operation=>result?,_=cancel.cancelled()=>return Err(Fault::new("cancelled","sync cancelled")),_=tokio::time::sleep(Duration::from_secs(task.project.sync_timeout_seconds))=>return Err(Fault::new("timed_out","sync timeout"))}

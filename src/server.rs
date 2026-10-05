@@ -14,7 +14,7 @@ use tokio::{
 };
 #[derive(Clone)]
 struct Peer {
-    connection: quinn::Connection,
+    connection: crate::transport::Connection,
     instance: String,
     status: Value,
     seen: u64,
@@ -35,6 +35,14 @@ struct State {
 }
 type Shared = Arc<Mutex<State>>;
 pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf) -> Result<()> {
+    serve_with_tcp(listen, socket, data, None).await
+}
+pub async fn serve_with_tcp(
+    listen: std::net::SocketAddr,
+    socket: PathBuf,
+    data: PathBuf,
+    tcp: Option<std::net::SocketAddr>,
+) -> Result<()> {
     let _lock = wire::lock(&data)?;
     let token = std::fs::read_to_string(data.join("token"))?
         .trim()
@@ -75,14 +83,31 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
     let endpoint = wire::server(listen, &data)?;
+    let tcp = if let Some(address) = tcp {
+        Some((
+            tokio::net::TcpListener::bind(address).await?,
+            crate::transport::acceptor(&data)?,
+        ))
+    } else {
+        None
+    };
     let state = Arc::new(Mutex::new(State::default()));
     crate::logging::event(
         "server",
         "listening",
         json!({"address":endpoint.local_addr()?.to_string(),"socket":socket}),
     );
+    let mut cleanup = tokio::time::interval(Duration::from_secs(3600));
     loop {
         tokio::select! {
+            _=cleanup.tick()=>{
+                let d=data.clone();
+                tokio::spawn(async move {let _=crate::wire::blocking(move||crate::retention::sync_jobs(&d,now().saturating_sub(30*86_400_000))).await;});
+            },
+            accepted=async{if let Some((listener,acceptor))=&tcp{let (stream,_)=listener.accept().await?;Ok::<_,anyhow::Error>((stream,acceptor.clone()))}else{std::future::pending().await}}=>{
+                let (stream,acceptor)=accepted?;let s=state.clone();let t=token.clone();let d=data.clone();
+                tokio::spawn(async move {let result=async{let conn=crate::transport::accept(stream,acceptor).await?;register_connection(conn,s,t,d).await}.await;if result.is_err(){crate::logging::event("server","tcp_connection_error",json!({"status":"failed"}));}});
+            },
             incoming=endpoint.accept()=>{if let Some(incoming)=incoming {let s=state.clone();let t=token.clone();let d=data.clone();tokio::spawn(async move {if register(incoming,s,t,d).await.is_err() {crate::logging::event("server", "connection_error", json!({"status":"failed"}));}});}},
             accepted=local.accept()=>{let (stream,_)=accepted?;let s=state.clone();let d=data.clone();tokio::spawn(async move {if handle_cli(stream,s,d).await.is_err(){crate::logging::event("server", "cli_error", json!({"status":"failed","reason":"request_decode_or_transport_failed"}));}});},
             _=tokio::signal::ctrl_c()=>break,
@@ -98,6 +123,14 @@ async fn register(
     data: PathBuf,
 ) -> Result<()> {
     let conn = tokio::time::timeout(Duration::from_secs(5), incoming).await??;
+    register_connection(crate::transport::Connection::Quic(conn), state, token, data).await
+}
+async fn register_connection(
+    conn: crate::transport::Connection,
+    state: Shared,
+    token: String,
+    data: PathBuf,
+) -> Result<()> {
     let (mut send, mut recv) =
         tokio::time::timeout(Duration::from_secs(5), conn.accept_bi()).await??;
     send.set_priority(10)?;
@@ -531,8 +564,8 @@ async fn execute(
     });
 }
 struct SyncStreams {
-    send: quinn::SendStream,
-    recv: quinn::RecvStream,
+    send: crate::transport::SendStream,
+    recv: crate::transport::RecvStream,
 }
 impl Drop for SyncStreams {
     fn drop(&mut self) {
@@ -565,6 +598,13 @@ async fn execute_inner(
         .as_array()
         .is_some_and(|c| c.iter().any(|v| v == "sync_stream_v1"));
     task.request.args["stream_sync"] = json!(streamed);
+    task.request.args["optimized_sync"] = json!(
+        streamed
+            && task.request.args["optimized_sync"] != false
+            && peer.status["capabilities"]
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v == "sync_delta_pack_v1"))
+    );
     if streamed {
         let manifest = task.manifest.take().unwrap_or_default();
         task.request.args["manifest_digest"] = json!(sync::digest(&manifest)?);
@@ -580,11 +620,36 @@ async fn execute_inner(
         wire::send(&mut send, task).await?;
     }
     let mut needed = Vec::new();
+    let mut objects = Vec::new();
+    let mut offer_bytes = 0usize;
     let mut phase = "dispatch".to_string();
     let mut phase_start = std::time::Instant::now();
     loop {
         let event: Event = wire::recv(&mut recv).await?;
         match event {
+            Event::NeedObjects {
+                objects: page,
+                last,
+            } if task.request.args["optimized_sync"] == true => {
+                offer_bytes += serde_json::to_vec(&page)?.len();
+                anyhow::ensure!(
+                    offer_bytes <= 64 * 1024 * 1024
+                        && objects.len() + page.len()
+                            <= task.manifest.as_ref().unwrap().entries.len(),
+                    "oversized delta plan"
+                );
+                objects.extend(page);
+                if last {
+                    crate::sync_transfer::send(
+                        &task.request.workspace,
+                        task.manifest.as_ref().unwrap(),
+                        &objects,
+                        send,
+                    )
+                    .await?;
+                    confirm_files(task, send).await?;
+                }
+            }
             Event::NeedPage { paths, last } if streamed => {
                 anyhow::ensure!(
                     needed.len() + paths.len() <= task.manifest.as_ref().unwrap().entries.len(),
@@ -627,9 +692,9 @@ async fn execute_inner(
 }
 async fn send_files(
     task: &Task,
-    conn: &quinn::Connection,
+    conn: &crate::transport::Connection,
     paths: &[String],
-    send: &mut quinn::SendStream,
+    send: &mut crate::transport::SendStream,
 ) -> Result<()> {
     let manifest = task
         .manifest
@@ -660,6 +725,13 @@ async fn send_files(
             return Err(Fault::new("source_changed", path).into());
         }
     }
+    confirm_files(task, send).await
+}
+async fn confirm_files(task: &Task, send: &mut crate::transport::SendStream) -> Result<()> {
+    let manifest = task
+        .manifest
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("missing manifest"))?;
     let root = task.request.workspace.clone();
     let exclude = task.project.exclude.clone();
     let strict = task.request.args["strict"] == true;

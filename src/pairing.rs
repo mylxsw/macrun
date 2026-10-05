@@ -89,13 +89,9 @@ pub fn authorized(data: &Path, token: &str) -> bool {
 pub async fn exchange(uri: &str, certificate_path: &Path) -> Result<(Invite, String)> {
     let (invite, cert) = parse(uri)?;
     wire::private_write(certificate_path, &cert)?;
-    let address = tokio::net::lookup_host(&invite.server)
-        .await?
-        .find(|a| a.is_ipv4())
-        .ok_or_else(|| anyhow::anyhow!("no IPv4 server address"))?;
     let endpoint = wire::client(certificate_path)?;
     let token = tokio::time::timeout(Duration::from_secs(12), async {
-        let conn = endpoint.connect(address, "macrun")?.await?;
+        let conn = crate::transport::connect(&endpoint, &invite.server, certificate_path).await?;
         let (mut out, mut input) = conn.open_bi().await?;
         wire::send(
             &mut out,

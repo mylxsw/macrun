@@ -93,6 +93,12 @@ fn redact_arguments(a: &Value) -> Value {
 }
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
+        for (backend, group) in &config.resource_groups {
+            anyhow::ensure!(
+                config.mcp.contains_key(backend) && !group.is_empty() && group.len() <= 128,
+                "invalid backend resource group"
+            );
+        }
         std::fs::create_dir_all(data.join("tasks"))?;
         let key_path = data.join("request-key");
         let key = if key_path.exists() {
@@ -198,7 +204,7 @@ impl Engine {
         if p.paused {
             return Err(crate::model::Fault::new("busy", "worker paused by local user").into());
         }
-        if kind == "mcp.call" && !p.desktop_enabled {
+        if matches!(kind, "mcp.call" | "desktop.sequence") && !p.desktop_enabled {
             return Err(crate::model::Fault::new(
                 "desktop_disabled",
                 "desktop control disabled by local user",
@@ -206,7 +212,9 @@ impl Engine {
             .into());
         }
         drop(p);
-        if kind == "mcp.call" && self.safety.lock().await.yield_until > now() {
+        if matches!(kind, "mcp.call" | "desktop.sequence")
+            && self.safety.lock().await.yield_until > now()
+        {
             return Err(crate::model::Fault::new(
                 "busy",
                 "desktop temporarily yielded to local input",
@@ -479,6 +487,7 @@ impl Engine {
             }
             *client = None;
         }
+        self.history.checkpoint().await?;
         Ok(())
     }
     pub async fn self_test(self: &Arc<Self>) -> Result<Value> {
@@ -502,33 +511,41 @@ impl Engine {
         let days = self.safety.lock().await.retention_days as u64;
         let cutoff = now().saturating_sub(days * 86_400_000);
         let mut removed = 0;
-        for entry in std::fs::read_dir(self.data.join("tasks"))? {
-            let dir = entry?.path();
-            let p = dir.join("result.json");
-            if let Ok(bytes) = std::fs::read(&p) {
-                let v: Value = serde_json::from_slice(&bytes)?;
-                if v["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
-                    let ident = string(&v, "task_id")?;
-                    uuid::Uuid::parse_str(ident)?;
-                    let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
-                    wire::persist(
-                        &self.data.join("dedup").join(format!("{ident}.json")),
-                        &tombstone,
-                    )
-                    .await?;
-                    std::fs::remove_dir_all(dir)?;
-                    removed += 1;
-                }
+        let mut transfers_removed = 0;
+        for record in self.history.records().await? {
+            let Some(ident) = record["task_id"].as_str() else {
+                continue;
+            };
+            let dir = self.directory(ident)?;
+            if record["kind"] == "file.upload" {
+                let path = dir.clone();
+                transfers_removed += crate::wire::blocking(move || {
+                    crate::retention::transfers(&path, now().saturating_sub(86_400_000))
+                })
+                .await?? as usize;
+            }
+            if record["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
+                let v: Value =
+                    serde_json::from_slice(&tokio::fs::read(dir.join("result.json")).await?)?;
+                let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
+                wire::persist(
+                    &self.data.join("dedup").join(format!("{ident}.json")),
+                    &tombstone,
+                )
+                .await?;
+                tokio::fs::remove_dir_all(dir).await?;
+                self.history.removed(ident);
+                removed += 1;
             }
         }
         self.changed();
-        Ok(json!({"removed":removed,"dedup_preserved":true}))
+        Ok(json!({"removed":removed,"transfers_removed":transfers_removed,"dedup_preserved":true}))
     }
     pub async fn local_snapshot(&self) -> Result<Value> {
-        let mut tasks = self.history.records().await?;
+        let tasks = self.history.shared_records().await?;
         let total = tasks.len();
         let mut task_counts: BTreeMap<String, usize> = BTreeMap::new();
-        for task in &tasks {
+        for task in tasks.iter() {
             *task_counts
                 .entry(task["status"].as_str().unwrap_or("unknown").into())
                 .or_default() += 1;
@@ -544,7 +561,7 @@ impl Engine {
         };
         let today = day(now());
         let mut summary: BTreeMap<String, u64> = BTreeMap::from([("total".into(), 0)]);
-        for t in &tasks {
+        for t in tasks.iter() {
             if day(t["started_at"].as_u64().unwrap_or(0)) == today {
                 *summary.entry("total".into()).or_default() += 1;
                 *summary
@@ -561,7 +578,7 @@ impl Engine {
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default();
-        for t in &tasks {
+        for t in tasks.iter() {
             if t["kind"] == "sync"
                 && let Some(root) = t["arguments"]["remote_root"].as_str()
             {
@@ -569,11 +586,11 @@ impl Engine {
             }
         }
         // Include all active tasks even when more than 200 newer tasks exist.
-        tasks = tasks
-            .into_iter()
+        let mut tasks: Vec<Value> = tasks
+            .iter()
             .enumerate()
             .filter(|(i, v)| *i < 200 || crate::history::active(v))
-            .map(|(_, v)| v)
+            .map(|(_, v)| v.clone())
             .collect();
         for v in &mut tasks {
             // Historical output is loaded with task_detail on demand. Only live
@@ -649,7 +666,7 @@ impl Engine {
     }
     pub async fn handle(self: &Arc<Self>, kind: &str, a: Value) -> Result<Value> {
         match kind {
-            "exec.start" | "mcp.call" => {
+            "exec.start" | "mcp.call" | "desktop.sequence" => {
                 let wait = a["wait_ms"].as_u64().unwrap_or(0).min(1000);
                 let refs = a["artifact_refs"] == true;
                 let mut args = a;
@@ -657,7 +674,7 @@ impl Engine {
                     object.remove("wait_ms");
                     object.remove("artifact_refs");
                 }
-                let value = self.submit(kind, args, false).await?;
+                let value = self.submit(kind, args, false, None).await?;
                 if wait == 0 {
                     return Ok(value);
                 }
@@ -726,7 +743,7 @@ impl Engine {
             "mcp.servers" => Ok(json!({"servers":self.config.mcp.keys().collect::<Vec<_>>()})),
             "mcp.tools" => {
                 let v = self
-                    .backend_request(&a, "tools/list", &CancellationToken::new())
+                    .backend_request(&a, "tools/list", &CancellationToken::new(), None)
                     .await?;
                 self.changed();
                 Ok(v)
@@ -778,9 +795,15 @@ impl Engine {
     /// Only this path may carry `local_observation`; it never waits for approval.
     pub async fn observe_locally(self: &Arc<Self>, mut a: Value) -> Result<Value> {
         a["local_observation"] = json!(true);
-        self.submit("mcp.call", a, true).await
+        self.submit("mcp.call", a, true, None).await
     }
-    async fn submit(self: &Arc<Self>, kind: &str, mut a: Value, local: bool) -> Result<Value> {
+    async fn submit(
+        self: &Arc<Self>,
+        kind: &str,
+        mut a: Value,
+        local: bool,
+        reservation: Option<Arc<crate::scheduler::Reservation>>,
+    ) -> Result<Value> {
         // Remote requests must not impersonate the local app: the flag skips
         // approval and hides the on-screen overlay.
         if !local && a.get("local_observation").is_some() {
@@ -802,7 +825,25 @@ impl Engine {
             }
         } else {
             let server = string(&a, "server")?;
-            string(&a, "tool")?;
+            if kind == "desktop.sequence" {
+                let steps = a["steps"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("steps required"))?;
+                anyhow::ensure!(
+                    !steps.is_empty() && steps.len() <= 16,
+                    "one to sixteen steps required"
+                );
+                string(&a, "session")?;
+                for step in steps {
+                    string(step, "tool")?;
+                    if let Some(expect) = step.get("expect") {
+                        string(expect, "pointer")?;
+                        anyhow::ensure!(expect.get("equals").is_some(), "expect.equals required");
+                    }
+                }
+            } else {
+                string(&a, "tool")?;
+            }
             if !self.backends.contains_key(server) {
                 bail!("unknown MCP server");
             }
@@ -842,6 +883,7 @@ impl Engine {
         let needs_approval = {
             let safety = self.safety.lock().await;
             match tier {
+                None if kind == "desktop.sequence" => false,
                 None => safety.approval_required(string(&a, "command")?),
                 Some(tier) => {
                     if safety.desktop.policy(tier) == "deny" {
@@ -926,8 +968,10 @@ impl Engine {
                 }
                 if kind == "exec.start" {
                     engine.command(&a, &dir, &cancel).await
+                } else if kind=="desktop.sequence" {
+                    engine.clone().run_sequence(a.clone(),ident.clone(),cancel.clone()).await
                 } else {
-                    engine.backend_request(&a, "tools/call", &cancel).await
+                    engine.backend_request(&a, "tools/call", &cancel, reservation.as_ref()).await
                 }
             }
             .await;
@@ -962,7 +1006,7 @@ impl Engine {
                     let text = e.to_string();
                     result["status"] = json!(if text.starts_with("denied:") {
                         "denied"
-                    } else if kind == "mcp.call"
+                    } else if matches!(kind.as_str(), "mcp.call" | "desktop.sequence")
                         && !text.starts_with("stale_session")
                         && !text.starts_with("desktop_disabled")
                         && !text.starts_with("cancelled before")
@@ -1030,13 +1074,42 @@ impl Engine {
             crate::workspace::resolve(&cwd)?.starts_with(crate::workspace::resolve(&root)?),
             "cwd is outside workspace_root"
         );
-        let _lease = crate::workspace::Lease::acquire(std::slice::from_ref(&root))?;
+        let mut lease = Some(Arc::new(crate::workspace::Lease::acquire(
+            std::slice::from_ref(&root),
+        )?));
         if let Some(expected) = a["generation"].as_str() {
             anyhow::ensure!(
                 crate::workspace::generation(&root).ok().as_deref() == Some(expected),
                 "stale_workspace: synchronize and use the returned generation"
             );
         }
+        let mut run_cwd = cwd.clone();
+        if a["snapshot"] == true {
+            let generation = crate::workspace::generation(&root)?;
+            let state = self.data.join("mirrors").join(
+                blake3::hash(root.to_string_lossy().as_bytes())
+                    .to_hex()
+                    .as_str(),
+            );
+            let source = root.clone();
+            let destination = dir.join("workspace");
+            let output = destination.clone();
+            let guard = lease.as_ref().unwrap().clone();
+            let relative = crate::workspace::resolve(&cwd)?
+                .strip_prefix(crate::workspace::resolve(&root)?)?
+                .to_path_buf();
+            crate::wire::blocking(move || {
+                let _guard = guard;
+                crate::snapshot::create(&source, &state, &destination, &generation)
+            })
+            .await??;
+            lease.take();
+            run_cwd = output.join(relative);
+            lease = Some(Arc::new(crate::workspace::Lease::acquire(
+                std::slice::from_ref(&output),
+            )?));
+        }
+        let _lease = lease;
         let env: BTreeMap<String, String> =
             serde_json::from_value(a.get("env").cloned().unwrap_or(json!({})))?;
         let (tx, mut rx) = mpsc::channel(64);
@@ -1054,7 +1127,7 @@ impl Engine {
         let r = process::run_command_until(
             "/bin/sh",
             &["-c".into(), string(a, "command")?.into()],
-            &expand(string(a, "cwd")?),
+            &run_cwd,
             &env,
             deadline,
             cancel,
@@ -1065,13 +1138,96 @@ impl Engine {
         .await;
         drop(tx);
         writer.await??;
-        Ok(json!({"exit_code":r?}))
+        Ok(json!({"exit_code":r?,"workspace":run_cwd,"snapshot":a["snapshot"]==true}))
+    }
+    fn run_sequence(
+        self: Arc<Self>,
+        args: Value,
+        parent: String,
+        cancel: CancellationToken,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send>> {
+        Box::pin(async move {
+            let server = string(&args, "server")?;
+            let group = self
+                .config
+                .resource_groups
+                .get(server)
+                .map(String::as_str)
+                .unwrap_or("desktop");
+            let deadline = tokio::time::Instant::now()
+                + Duration::from_secs(args["timeout_seconds"].as_u64().unwrap_or(120).min(600));
+            let guard = tokio::select! {
+                r=tokio::time::timeout_at(deadline,crate::scheduler::resource(group).lock_owned())=>r.map_err(|_|anyhow::anyhow!("timed_out waiting for sequence resource"))?,
+                _=cancel.cancelled()=>bail!("cancelled before sequence dispatch"),
+            };
+            let reserved = Arc::new(crate::scheduler::Reservation {
+                group: group.into(),
+                guard,
+            });
+            let mut results = Vec::new();
+            let mut last = json!({});
+            for (index, step) in args["steps"].as_array().unwrap().iter().enumerate() {
+                if cancel.is_cancelled() || tokio::time::Instant::now() >= deadline {
+                    bail!("sequence cancelled or timed_out before next step")
+                }
+                let hash = blake3::hash(format!("sequence:{parent}:{index}").as_bytes());
+                let request = uuid::Uuid::from_slice(&hash.as_bytes()[..16])?.to_string();
+                let child_args = json!({"server":server,"session":args["session"],"tool":step["tool"],"arguments":step.get("arguments").cloned().unwrap_or(json!({})),"request_id":request,"timeout_seconds":deadline.saturating_duration_since(tokio::time::Instant::now()).as_secs().max(1)});
+                let child = self
+                    .submit("mcp.call", child_args, false, Some(reserved.clone()))
+                    .await?;
+                let task = child["task_id"].clone();
+                let outcome = async {
+                    loop {
+                        let value = self
+                            .wait_task(json!({"task_id":task,"wait_ms":25000}))
+                            .await?;
+                        if value.get("ended_at").is_some() {
+                            return Ok::<_, anyhow::Error>(value);
+                        }
+                    }
+                };
+                let done = tokio::select! {
+                    value=tokio::time::timeout_at(deadline,outcome)=>value.unwrap_or_else(|_|Err(anyhow::anyhow!("sequence timed_out"))),
+                    _=cancel.cancelled()=>Err(anyhow::anyhow!("sequence cancelled")),
+                };
+                let done = match done {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = self.handle("task.cancel", json!({"task_id":task})).await;
+                        return Err(error);
+                    }
+                };
+                results.push(json!({"index":index,"task_id":task,"status":done["status"]}));
+                self.external_progress(&parent, json!({"steps":results}))
+                    .await?;
+                if done["status"] == "unknown" {
+                    bail!("sequence stopped: step {index} has unknown effects; task_id={task}");
+                }
+                if done["status"] != "succeeded" {
+                    return Ok(
+                        json!({"steps":results,"result":{"isError":true,"content":[{"type":"text","text":"sequence stopped after unsuccessful step"}]}}),
+                    );
+                }
+                last = done["result"]["result"].clone();
+                if let Some(expect) = step.get("expect") {
+                    let pointer = string(expect, "pointer")?;
+                    if last.pointer(pointer) != Some(&expect["equals"]) {
+                        return Ok(
+                            json!({"steps":results,"result":{"isError":true,"content":[{"type":"text","text":"sequence condition failed; remaining steps were not dispatched"}]}}),
+                        );
+                    }
+                }
+            }
+            Ok(json!({"steps":results,"result":last}))
+        })
     }
     async fn backend_request(
         &self,
         a: &Value,
         method: &str,
         cancel: &CancellationToken,
+        reservation: Option<&Arc<crate::scheduler::Reservation>>,
     ) -> Result<Value> {
         let stop_all = self.backend_stop.lock().await.clone();
         let name = string(a, "server")?;
@@ -1086,10 +1242,19 @@ impl Engine {
         );
         let deadline = tokio::time::Instant::now() + timeout;
         let queued_at = std::time::Instant::now();
-        static DESKTOP: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-        let _desktop = if method == "tools/call" {
+        let group = self
+            .config
+            .resource_groups
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or("desktop");
+        let resource = crate::scheduler::resource(group);
+        if let Some(reserved) = reservation {
+            anyhow::ensure!(reserved.group == group, "wrong reserved resource");
+        }
+        let _desktop = if method == "tools/call" && reservation.is_none() {
             Some(
-                tokio::select! {v=tokio::time::timeout_at(deadline,DESKTOP.get_or_init(||Mutex::new(())).lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for desktop"))?,_=cancel.cancelled()=>bail!("cancelled before desktop dispatch"),_=stop_all.cancelled()=>bail!("cancelled before desktop dispatch")},
+                tokio::select! {v=tokio::time::timeout_at(deadline,resource.lock_owned())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for desktop"))?,_=cancel.cancelled()=>bail!("cancelled before desktop dispatch"),_=stop_all.cancelled()=>bail!("cancelled before desktop dispatch")},
             )
         } else {
             None
@@ -1151,7 +1316,7 @@ impl Engine {
                 }
             }
             Ok::<Value, anyhow::Error>(
-                json!({"server":name,"session":c.generation,"result":result,"queue_ms":queue_ms}),
+                json!({"server":name,"session":c.generation,"result":result,"queue_ms":queue_ms,"resource_group":group}),
             )
         };
         let r = tokio::select! {v=tokio::time::timeout_at(deadline,operation)=>v.unwrap_or_else(|_|Err(anyhow::anyhow!("timed_out; backend session invalidated; effect may be unknown"))),_=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown")),_=stop_all.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown"))};

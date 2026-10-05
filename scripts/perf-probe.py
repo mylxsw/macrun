@@ -135,6 +135,9 @@ for line in sys.stdin:
             file.seek(1024)
             file.write(bytes([byte[0] ^ 1]))
         results["change_one_byte_of_64MiB"] = sync_once()
+        assert results["change_one_byte_of_64MiB"]["sync"]["bytes"] == 1024*1024
+        assert results["change_one_byte_of_64MiB"]["sync"]["reused_bytes"] == 63*1024*1024
+        assert results["small_1000x4KiB_first"]["sync"]["packs"] > 0
         assert (mirror / "large.bin").read_bytes() == (source / "large.bin").read_bytes()
 
         for operation, paths in [("download", [str(mirror / "large.bin"), str(root / "download.bin")]),

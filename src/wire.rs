@@ -89,6 +89,9 @@ pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let temp = path.with_extension("tmp");
     private_write(&temp, &serde_json::to_vec_pretty(value)?)?;
     std::fs::rename(temp, path)?;
+    if path.file_name().is_some_and(|n| n == "result.json") {
+        crate::history::record_written(path, &serde_json::to_value(value)?);
+    }
     Ok(())
 }
 

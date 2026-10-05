@@ -41,12 +41,15 @@ enum Cmd {
     Serve {
         #[arg(long, default_value = "0.0.0.0:7443")]
         listen: std::net::SocketAddr,
+        /// Opt-in TLS/Yamux listener for TCP-only networks.
+        #[arg(long)]
+        tcp_listen: Option<std::net::SocketAddr>,
         #[arg(long)]
         data: PathBuf,
     },
     Worker {
         #[arg(long, required_unless_present = "connections")]
-        server: Option<std::net::SocketAddr>,
+        server: Option<String>,
         #[arg(long, required_unless_present = "connections")]
         cert: Option<PathBuf>,
         #[arg(long, required_unless_present = "connections")]
@@ -84,6 +87,8 @@ enum Cmd {
         workspace_root: Option<String>,
         #[arg(long)]
         generation: Option<String>,
+        #[arg(long)]
+        snapshot: bool,
         #[arg(long, default_value_t = 0)]
         wait_ms: u64,
         #[arg(long)]
@@ -111,6 +116,9 @@ enum Cmd {
         interval_ms: u64,
     },
     Download {
+        /// Keep a verified partial file and resume against the same remote version.
+        #[arg(long)]
+        resume: bool,
         remote: String,
         local: PathBuf,
     },
@@ -142,8 +150,12 @@ async fn entry() -> anyhow::Result<()> {
             println!("Created identity: {}", data.display());
             return Ok(());
         }
-        Cmd::Serve { listen, data } => {
-            return macrun::server::serve(listen, cli.socket, data).await;
+        Cmd::Serve {
+            listen,
+            tcp_listen,
+            data,
+        } => {
+            return macrun::server::serve_with_tcp(listen, cli.socket, data, tcp_listen).await;
         }
         Cmd::Worker {
             server,
@@ -205,13 +217,14 @@ async fn entry() -> anyhow::Result<()> {
             cwd,
             workspace_root,
             generation,
+            snapshot,
             wait_ms,
             request_id,
             timeout,
             command,
         } => (
             "exec.start".into(),
-            json!({"cwd":cwd,"workspace_root":workspace_root,"generation":generation,"wait_ms":wait_ms,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
+            json!({"cwd":cwd,"workspace_root":workspace_root,"generation":generation,"snapshot":snapshot,"wait_ms":wait_ms,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
         ),
         Cmd::Task { task_id, offset } => (
             "task.get".into(),
@@ -290,7 +303,27 @@ async fn entry() -> anyhow::Result<()> {
                 tokio::select! {_=tokio::time::sleep(Duration::from_millis(interval_ms))=>{},_=tokio::signal::ctrl_c()=>return Ok(())}
             }
         }
-        Cmd::Download { remote, local } => {
+        Cmd::Download {
+            remote,
+            local,
+            resume,
+        } => {
+            if resume {
+                anyhow::ensure!(
+                    macrun::transfer::capable(&cli.socket, &root, cli.client.as_deref()).await?,
+                    "download resume requires binary-transfer peers"
+                );
+                macrun::transfer::download_resumable(
+                    &cli.socket,
+                    &root,
+                    &remote,
+                    &local,
+                    cli.client.as_deref(),
+                )
+                .await?;
+                println!("{}", local.display());
+                return Ok(());
+            }
             if macrun::transfer::capable(&cli.socket, &root, cli.client.as_deref()).await? {
                 let temp = local.with_extension(format!("{}.part", id()));
                 let mut file = tokio::fs::File::create(&temp).await?;
