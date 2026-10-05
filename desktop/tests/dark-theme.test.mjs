@@ -35,3 +35,7 @@ test("generated stylesheet is current and leaves the terminal dark", () => {
   assert.doesNotMatch(css, /\.term\b/);
   assert.doesNotMatch(css, /overlay/);
 });
+
+test("enabled switches keep their green fill in dark mode", () => {
+  assert.match(build(), /\.switch:checked \{ background: #1f9d5c; \}/);
+});

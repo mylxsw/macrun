@@ -707,13 +707,13 @@ function App() {
     <div className="layout">
       <aside className="sidebar">
         <div className="drag" data-tauri-drag-region />
-        <div className="brand">
-          <div className="logo">
-            <Terminal size={19} />
+        <div className="brand" data-tauri-drag-region>
+          <div className="logo" data-tauri-drag-region>
+            <Terminal size={19} style={{ pointerEvents: "none" }} />
           </div>
           <div>
-            <b>Macrun</b>
-            <small>
+            <b data-tauri-drag-region>Macrun</b>
+            <small data-tauri-drag-region>
               执行器 · {snapshot ? `v${snapshot.version}` : "未启动"}
             </small>
           </div>

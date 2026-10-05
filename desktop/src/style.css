@@ -126,6 +126,8 @@ kbd {
   height: 100vh;
 }
 .drag {
+  user-select: none;
+  -webkit-user-select: none;
   height: 32px;
 }
 .brand {
@@ -613,7 +615,7 @@ dd {
   margin: 0;
 }
 .switch:checked {
-  background: #1a1a19;
+  background: #1f9d5c;
 }
 .switch:before {
   content: "";
@@ -1041,9 +1043,9 @@ a:focus-visible {
 .tray-connection {
   margin: 2px 4px 6px !important;
 }
-.transparent-surface,
-.transparent-surface body,
-.transparent-surface #root {
+:root.transparent-surface,
+:root.transparent-surface body,
+:root.transparent-surface #root {
   background: transparent;
 }
 .overlay-shell {
@@ -1172,4 +1174,10 @@ a:focus-visible {
 .sync-title-button:hover {
   color: #2f5bea;
   background: transparent;
+}
+
+/* Brand area is a drag handle; navigation controls remain interactive. */
+.brand, .brand * {
+  user-select: none;
+  -webkit-user-select: none;
 }

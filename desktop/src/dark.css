@@ -43,7 +43,7 @@
   .task-list button.selected { background: #1d2543; }
   .soft { background: #393929; }
   .switch { background: #51514e; }
-  .switch:checked { background: #e7e7e7; }
+  .switch:checked { background: #1f9d5c; }
   .amber { color: #ffbf61; }
   kbd { border: 1px solid #474744; background: #393929; }
   .field input { border: 1px solid #474744; }

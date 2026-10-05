@@ -139,17 +139,29 @@ fn tray_image(state: tray::TrayState) -> tauri::image::Image<'static> {
 }
 
 fn tray_status(app: &tauri::AppHandle, v: &Value) {
-    let state = tray::TrayState::from_snapshot(v);
-    if let Some(icon) = app.tray_by_id("macrun") {
-        // Set the template flag together with the image so macOS tints calm
-        // states for the menu bar and leaves coloured capsules untouched.
-        let _ = icon.set_icon(Some(tray_image(state)));
-        let _ = icon.set_icon_as_template(state.template());
-        let count = tray::approval_count(v);
-        let _ = icon.set_title((count > 0).then(|| count.to_string()));
-        let _ = icon.set_tooltip(Some(format!("Macrun · {}", state.label())));
+    let next = tray::Presentation::from_snapshot(v);
+    let cache = app.state::<Mutex<Option<tray::Presentation>>>();
+    let mut previous = cache.lock().unwrap();
+    let Some(icon) = app.tray_by_id("macrun") else {
+        return;
+    };
+    if previous.as_ref().map(|p| p.state) != Some(next.state) {
+        // A separate set_icon + set_icon_as_template briefly displays a black
+        // non-template image. Update both together, only when the state changes.
+        if icon
+            .set_icon_with_as_template(Some(tray_image(next.state)), next.state.template())
+            .is_err()
+        {
+            return;
+        }
+        let _ = icon.set_tooltip(Some(format!("Macrun · {}", next.state.label())));
     }
+    if previous.as_ref().map(|p| p.approvals) != Some(next.approvals) {
+        let _ = icon.set_title((next.approvals > 0).then(|| next.approvals.to_string()));
+    }
+    *previous = Some(next);
 }
+
 fn overlay_visible(app: &tauri::AppHandle, visible: bool) {
     for (label, w) in app.webview_windows() {
         if label == "overlay" || label.starts_with("border-") {
@@ -936,6 +948,7 @@ fn main() {
                 migrating: AtomicBool::new(false),
                 window_layout: Mutex::new(WindowLayout::default()),
             });
+            app.manage(Mutex::new(None::<tray::Presentation>));
             let handle = app.handle().clone();
             app.global_shortcut().register("Control+Alt+Super+Period")?;
             tauri::tray::TrayIconBuilder::with_id("macrun")
@@ -958,6 +971,7 @@ fn main() {
                 tauri::WebviewUrl::App("index.html?tray=1".into()),
             )
             .title("Macrun · 菜单栏")
+            .shadow(false)
             .inner_size(352., 510.)
             .resizable(false)
             .decorations(false)

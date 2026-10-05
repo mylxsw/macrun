@@ -1,0 +1,6 @@
+{
+  "identifier": "main-window-drag",
+  "description": "Allow the main window title and brand regions to move the window",
+  "windows": ["main"],
+  "permissions": ["core:window:allow-start-dragging"]
+}
