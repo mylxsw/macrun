@@ -227,7 +227,7 @@ test("invalid observation JSON never dispatches a backend action", async () => {
         backends: [{ name: "fixture", state: "running", command: "/fixture" }],
       }}
       act={act}
-      read={act}
+      read={(command, args) => command === "cua_status" ? Promise.resolve({ state: "missing" }) : act(command, args)}
       app={null}
       mode="advanced"
     />,

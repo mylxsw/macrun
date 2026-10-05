@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod connection_check;
+mod cua_driver;
 mod migration;
 mod native;
 #[cfg(target_os = "macos")]
@@ -878,6 +880,7 @@ async fn pair(
         let cert=rt.data.join(format!("paired-{}.der",uuid::Uuid::new_v4()));
         let (invite,token)=macrun::pairing::exchange(&uri,&cert).await?;
         let account=uuid::Uuid::new_v4().to_string();
+        let connection_id=if add==Some(true) && !original.server.is_empty() {account.clone()} else {"primary".into()};
         security_framework::passwords::set_generic_password("dev.macrun.desktop",&account,token.as_bytes()).map_err(|_|anyhow::anyhow!("钥匙串写入失败，请检查系统授权并生成新邀请"))?;
         let _guard=configuration_edit_guard(&rt)?;
         let mut current=rt.settings.lock().unwrap();
@@ -890,7 +893,7 @@ async fn pair(
         }
         wire::atomic_json(&rt.data.join("connection.json"),&settings)?;
         *current=settings;
-        Ok(json!({"fingerprint":invite.fingerprint,"protocol":invite.protocol,"credentials":"keychain"}))
+        Ok(json!({"fingerprint":invite.fingerprint,"protocol":invite.protocol,"credentials":"keychain","connection_id":connection_id}))
     }.await;
     result.map_err(|e| e.to_string())
 }
@@ -1125,6 +1128,10 @@ fn main() {
             native::save_backends,
             native::diagnostics,
             native::connection_check,
+            cua_driver::cua_status,
+            cua_driver::install_cua_driver,
+            cua_driver::configure_cua_driver,
+            cua_driver::grant_cua_permissions,
             native::migrate_legacy,
             start_worker,
             control,

@@ -28,6 +28,7 @@ import {
   projectOf,
 } from "./model.mjs";
 import "./features.css";
+import { CuaSetup } from "./CuaSetup";
 import appIcon from "./assets/macrun-icon.png";
 export type Act = (
   c: string,
@@ -248,10 +249,10 @@ export function Pairing({
       setPending(false);
     }
   };
-  const checkConnection = async () => {
-    const checks = await act("connection_check");
+  const checkConnection = async (connectionId = result?.connection_id) => {
+    const checks = await act("connection_check", { connectionId });
     if (checks) setResult((v: any) => ({ ...v, ...checks }));
-    else setError("暂时无法完成检查，请稍后重试。");
+    else setError("配对已保存，暂时无法完成连接检查，请稍后重试。");
   };
   const finish = async (route: "desktop" | "main") => {
     if (route === "main") {
@@ -370,7 +371,7 @@ export function Pairing({
                       );
                       return;
                     }
-                    await checkConnection();
+                    await checkConnection(paired.connection_id);
                   })
                 }
               >
@@ -382,7 +383,7 @@ export function Pairing({
           <>
             <h1>检查连接</h1>
             <p className="pairing-intro">
-              逐项检查，任何一步失败都会说明原因和下一步怎么做。
+              配对已保存。正在等待执行器启动和服务器握手，连接超时后可重试，无需重新配对。
             </p>
             <div className="card pairing-checks">
               <div className="feature-line">
@@ -412,6 +413,7 @@ export function Pairing({
                 <small className="mono wrap">{result?.fingerprint}</small>
               </div>
             </div>
+            {pending && <p role="status">正在等待连接就绪…</p>}
             {(result?.error || error) && (
               <p className="error-text" role="alert">
                 {result?.error || error}
@@ -420,7 +422,19 @@ export function Pairing({
             <div className="actions pairing-check-actions">
               <button
                 disabled={pending}
-                onClick={() => perform(checkConnection)}
+                onClick={() =>
+                  perform(async () => {
+                    setResult((v: any) => ({ ...v, checks: [], error: "" }));
+                    if (!running) {
+                      const started = await act("start_worker");
+                      if (started === undefined) {
+                        setError("配对已保存，但执行器尚未启动。请重试连接。");
+                        return;
+                      }
+                    }
+                    await checkConnection();
+                  })
+                }
               >
                 重新检查
               </button>
@@ -477,39 +491,7 @@ export function Pairing({
             <p className="pairing-intro">
               需要让 Agent 截图、点击应用时再开启。跳过不影响命令和文件。
             </p>
-            <div className="card">
-              <div className="feature-line">
-                <Monitor size={17} />
-                <div className="grow">
-                  <b>computer-use 工具</b>
-                  <small>在桌面控制页添加本机 MCP 后端，并实拍验证。</small>
-                </div>
-              </div>
-              <div className="feature-line">
-                <div className="grow">
-                  <b>辅助功能</b>
-                  <small>后端需要授权后才能点击和输入。</small>
-                </div>
-                <button
-                  onClick={() =>
-                    act("open_permission", { kind: "accessibility" })
-                  }
-                >
-                  打开系统设置
-                </button>
-              </div>
-              <div className="feature-line">
-                <div className="grow">
-                  <b>屏幕录制</b>
-                  <small>通过后端实拍验证，不只看权限标记。</small>
-                </div>
-                <button
-                  onClick={() => act("open_permission", { kind: "screen" })}
-                >
-                  打开系统设置
-                </button>
-              </div>
-            </div>
+            <CuaSetup act={act} />
             {error && (
               <p className="error-text" role="alert">
                 {error}
@@ -1491,6 +1473,7 @@ export function BackendPanel({
       )}
       {mode !== "permissions" && (
         <div className="backend-advanced">
+          <CuaSetup act={act} read={read} />
           <details className="feature-disclosure card">
             <summary>后端实拍与状态核对</summary>
             <div className="feature-disclosure-body">
