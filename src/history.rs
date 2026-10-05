@@ -35,12 +35,26 @@ struct Query {
     cursor: Option<Cursor>,
 }
 
-/// Filter groups: "active" is still running or waiting; "attention" needs a human look.
-fn status_matches(filter: &str, status: &str) -> bool {
+/// A command that ran and exited non-zero. The agent reads the exit code and
+/// decides what to do, so this is the agent's result rather than a Macrun fault.
+pub fn exited_nonzero(task: &Value) -> bool {
+    task["status"] == "failed"
+        && task["error"].is_null()
+        && task["result"]["exit_code"]
+            .as_i64()
+            .is_some_and(|code| code != 0)
+}
+
+/// Filter groups: "active" is still running or waiting; "attention" needs a
+/// human look and leaves out commands that merely exited non-zero.
+fn status_matches(filter: &str, task: &Value) -> bool {
+    let status = task["status"].as_str().unwrap_or("unknown");
     match filter {
         "" | "all" => true,
         "active" => matches!(status, "accepted" | "running" | "awaiting_approval"),
-        "attention" => matches!(status, "failed" | "timed_out" | "unknown" | "denied"),
+        "attention" => {
+            matches!(status, "failed" | "timed_out" | "unknown" | "denied") && !exited_nonzero(task)
+        }
         _ => status == filter,
     }
 }
@@ -201,7 +215,12 @@ impl TaskHistory {
             }
             let status = task["status"].as_str().unwrap_or("unknown");
             *counts.entry(status.to_owned()).or_default() += 1;
-            if status_matches(&query.status, status) {
+            // "exited" is a subset of "failed", not another status: clients
+            // subtract it from the attention group instead of adding it to totals.
+            if exited_nonzero(&task) {
+                *counts.entry("exited".to_owned()).or_default() += 1;
+            }
+            if status_matches(&query.status, &task) {
                 matches.push(task);
             }
         }
@@ -225,9 +244,6 @@ impl TaskHistory {
         } else {
             None
         };
-        for row in &mut rows {
-            row.as_object_mut().unwrap().remove("result");
-        }
         Ok(
             json!({"tasks":rows,"total":total,"filtered_total":filtered_total,"counts":counts,"next_cursor":next_cursor}),
         )

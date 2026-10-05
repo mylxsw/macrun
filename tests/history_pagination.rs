@@ -245,3 +245,69 @@ async fn status_groups_cover_active_and_attention_records() {
     assert_eq!(active["filtered_total"], 1);
     assert_eq!(active["tasks"][0]["status"], "awaiting_approval");
 }
+
+#[tokio::test]
+async fn attention_leaves_out_commands_that_only_exited_non_zero() {
+    let data = tempfile::tempdir().unwrap();
+    let engine = Engine::open(data.path().into(), WorkerConfig::default()).unwrap();
+    let now = model::now();
+    let write = |i: u128, task: Value| {
+        let id = uuid::Uuid::from_u128(i).to_string();
+        let mut task = task;
+        task["task_id"] = json!(id);
+        task["kind"] = json!("exec.start");
+        task["started_at"] = json!(now - i as u64);
+        task["ended_at"] = json!(now - i as u64 + 1);
+        task["arguments"] = json!({"command":"grep missing file","cwd":"/work"});
+        wire::atomic_json(
+            &data.path().join("tasks").join(&id).join("result.json"),
+            &task,
+        )
+        .unwrap();
+        id
+    };
+    let exited = write(1, json!({"status":"failed","result":{"exit_code":1}}));
+    let broken = write(
+        2,
+        json!({"status":"failed","error":{"message":"spawn failed"}}),
+    );
+    let timed_out = write(
+        3,
+        json!({"status":"timed_out","error":{"message":"timed_out"}}),
+    );
+    write(4, json!({"status":"succeeded","result":{"exit_code":0}}));
+
+    let attention = engine
+        .local_task_list(json!({"status":"attention"}))
+        .await
+        .unwrap();
+    let ids: BTreeSet<_> = attention["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["task_id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids, BTreeSet::from([broken.clone(), timed_out]));
+    assert_eq!(attention["filtered_total"], 2);
+    assert_eq!(attention["counts"]["failed"], 2);
+    assert_eq!(attention["counts"]["exited"], 1);
+
+    // The plain status filter still returns every failed record, and rows keep
+    // the exit code so the client can label them without a detail read.
+    let failed = engine
+        .local_task_list(json!({"status":"failed"}))
+        .await
+        .unwrap();
+    assert_eq!(failed["filtered_total"], 2);
+    let row = failed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["task_id"] == exited)
+        .unwrap();
+    assert_eq!(row["result"], json!({"exit_code":1}));
+
+    let snapshot = engine.local_snapshot().await.unwrap();
+    assert_eq!(snapshot["today_summary"]["failed"], 2);
+    assert_eq!(snapshot["today_summary"]["exited"], 1);
+}

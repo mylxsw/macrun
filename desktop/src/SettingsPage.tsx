@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
-import { SafetyPanel, type Act } from "./Features";
+import { PruneButton, type Act } from "./Features";
 import type { AppState, Settings, Snapshot } from "./types";
 const emptySettings: Settings = {
   server: "",
@@ -92,12 +92,12 @@ export function SettingsPage({
   return (
     <div className="settings-page">
       <header>
-        <h1>设置与安全</h1>
+        <h1>设置</h1>
         <nav className="settings-subnav" aria-label="设置分区">
           {[
-            ["safety", "安全边界"],
             ["conn", "连接"],
             ["general", "通用"],
+            ["records", "记录"],
             ["diag", "诊断"],
           ].map(([id, label]) => (
             <a
@@ -145,21 +145,6 @@ export function SettingsPage({
           </button>
         </section>
       )}
-      <section className="settings-section" id="safety">
-        <div>
-          <h2>安全边界</h2>
-          <p className="muted">
-            远程 Agent 拥有和你一样的用户权限。这些规则在执行器内生效，Shell
-            仍可使用本机用户权限。
-          </p>
-        </div>
-        <SafetyPanel
-          snapshot={snapshot}
-          act={act}
-          disabled={busy || !available}
-          includeRetention={false}
-        />
-      </section>
       <section className="settings-section" id="conn" ref={connection}>
         <h2 ref={connectionHeading} tabIndex={-1}>
           连接
@@ -465,6 +450,24 @@ export function SettingsPage({
               onChange={(e) => pref("notifications", e.target.checked)}
             />
           </label>
+          <label className="feature-line">
+            <div className="grow">
+              <b>应用启动时自动连接</b>
+              <small>使用已保存的连接配置启动执行器。</small>
+            </div>
+            <input
+              type="checkbox"
+              className="switch"
+              checked={app?.preferences.auto_connect || false}
+              disabled={busy || !app}
+              onChange={(e) => pref("auto_connect", e.target.checked)}
+            />
+          </label>
+        </div>
+      </section>
+      <section className="settings-section" id="records">
+        <h2>记录</h2>
+        <div className="card">
           <div className="feature-line">
             <div className="grow">
               <b>任务记录保留</b>
@@ -495,19 +498,12 @@ export function SettingsPage({
               ))}
             </div>
           </div>
-          <label className="feature-line">
-            <div className="grow">
-              <b>应用启动时自动连接</b>
-              <small>使用已保存的连接配置启动执行器。</small>
-            </div>
-            <input
-              type="checkbox"
-              className="switch"
-              checked={app?.preferences.auto_connect || false}
-              disabled={busy || !app}
-              onChange={(e) => pref("auto_connect", e.target.checked)}
-            />
-          </label>
+          <div className="feature-line feature-shaded">
+            <small className="grow">
+              启动时和每小时自动清理过期记录；也可以现在清理。去重编号会保留，过期任务不会再次执行。
+            </small>
+            <PruneButton act={act} disabled={busy || !available} />
+          </div>
         </div>
       </section>
       <section className="settings-section" id="diag">

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v4 · 活动</title>
+<link rel="stylesheet" href="v4.css">
+<link rel="stylesheet" href="window.css">
+<script>if (location.hash.includes("light")) document.documentElement.classList.add("light");
+if (location.hash.includes("clean")) document.documentElement.classList.add("clean");</script>
+<style>
+.clean .anno { display: none; }
+.content { display: grid; grid-template-columns: 430px minmax(0, 1fr); gap: 0; padding: 0; }
+.list { border-right: .5px solid var(--line); overflow: hidden; padding: 12px 0; }
+.day { padding: 8px 18px 4px; }
+.sess { margin: 2px 10px; border-radius: 8px; }
+.sess-head { display: flex; align-items: center; gap: 9px; padding: 8px 10px; }
+.sess-head b { font-size: 13px; font-weight: 600; }
+.sess-head .meta { font-size: 11.5px; color: var(--faint); }
+.sess.open { background: var(--bg-raised); border: .5px solid var(--line); }
+.rows > div { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 10px 0 12px; font-size: 12px; border-top: .5px solid var(--line); }
+.rows .t { width: 36px; color: var(--faint); font-size: 11.5px; }
+.rows .mono { font-size: 11.5px; }
+.rows .d { width: 34px; text-align: right; color: var(--faint); font-size: 11.5px; }
+.rows .sel { background: var(--run-bg); }
+.st { width: 14px; display: grid; place-items: center; flex: none; }
+.detail { padding: 18px 24px; overflow: hidden; }
+.detail > h2 { font: 600 17px var(--mono); margin-top: 8px; }
+.kv { display: grid; grid-template-columns: 78px 1fr; gap: 6px 12px; font-size: 12.5px; margin-top: 14px; }
+.kv span:nth-child(odd) { color: var(--muted); }
+.explain { margin-top: 16px; border-radius: 10px; border: .5px solid var(--line); background: var(--bg-raised); display: grid; grid-template-columns: repeat(3, 1fr); }
+.explain > div { padding: 11px 13px; font-size: 12px; color: var(--muted); }
+.explain > div + div { border-left: .5px solid var(--line); }
+.explain b { display: block; color: var(--text); font-size: 12.5px; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <nav>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg>概览</a>
+      <a class="on"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.5V8l2.5 1.5"/></svg>活动</a>
+      <a><svg class="i" viewBox="0 0 16 16"><path d="M8 1.5l5.5 2v4c0 3.5-2.5 6-5.5 7-3-1-5.5-3.5-5.5-7v-4z"/></svg>权限</a>
+      <a><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="7.5" rx="1"/><path d="M1 13h14"/></svg>本机<span class="badge">1 项</span></a>
+    </nav>
+    <div class="side-foot">
+      <a><span class="dot ok"></span><span class="grow">gulu-server</span><span class="mono faint" style="font-size:11px">232 ms</span></a>
+      <a><span class="dot ok"></span><span class="grow">dev-box</span><span class="mono faint" style="font-size:11px">41 ms</span></a>
+      <a><svg class="i sm" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>设置</a>
+    </div>
+  </aside>
+  <main>
+    <header class="tb">
+      <h1>活动</h1>
+      <span class="seg"><span class="on">全部</span><span>需要关注 <b style="color:var(--warn)">2</b></span><span>桌面</span></span>
+      <span class="seg"><span class="on">所有服务器</span><span>gulu-server</span><span>dev-box</span></span>
+      <span class="grow"></span>
+      <span class="row" style="width:260px;height:28px;border-radius:7px;background:var(--seg);padding:0 9px;color:var(--faint);font-size:12.5px"><svg class="i sm" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>项目、命令、目录或任务编号</span>
+    </header>
+    <div class="content">
+      <div class="list">
+        <div class="day label">今天 · 46 个任务</div>
+
+        <div class="sess open">
+          <div class="sess-head">
+            <span class="spin"></span>
+            <div class="grow"><b>typeflux</b> <span class="faint" style="font-size:12px">gul207 · gulu-server</span>
+              <div class="meta">12:39 开始 · 14 个任务 · 进行中</div></div>
+            <span class="chip run">进行中</span>
+          </div>
+          <div class="rows">
+            <div><span class="t num">13:00</span><span class="st"><span class="spin" style="width:11px;height:11px"></span></span><span class="mono grow ell">swift build → swift test</span><span class="d num">5:56</span></div>
+            <div><span class="t num">12:57</span><span class="st"><svg class="i sm" viewBox="0 0 16 16" style="color:var(--faint)"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="grow ell">同步 142 个文件</span><span class="d num">0:01</span></div>
+            <div class="sel"><span class="t num">12:53</span><span class="st"><svg class="i sm" viewBox="0 0 16 16" style="color:var(--faint)"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="mono grow ell">swift test --enable-code-coverage</span><span class="d num">0:36</span></div>
+            <div><span class="t num">12:52</span><span class="st"><span class="chip" style="font-size:10px;line-height:14px;padding:0 4px">1</span></span><span class="mono grow ell">ls .build/out/Products/Debug | head</span><span class="d num">0:00</span></div>
+            <div><span class="t num">12:52</span><span class="st"><svg class="i sm" viewBox="0 0 16 16" style="color:var(--faint)"><path d="M3.5 8.5l3 3 6-7"/></svg></span><span class="mono grow ell">P=$PWD; TB=… <span class="faint">(cp, codesign)</span></span><span class="d num">0:00</span></div>
+            <div style="color:var(--faint)"><span class="t"></span><span class="st"></span><span class="grow">还有 9 个任务 · 展开</span></div>
+          </div>
+        </div>
+
+        <div class="sess">
+          <div class="sess-head">
+            <svg class="i" viewBox="0 0 16 16" style="color:var(--act)"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg>
+            <div class="grow"><b>桌面操作</b> <span class="faint" style="font-size:12px">dev-box · computer</span>
+              <div class="meta">12:41 – 现在 · 12 次 · Xcode、模拟器</div></div>
+            <span class="chip act">操作中</span>
+          </div>
+        </div>
+        <div class="sess">
+          <div class="sess-head">
+            <svg class="i" viewBox="0 0 16 16" style="color:var(--muted)"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>
+            <div class="grow"><b>typeflux-api</b> <span class="faint" style="font-size:12px">gul206 · gulu-server</span>
+              <div class="meta">10:58 – 11:11 · 11 个任务</div></div>
+            <span class="faint" style="font-size:12px">完成</span>
+          </div>
+        </div>
+        <div class="sess">
+          <div class="sess-head">
+            <svg class="i" viewBox="0 0 16 16" style="color:var(--muted)"><path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/></svg>
+            <div class="grow"><b>typeflux-baseline</b> <span class="faint" style="font-size:12px">gul206 · gulu-server</span>
+              <div class="meta">10:40 – 11:23 · 9 个任务</div></div>
+            <span class="faint" style="font-size:12px">完成</span>
+          </div>
+        </div>
+
+        <div class="day label" style="margin-top:8px">昨天 · 212 个任务</div>
+        <div class="sess">
+          <div class="sess-head">
+            <svg class="i" viewBox="0 0 16 16" style="color:var(--warn)"><path d="M8 2l6.5 11.5h-13z M8 6.5v3 M8 11.5h.01"/></svg>
+            <div class="grow"><b>gul-199-ios-v4</b> <span class="faint" style="font-size:12px">gulu-server</span>
+              <div class="meta">21:40 – 22:18 · 31 个任务</div></div>
+            <span class="chip warn">同步超时</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail">
+        <div class="row"><span class="chip">命令</span><span class="chip ok" style="background:transparent;padding:0">✓ 成功 · 退出码 0</span><span class="grow"></span><span class="faint num" style="font-size:12px">今天 12:53:20 · 用时 0:36</span></div>
+        <h2>swift test --enable-code-coverage</h2>
+        <div class="kv">
+          <span>项目</span><span>typeflux <span class="faint">· gul207</span></span>
+          <span>目录</span><span class="mono">/tmp/typeflux-gul207/typeflux</span>
+          <span>来自</span><span>gulu-server</span>
+          <span>任务编号</span><span class="mono faint">4d0c2a51-… <span style="color:var(--accent)">复制</span></span>
+        </div>
+
+        <div class="sh" style="margin-top:18px"><h2>输出</h2><span class="grow"></span><span class="faint">最后 8 KB · 打开完整日志 ›</span></div>
+        <div class="term">Test Suite 'All tests' started at 2026-10-05 12:53:21.004<br>Test Suite 'TypeFluxTests.xctest' started<br>…<br>Executed 214 tests, with 0 failures (0 unexpected) in 12.408 seconds<br><span style="color:#7ee2a8">Test run with 214 tests passed after 12.41 seconds.</span></div>
+
+        <div class="row" style="margin-top:12px"><span class="btn">复制命令</span><span class="btn">在终端打开目录</span><span class="btn">在访达中显示</span></div>
+
+        <div class="sh" style="margin-top:26px"><h2>当任务出了问题时，这里换成三段说明</h2></div>
+        <div class="explain">
+          <div><b>发生了什么</b>同步 1.2 GB 时等待服务器超过 120 秒，连接未断开。</div>
+          <div><b>Agent 收到了什么</b><span class="mono">timed_out</span>：Agent 可以缩小范围后重试；Macrun 不会自动重放。</div>
+          <div><b>你可以做什么</b>通常无需处理。频繁出现时，检查网络或排除 <span class="mono">.build/</span>。<br><span style="color:var(--accent)">查看连接质量 ›</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <span class="anno" style="left:203px;top:16px">1</span>
+  <span class="anno" style="left:203px;top:96px">2</span>
+  <span class="anno" style="left:203px;top:236px">3</span>
+  <span class="anno" style="left:634px;top:72px">4</span>
+  <span class="anno" style="left:634px;top:470px">5</span>
+</div>
+</body>
+</html>

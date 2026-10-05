@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Macrun v4 · 菜单栏</title>
+<link rel="stylesheet" href="v4.css">
+<script>if (location.hash.includes("light")) document.documentElement.classList.add("light");
+if (location.hash.includes("clean")) document.documentElement.classList.add("clean");</script>
+<style>
+.clean .anno { display: none; }
+body { width: 1480px; height: 600px; overflow: hidden; background: linear-gradient(160deg, #3d4a3a, #2a2f38 55%, #3a3029); position: relative; }
+.light body, body.light { background: linear-gradient(160deg, #cfd9c8, #c9d2de 55%, #e0d3c6); }
+.bar { height: 28px; background: rgba(20,20,22,.55); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 0 16px; color: #f2f2f2; font-size: 12.5px; }
+.light .bar { background: rgba(255,255,255,.55); color: #1d1d1f; }
+.icons { display: flex; gap: 22px; align-items: center; margin-right: 18px; }
+.icons .cap { font-size: 10.5px; opacity: .65; margin-left: 4px; }
+.mi { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 5px; border-radius: 4px; }
+.mi.sel { background: rgba(255,255,255,.2); }
+.pill { font: 600 10.5px/15px var(--font); padding: 0 5px; border-radius: 7px; color: #1d1d1f; }
+.boards { display: flex; gap: 26px; padding: 26px 30px; align-items: flex-start; }
+.st { width: 340px; flex: none; }
+.st h4 { margin: 0 0 8px; font: 600 12.5px var(--font); color: rgba(255,255,255,.85); }
+.light .st h4 { color: #2b2b2e; }
+.panel { width: 340px; border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); backdrop-filter: blur(30px); overflow: hidden; }
+.ph { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px 11px; }
+.ph h3 { font-size: 14px; font-weight: 600; }
+.ph p { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.sec { border-top: .5px solid var(--line); padding: 6px 6px; }
+.lab { font-size: 11px; font-weight: 600; color: var(--faint); padding: 4px 8px 2px; }
+.trow { display: flex; gap: 9px; align-items: center; padding: 6px 8px; border-radius: 6px; }
+.trow.hl { background: var(--bg-hover); }
+.trow b { font-size: 13px; font-weight: 600; }
+.trow .s { font: 11.5px var(--mono); color: var(--muted); }
+.trow .tl { font: 11px var(--mono); color: var(--faint); }
+.sw { display: flex; align-items: center; padding: 5px 8px; font-size: 13px; }
+.menu { display: flex; align-items: center; padding: 4px 8px; font-size: 13px; border-radius: 5px; height: 26px; }
+.menu .k { margin-left: auto; color: var(--faint); font-size: 12px; }
+.ap { margin: 0 10px 10px; border-radius: 9px; background: var(--warn-bg); border: .5px solid var(--warn-line); padding: 10px 11px; display: grid; gap: 8px; }
+.ap .cmd { font: 11.5px/1.55 var(--mono); background: rgba(0,0,0,.2); border-radius: 6px; padding: 6px 8px; word-break: break-all; }
+.light .ap .cmd { background: rgba(255,255,255,.75); }
+.splitbtn { display: inline-flex; }
+.splitbtn .btn:first-child { border-radius: 6px 0 0 6px; }
+.splitbtn .btn:last-child { border-radius: 0 6px 6px 0; border-left: .5px solid rgba(255,255,255,.35); padding: 0 7px; }
+.notes { position: absolute; left: 30px; right: 30px; bottom: 26px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; }
+.note { font: 12px/1.55 var(--font); color: rgba(255,255,255,.82); }
+.light .note { color: #3b3b40; }
+.note b { color: #fff; }
+.light .note b { color: #1d1d1f; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="icons">
+    <span class="mi"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5"/></svg><span class="cap">空闲</span></span>
+    <span class="mi"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5"/><circle cx="13" cy="13" r="2" fill="currentColor" stroke="none"/></svg><span class="cap">工作中</span></span>
+    <span class="mi"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5"/></svg><span class="pill" style="background:#f2b33d">1</span><span class="cap">待确认</span></span>
+    <span class="mi"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5"/></svg><span class="pill" style="background:#ff7a33;color:#fff">操作中</span><span class="cap">桌面</span></span>
+    <span class="mi"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5"/><circle cx="12.5" cy="12.5" r="2.6" fill="#ff6a55" stroke="none"/></svg><span class="cap">出问题</span></span>
+    <span class="mi" style="opacity:.5"><svg class="i" viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.8 2.8 0 0 1 4 4L11 8.5M9 11.5l-1.2 1.2a2.8 2.8 0 0 1-4-4L5 7.5M2 2l12 12"/></svg><span class="cap">断线 / 暂停</span></span>
+  </div>
+  <span>Mon 13:06</span>
+</div>
+
+<div class="boards">
+  <!-- 1. Working -->
+  <div class="st">
+    <h4>① 工作中</h4>
+    <div class="panel">
+      <div class="ph">
+        <span class="dot run" style="margin-top:6px"></span>
+        <div class="grow"><h3>正在 2 个项目上工作</h3><p>另有 1 个桌面操作 · 2 台服务器在线</p></div>
+        <span class="btn stop sm"><svg class="i sm" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>停止</span>
+      </div>
+      <div class="sec">
+        <div class="trow hl"><span class="spin"></span><div class="grow"><div class="row"><b>typeflux</b><span class="faint" style="font-size:11.5px">gul207</span><span class="grow"></span><span class="mono faint num">5:56</span></div><div class="s ell">swift build → swift test</div><div class="tl ell">Build complete! (35.54 secs)</div></div></div>
+        <div class="trow"><span class="spin"></span><div class="grow"><div class="row"><b>typeflux</b><span class="faint" style="font-size:11.5px">gul210</span><span class="grow"></span><span class="mono faint num">2:27</span></div><div class="s ell">cp .build → swift build --build-tests</div></div></div>
+        <div class="trow"><div class="thumb" style="width:40px;height:26px"><div class="w" style="left:5px;top:4px;width:28px;height:17px"></div><div class="click" style="left:24px;top:10px;width:7px;height:7px;border-width:1.5px"></div></div><div class="grow"><div class="row"><b style="color:var(--act)">桌面 · Xcode</b><span class="grow"></span><span class="mono faint num">0:02</span></div><div class="s ell">click “Run” 按钮</div></div></div>
+      </div>
+      <div class="sec"><div class="menu"><span class="muted">今天 46 个任务 · 没有问题</span><span class="k">›</span></div></div>
+      <div class="sec">
+        <div class="sw"><span class="grow">接收新任务</span><span class="switch on"></span></div>
+        <div class="sw"><span class="grow">允许 Agent 操作桌面</span><span class="switch on"></span></div>
+      </div>
+      <div class="sec">
+        <div class="menu">打开 Macrun<span class="k">⌘O</span></div>
+        <div class="menu">设置…<span class="k">⌘,</span></div>
+        <div class="menu">退出 Macrun<span class="k">⌘Q</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Approval -->
+  <div class="st">
+    <h4>② 需要你确认（自动弹出，同时发系统通知）</h4>
+    <div class="panel">
+      <div class="ph">
+        <span class="ring" style="margin-top:1px"></span>
+        <div class="grow"><h3>typeflux 想运行一条命令</h3><p>gulu-server · 41 秒后自动拒绝</p></div>
+        <span class="faint" style="font-size:12px;margin-top:2px">1 / 2</span>
+      </div>
+      <div class="ap">
+        <div class="cmd">ps aux | grep -i macrun | grep -v grep | head; system_profiler SPDisplaysDataType | grep -i resolution</div>
+        <div class="row" style="flex-wrap:wrap;gap:5px"><span class="chip warn">包含管道</span><span class="chip warn">未知程序 system_profiler</span></div>
+        <div class="mono faint" style="font-size:11px">/tmp/typeflux-gul207/typeflux</div>
+        <div class="row"><span class="btn">拒绝</span><span class="grow"></span><span class="splitbtn"><span class="btn primary">允许一次</span><span class="btn primary">▾</span></span></div>
+      </div>
+      <div class="sec">
+        <div class="trow"><span class="spin"></span><div class="grow"><div class="row"><b>typeflux</b><span class="faint" style="font-size:11.5px">gul210</span><span class="grow"></span><span class="mono faint num">2:27</span></div><div class="s ell">swift build --build-tests</div></div></div>
+      </div>
+      <div class="sec">
+        <div class="menu">打开 Macrun<span class="k">⌘O</span></div>
+        <div class="menu">设置…<span class="k">⌘,</span></div>
+        <div class="menu">退出 Macrun<span class="k">⌘Q</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Idle -->
+  <div class="st">
+    <h4>③ 空闲（最常见）</h4>
+    <div class="panel">
+      <div class="ph">
+        <span class="dot ok" style="margin-top:6px"></span>
+        <div class="grow"><h3>就绪，等待 Agent</h3><p>2 台服务器在线 · 命令与桌面均可用</p></div>
+      </div>
+      <div class="sec">
+        <div class="lab">最近</div>
+        <div class="trow"><svg class="i sm" viewBox="0 0 16 16" style="color:var(--faint)"><path d="M3.5 8.5l3 3 6-7"/></svg><div class="grow row"><b style="font-weight:500">typeflux</b><span class="faint" style="font-size:11.5px">14 个任务 · 18 分钟</span></div><span class="faint num" style="font-size:11.5px">13:06</span></div>
+        <div class="trow"><svg class="i sm" viewBox="0 0 16 16" style="color:var(--faint)"><path d="M3.5 8.5l3 3 6-7"/></svg><div class="grow row"><b style="font-weight:500">typeflux-api</b><span class="faint" style="font-size:11.5px">11 个任务</span></div><span class="faint num" style="font-size:11.5px">11:11</span></div>
+      </div>
+      <div class="sec">
+        <div class="sw"><span class="grow">接收新任务</span><span class="switch on"></span></div>
+        <div class="sw"><span class="grow">允许 Agent 操作桌面</span><span class="switch on"></span></div>
+      </div>
+      <div class="sec">
+        <div class="menu">打开 Macrun<span class="k">⌘O</span></div>
+        <div class="menu">设置…<span class="k">⌘,</span></div>
+        <div class="menu">退出 Macrun<span class="k">⌘Q</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Problem -->
+  <div class="st">
+    <h4>④ 出问题（断线 / 权限缺失 / 已暂停）</h4>
+    <div class="panel">
+      <div class="ph">
+        <span class="dot err" style="margin-top:6px"></span>
+        <div class="grow"><h3>连不上 gulu-server</h3><p>网络不可达 · 18 秒后自动重试</p></div>
+        <span class="btn sm">立即重试</span>
+      </div>
+      <div class="sec">
+        <div class="trow"><span class="ico warn" style="width:22px;height:22px"><svg class="i sm" viewBox="0 0 16 16"><path d="M3 2l9 5-4 1.5L6.5 13z"/></svg></span><div class="grow"><div style="font-size:12.5px">桌面截图还没确认过</div><div class="faint" style="font-size:11.5px">Agent 截图可能失败</div></div><span class="btn sm">去确认</span></div>
+        <div class="trow"><span class="ico" style="width:22px;height:22px"><svg class="i sm" viewBox="0 0 16 16"><path d="M6 4v8M10 4v8"/></svg></span><div class="grow"><div style="font-size:12.5px">已暂停接收新任务</div><div class="faint" style="font-size:11.5px">13:02 由“停止全部”触发</div></div><span class="btn primary sm">恢复</span></div>
+      </div>
+      <div class="sec"><div class="menu"><span class="muted">dev-box 正常 · 今天 46 个任务</span><span class="k">›</span></div></div>
+      <div class="sec">
+        <div class="sw"><span class="grow">接收新任务</span><span class="switch"></span></div>
+        <div class="sw"><span class="grow">允许 Agent 操作桌面</span><span class="switch"></span></div>
+      </div>
+      <div class="sec">
+        <div class="menu">打开 Macrun<span class="k">⌘O</span></div>
+        <div class="menu">退出 Macrun<span class="k">⌘Q</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notes">
+  <div class="note"><b>项目，而不是命令。</b>每行是一个项目正在做的那一步：先给提炼后的主要程序（swift build → swift test），再给最后一行输出。完整命令在主窗口看。</div>
+  <div class="note"><b>确认优先，一个都不漏。</b>有待确认时面板自动弹出，标题就是请求本身；“允许一次”是主按钮，▾ 里是“15 分钟内允许同类”和“本次运行允许此目录”。</div>
+  <div class="note"><b>空闲时只说“就绪”。</b>不显示延迟、协议等数字；只列最近 2 个项目，让人确认“刚才确实干完了”。</div>
+  <div class="note"><b>问题自己带着修复按钮。</b>断线、权限缺失、暂停分别一行，每行一个动作；其他服务器正常时照常说明，不让一台断线吓到人。</div>
+</div>
+</body>
+</html>

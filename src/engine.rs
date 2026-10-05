@@ -546,6 +546,9 @@ impl Engine {
                 *summary
                     .entry(t["status"].as_str().unwrap_or("unknown").into())
                     .or_default() += 1;
+                if crate::history::exited_nonzero(t) {
+                    *summary.entry("exited".into()).or_default() += 1;
+                }
             }
         }
 

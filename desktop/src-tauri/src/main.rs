@@ -3,6 +3,9 @@ mod migration;
 mod native;
 #[cfg(target_os = "macos")]
 mod native_panel;
+// Pure presentation logic; compiled everywhere so its tests run on any host.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod panel_model;
 mod supervisor;
 mod tray;
 use anyhow::{Context, Result};

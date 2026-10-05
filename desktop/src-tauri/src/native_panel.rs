@@ -102,71 +102,10 @@ pub fn update(app: &tauri::AppHandle, snapshot: &Value) {
     let _ = app.run_on_main_thread(move || unsafe { macrun_panel_update(wire.as_ptr()) });
 }
 fn presentation(v: &Value, pending: Vec<String>, error: String) -> Value {
-    let connected = v["connection"]["state"] == "connected";
-    let state = crate::tray::TrayState::from_snapshot(v);
-    let title = match state {
-        crate::tray::TrayState::Idle => "空闲 · 等待 Agent",
-        crate::tray::TrayState::Working => "Agent 正在工作",
-        crate::tray::TrayState::Desktop => "Agent 正在操作桌面",
-        crate::tray::TrayState::Approval => "有操作等待你确认",
-        crate::tray::TrayState::Offline => "尚未连接服务器",
-        crate::tray::TrayState::Paused => "已暂停接收新任务",
-    };
-    let mut active: Vec<&Value> = v["tasks"]
-        .as_array()
-        .map(|tasks| {
-            tasks
-                .iter()
-                .filter(|task| {
-                    matches!(
-                        task["status"].as_str(),
-                        Some("accepted" | "running" | "awaiting_approval")
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let active_count = active.len();
-    active.sort_by_key(|task| task["status"] != "awaiting_approval");
-    let tasks: Vec<Value> = active.into_iter().take(3).map(|task| {
-        let title = task["arguments"]["command"].as_str()
-            .or_else(|| task["arguments"]["tool"].as_str())
-            .unwrap_or("同步任务");
-        json!({"id":task["task_id"],"title":format!("{}{}",task["connection_name"].as_str().map(|name|format!("{name} · ")).unwrap_or_default(),title).chars().take(90).collect::<String>(),"approval":task["status"]=="awaiting_approval"})
-    }).collect();
-    let connection_text =
-        if let Some(connections) = v["connections"].as_array().filter(|c| c.len() > 1) {
-            format!(
-                "{}/{} 台服务器在线",
-                connections
-                    .iter()
-                    .filter(|c| c["connection"]["state"] == "connected")
-                    .count(),
-                connections.len()
-            )
-        } else {
-            format!(
-                "已连接 {} ms",
-                v["connection"]["rtt_ms"].as_u64().unwrap_or(0)
-            )
-        };
-    let subtitle = if connected {
-        if active_count > 0 {
-            format!("{} 个任务进行中 · {}", active_count, connection_text)
-        } else {
-            format!(
-                "今天 {} 个任务 · {}",
-                v["today_summary"]["total"].as_u64().unwrap_or(0),
-                connection_text
-            )
-        }
-    } else {
-        v["connection"]["error"]
-            .as_str()
-            .unwrap_or("打开 Macrun 查看连接状态")
-            .to_owned()
-    };
-    json!({"title":title,"subtitle":subtitle,"tasks":tasks,"available":!v.is_null(),"can_stop":active_count>0,"pause":v["policy"]["paused"]!=true,"desktop":v["policy"]["desktop_enabled"]==true,"pending":pending,"error":error})
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    crate::panel_model::presentation(v, pending, error, now)
 }
 pub fn show_panel(app: &tauri::AppHandle, toggle: bool) {
     update(app, &app.state::<Runtime>().snapshot.lock().unwrap());
@@ -187,24 +126,12 @@ pub fn hide() {
 mod tests {
     use super::*;
     #[test]
-    fn native_panel_counts_servers_and_identifies_task_source() {
-        let v = json!({"connection":{"state":"connected"},"connections":[{"connection":{"state":"connected"}},{"connection":{"state":"disconnected"}}],"tasks":[{"task_id":"task","status":"running","connection_name":"Build server","arguments":{"command":"test"}}]});
-        let panel = presentation(&v, vec![], "".into());
-        assert!(
-            panel["subtitle"]
-                .as_str()
-                .unwrap()
-                .contains("1/2 台服务器在线")
-        );
-        assert_eq!(panel["tasks"][0]["title"], "Build server · test");
-    }
-    #[test]
-    fn native_panel_keeps_confirmed_policy_and_prioritizes_approvals() {
-        let v = json!({"connection":{"state":"connected"},"policy":{"paused":true,"desktop_enabled":false},"tasks":[{"task_id":"running","status":"running","arguments":{"command":"echo running"}},{"task_id":"approval","status":"awaiting_approval","arguments":{"command":"echo waiting"}}]});
+    fn native_panel_keeps_confirmed_policy_while_a_request_is_pending() {
+        let v = json!({"connection":{"state":"connected"},"policy":{"paused":true,"desktop_enabled":false},"tasks":[{"task_id":"approval","status":"awaiting_approval","started_at":0,"arguments":{"command":"echo waiting","cwd":"/w/app"}}]});
         let panel = presentation(&v, vec!["pause".into()], "".into());
         assert_eq!(panel["pause"], false);
         assert_eq!(panel["desktop"], false);
-        assert_eq!(panel["tasks"][0]["id"], "approval");
+        assert_eq!(panel["approval"]["id"], "approval");
         assert_eq!(panel["pending"][0], "pause");
         assert_eq!(
             presentation(&Value::Null, vec![], "offline".into())["available"],
