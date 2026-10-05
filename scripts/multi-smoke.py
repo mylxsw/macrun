@@ -72,6 +72,9 @@ try:
     assert all((mirror/'payload').stat().st_size==1024*1024 for _,mirror,_ in sources)
     request=str(uuid.uuid4());marker=root/'marker';args=dict(command=f'printf x >> {marker}',cwd='/tmp',request_id=request)
     one=call(servers[0][1],'exec.start',args,client1)['task_id']
+    # Shared cwd commands now hold an exclusive workspace lease. This case tests
+    # profile-scoped dedup; overlapping workspace rejection has a separate probe.
+    assert done(servers[0][1],client1,one)['status']=='succeeded'
     two=call(servers[1][1],'exec.start',args,client1)['task_id']
     three=call(servers[0][1],'exec.start',dict(command='printf other-client',cwd='/tmp',request_id=str(uuid.uuid4())),client2)['task_id']
     assert one!=two

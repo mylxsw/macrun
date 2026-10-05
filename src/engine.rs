@@ -93,6 +93,12 @@ fn redact_arguments(a: &Value) -> Value {
 }
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
+        for (backend, group) in &config.resource_groups {
+            anyhow::ensure!(
+                config.mcp.contains_key(backend) && !group.is_empty() && group.len() <= 128,
+                "invalid backend resource group"
+            );
+        }
         std::fs::create_dir_all(data.join("tasks"))?;
         let key_path = data.join("request-key");
         let key = if key_path.exists() {
@@ -198,7 +204,7 @@ impl Engine {
         if p.paused {
             return Err(crate::model::Fault::new("busy", "worker paused by local user").into());
         }
-        if kind == "mcp.call" && !p.desktop_enabled {
+        if matches!(kind, "mcp.call" | "desktop.sequence") && !p.desktop_enabled {
             return Err(crate::model::Fault::new(
                 "desktop_disabled",
                 "desktop control disabled by local user",
@@ -206,7 +212,9 @@ impl Engine {
             .into());
         }
         drop(p);
-        if kind == "mcp.call" && self.safety.lock().await.yield_until > now() {
+        if matches!(kind, "mcp.call" | "desktop.sequence")
+            && self.safety.lock().await.yield_until > now()
+        {
             return Err(crate::model::Fault::new(
                 "busy",
                 "desktop temporarily yielded to local input",
@@ -246,7 +254,7 @@ impl Engine {
             }
             self.changed();
         }
-        wire::atomic_json(&self.data.join("desktop-policy.json"), &next)?;
+        wire::persist(&self.data.join("desktop-policy.json"), &next).await?;
         *p = next;
         self.changed();
         Ok(json!({"policy":*p,"cancel_requested":stop}))
@@ -254,7 +262,7 @@ impl Engine {
     pub async fn set_safety(&self, mut safety: crate::safety::Safety) -> Result<Value> {
         let _guard = self.submissions.lock().await;
         safety.validate()?;
-        wire::atomic_json(&self.data.join("safety.json"), &safety)?;
+        wire::persist(&self.data.join("safety.json"), &safety).await?;
         *self.safety.lock().await = safety.clone();
         self.changed();
         Ok(json!(safety))
@@ -362,6 +370,9 @@ impl Engine {
         let _guard = self.submissions.lock().await;
         self.check_admission(kind).await?;
         self.check_paths(kind, &args).await?;
+        if self.tasks.lock().await.len() >= 128 {
+            return Err(crate::model::Fault::new("busy", "task capacity reached").into());
+        }
         let ident = id();
         let cancel = CancellationToken::new();
         let args = if kind.starts_with("file.") {
@@ -370,10 +381,10 @@ impl Engine {
         } else {
             args
         };
-        wire::atomic_json(
+        wire::persist(
             &self.directory(&ident)?.join("result.json"),
             &json!({"task_id":ident,"kind":kind,"arguments":args,"status":"running","started_at":now()}),
-        )?;
+        ).await?;
         self.tasks
             .lock()
             .await
@@ -385,7 +396,7 @@ impl Engine {
         let p = self.directory(ident)?.join("result.json");
         let mut v: Value = serde_json::from_slice(&tokio::fs::read(&p).await?)?;
         v["progress"] = progress;
-        wire::atomic_json(&p, &v)?;
+        wire::persist(&p, &v).await?;
         self.changed();
         Ok(())
     }
@@ -424,7 +435,7 @@ impl Engine {
                 .unwrap_or_default();
             if let Some(root) = v["arguments"]["remote_root"].as_str() {
                 workspaces.insert(root.into(),json!({"root":root,"time":v["started_at"],"status":v["status"],"error":v["error"]}));
-                if wire::atomic_json(&index, &workspaces).is_err() {
+                if wire::persist(&index, &workspaces).await.is_err() {
                     crate::logging::event(
                         "worker",
                         "workspace_index_failed",
@@ -433,7 +444,7 @@ impl Engine {
                 }
             }
         }
-        let result = wire::atomic_json(&p, &v);
+        let result = wire::persist(&p, &v).await;
         self.tasks.lock().await.remove(ident);
         self.changed();
         result
@@ -476,6 +487,7 @@ impl Engine {
             }
             *client = None;
         }
+        self.history.checkpoint().await?;
         Ok(())
     }
     pub async fn self_test(self: &Arc<Self>) -> Result<Value> {
@@ -499,32 +511,41 @@ impl Engine {
         let days = self.safety.lock().await.retention_days as u64;
         let cutoff = now().saturating_sub(days * 86_400_000);
         let mut removed = 0;
-        for entry in std::fs::read_dir(self.data.join("tasks"))? {
-            let dir = entry?.path();
-            let p = dir.join("result.json");
-            if let Ok(bytes) = std::fs::read(&p) {
-                let v: Value = serde_json::from_slice(&bytes)?;
-                if v["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
-                    let ident = string(&v, "task_id")?;
-                    uuid::Uuid::parse_str(ident)?;
-                    let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
-                    wire::atomic_json(
-                        &self.data.join("dedup").join(format!("{ident}.json")),
-                        &tombstone,
-                    )?;
-                    std::fs::remove_dir_all(dir)?;
-                    removed += 1;
-                }
+        let mut transfers_removed = 0;
+        for record in self.history.records().await? {
+            let Some(ident) = record["task_id"].as_str() else {
+                continue;
+            };
+            let dir = self.directory(ident)?;
+            if record["kind"] == "file.upload" {
+                let path = dir.clone();
+                transfers_removed += crate::wire::blocking(move || {
+                    crate::retention::transfers(&path, now().saturating_sub(86_400_000))
+                })
+                .await?? as usize;
+            }
+            if record["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
+                let v: Value =
+                    serde_json::from_slice(&tokio::fs::read(dir.join("result.json")).await?)?;
+                let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
+                wire::persist(
+                    &self.data.join("dedup").join(format!("{ident}.json")),
+                    &tombstone,
+                )
+                .await?;
+                tokio::fs::remove_dir_all(dir).await?;
+                self.history.removed(ident);
+                removed += 1;
             }
         }
         self.changed();
-        Ok(json!({"removed":removed,"dedup_preserved":true}))
+        Ok(json!({"removed":removed,"transfers_removed":transfers_removed,"dedup_preserved":true}))
     }
     pub async fn local_snapshot(&self) -> Result<Value> {
-        let mut tasks = self.history.records().await?;
+        let tasks = self.history.shared_records().await?;
         let total = tasks.len();
         let mut task_counts: BTreeMap<String, usize> = BTreeMap::new();
-        for task in &tasks {
+        for task in tasks.iter() {
             *task_counts
                 .entry(task["status"].as_str().unwrap_or("unknown").into())
                 .or_default() += 1;
@@ -540,7 +561,7 @@ impl Engine {
         };
         let today = day(now());
         let mut summary: BTreeMap<String, u64> = BTreeMap::from([("total".into(), 0)]);
-        for t in &tasks {
+        for t in tasks.iter() {
             if day(t["started_at"].as_u64().unwrap_or(0)) == today {
                 *summary.entry("total".into()).or_default() += 1;
                 *summary
@@ -557,7 +578,7 @@ impl Engine {
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default();
-        for t in &tasks {
+        for t in tasks.iter() {
             if t["kind"] == "sync"
                 && let Some(root) = t["arguments"]["remote_root"].as_str()
             {
@@ -565,11 +586,11 @@ impl Engine {
             }
         }
         // Include all active tasks even when more than 200 newer tasks exist.
-        tasks = tasks
-            .into_iter()
+        let mut tasks: Vec<Value> = tasks
+            .iter()
             .enumerate()
             .filter(|(i, v)| *i < 200 || crate::history::active(v))
-            .map(|(_, v)| v)
+            .map(|(_, v)| v.clone())
             .collect();
         for v in &mut tasks {
             // Historical output is loaded with task_detail on demand. Only live
@@ -625,7 +646,7 @@ impl Engine {
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
         self.history.page(args).await
     }
-    fn directory(&self, id: &str) -> Result<PathBuf> {
+    pub(crate) fn directory(&self, id: &str) -> Result<PathBuf> {
         uuid::Uuid::parse_str(id)?;
         Ok(self.data.join("tasks").join(id))
     }
@@ -645,7 +666,24 @@ impl Engine {
     }
     pub async fn handle(self: &Arc<Self>, kind: &str, a: Value) -> Result<Value> {
         match kind {
-            "exec.start" | "mcp.call" => self.submit(kind, a, false).await,
+            "exec.start" | "mcp.call" | "desktop.sequence" => {
+                let wait = a["wait_ms"].as_u64().unwrap_or(0).min(1000);
+                let refs = a["artifact_refs"] == true;
+                let mut args = a;
+                if let Some(object) = args.as_object_mut() {
+                    object.remove("wait_ms");
+                    object.remove("artifact_refs");
+                }
+                let value = self.submit(kind, args, false, None).await?;
+                if wait == 0 {
+                    return Ok(value);
+                }
+                self.wait_task(
+                    json!({"task_id":value["task_id"],"wait_ms":wait,"artifact_refs":refs}),
+                )
+                .await
+            }
+            "task.wait" => self.wait_task(a).await,
             "task.get" => {
                 // Keep the record and its output alive for the whole read while
                 // retention cleanup moves completed tasks into dedup records.
@@ -677,6 +715,15 @@ impl Engine {
                     output.as_object_mut().unwrap().remove("data");
                     v["output"] = output;
                 }
+                if a["include_result"] == false {
+                    v.as_object_mut().unwrap().remove("result");
+                } else if a["artifact_refs"] != true {
+                    v = crate::wire::blocking(move || {
+                        crate::artifact::hydrate(&dir, &mut v)?;
+                        Ok::<_, anyhow::Error>(v)
+                    })
+                    .await??;
+                }
                 Ok(v)
             }
             "task.cancel" => {
@@ -696,14 +743,29 @@ impl Engine {
             "mcp.servers" => Ok(json!({"servers":self.config.mcp.keys().collect::<Vec<_>>()})),
             "mcp.tools" => {
                 let v = self
-                    .backend_request(&a, "tools/list", &CancellationToken::new())
+                    .backend_request(&a, "tools/list", &CancellationToken::new(), None)
                     .await?;
                 self.changed();
                 Ok(v)
             }
             _ if kind.starts_with("file.") => {
                 let (ident, cancel) = self.begin_external(kind, a.clone()).await?;
-                let r = tokio::select! { r=crate::files::handle(kind,&a)=>r, _=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled")) };
+                let lease = if matches!(kind, "file.write" | "file.move") {
+                    let mut paths = vec![expand(string(&a, "path")?)];
+                    if kind == "file.move" {
+                        paths.push(expand(string(&a, "destination")?));
+                    }
+                    crate::workspace::Lease::acquire(&paths).map(Some)
+                } else {
+                    Ok(None)
+                };
+                let r = if let Err(e) = lease {
+                    Err(e)
+                } else {
+                    let _lease = lease?;
+                    tokio::select! { r=crate::files::handle(kind,&a)=>r, _=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled")) }
+                };
+
                 self.finish_external(&ident, r.as_ref().err().map(ToString::to_string), None)
                     .await?;
                 r
@@ -711,13 +773,37 @@ impl Engine {
             _ => bail!("unknown operation: {kind}"),
         }
     }
+    async fn wait_task(self: &Arc<Self>, mut args: Value) -> Result<Value> {
+        let wait = args["wait_ms"].as_u64().unwrap_or(1000).min(25_000);
+        args.as_object_mut().map(|o| o.remove("wait_ms"));
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(wait);
+        let mut changed = self.subscribe();
+        loop {
+            let value = Box::pin(self.handle("task.get", args.clone())).await?;
+            if value.get("ended_at").is_some() || value["history_expired"] == true {
+                return Ok(value);
+            }
+            if tokio::time::timeout_at(deadline, changed.changed())
+                .await
+                .is_err()
+            {
+                return Ok(value);
+            }
+        }
+    }
     /// The desktop app's own observation, sent over the private control socket.
     /// Only this path may carry `local_observation`; it never waits for approval.
     pub async fn observe_locally(self: &Arc<Self>, mut a: Value) -> Result<Value> {
         a["local_observation"] = json!(true);
-        self.submit("mcp.call", a, true).await
+        self.submit("mcp.call", a, true, None).await
     }
-    async fn submit(self: &Arc<Self>, kind: &str, mut a: Value, local: bool) -> Result<Value> {
+    async fn submit(
+        self: &Arc<Self>,
+        kind: &str,
+        mut a: Value,
+        local: bool,
+        reservation: Option<Arc<crate::scheduler::Reservation>>,
+    ) -> Result<Value> {
         // Remote requests must not impersonate the local app: the flag skips
         // approval and hides the on-screen overlay.
         if !local && a.get("local_observation").is_some() {
@@ -739,7 +825,25 @@ impl Engine {
             }
         } else {
             let server = string(&a, "server")?;
-            string(&a, "tool")?;
+            if kind == "desktop.sequence" {
+                let steps = a["steps"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("steps required"))?;
+                anyhow::ensure!(
+                    !steps.is_empty() && steps.len() <= 16,
+                    "one to sixteen steps required"
+                );
+                string(&a, "session")?;
+                for step in steps {
+                    string(step, "tool")?;
+                    if let Some(expect) = step.get("expect") {
+                        string(expect, "pointer")?;
+                        anyhow::ensure!(expect.get("equals").is_some(), "expect.equals required");
+                    }
+                }
+            } else {
+                string(&a, "tool")?;
+            }
             if !self.backends.contains_key(server) {
                 bail!("unknown MCP server");
             }
@@ -764,6 +868,9 @@ impl Engine {
             return Ok(json!({"task_id":task_id,"status":v["status"],"duplicate":true}));
         }
         self.check_admission(kind).await?;
+        if self.tasks.lock().await.len() >= 128 {
+            return Err(crate::model::Fault::new("busy", "task capacity reached").into());
+        }
         self.check_paths(kind, &a).await?;
         let tier = if kind == "mcp.call" {
             Some(
@@ -776,6 +883,7 @@ impl Engine {
         let needs_approval = {
             let safety = self.safety.lock().await;
             match tier {
+                None if kind == "desktop.sequence" => false,
                 None => safety.approval_required(string(&a, "command")?),
                 Some(tier) => {
                     if safety.desktop.policy(tier) == "deny" {
@@ -809,7 +917,7 @@ impl Engine {
         if let Some(rule) = rule {
             initial["approved_by_rule"] = json!(rule);
         }
-        wire::atomic_json(&path, &initial)?;
+        wire::persist(&path, &initial).await?;
         let cancel = CancellationToken::new();
         let approval = if needs_approval {
             let (sender, rx) = tokio::sync::oneshot::channel();
@@ -839,7 +947,7 @@ impl Engine {
             let outcome = async {
                 if let Some(approval)=approval {
                     result["status"]=json!("awaiting_approval");result["approval_deadline"]=json!(now()+60_000);
-                    wire::atomic_json(&path,&result)?;engine.changed();
+                    wire::persist(&path,&result).await?;engine.changed();
                     let decision=tokio::select! {
                         v=tokio::time::timeout(Duration::from_secs(60),approval)=>v,
                         _=cancel.cancelled()=>{bail!("cancelled before approval");}
@@ -853,15 +961,17 @@ impl Engine {
                 }
                 engine.check_paths(&kind,&a).await?;
                 result["status"] = json!("running");
-                wire::atomic_json(&path, &result)?;
+                wire::persist(&path, &result).await?;
                 engine.changed();
                 if cancel.is_cancelled() {
                     bail!("cancelled before dispatch");
                 }
                 if kind == "exec.start" {
                     engine.command(&a, &dir, &cancel).await
+                } else if kind=="desktop.sequence" {
+                    engine.clone().run_sequence(a.clone(),ident.clone(),cancel.clone()).await
                 } else {
-                    engine.backend_request(&a, "tools/call", &cancel).await
+                    engine.backend_request(&a, "tools/call", &cancel, reservation.as_ref()).await
                 }
             }
             .await;
@@ -874,16 +984,33 @@ impl Engine {
                     } else {
                         "succeeded"
                     });
-                    result["result"] = v;
+                    let dir = dir.clone();
+                    let stored = crate::wire::blocking(move || {
+                        let mut value = v;
+                        let artifacts = crate::artifact::store(&dir, &mut value)?;
+                        Ok::<_, anyhow::Error>((value, artifacts))
+                    })
+                    .await;
+                    match stored {
+                        Ok(Ok((value, artifacts))) => {
+                            result["result"] = value;
+                            result["artifacts"] = json!(artifacts);
+                        }
+                        other => {
+                            result["status"] = json!("unknown");
+                            result["error"] = json!({"message":format!("could not persist result artifacts: {other:?}")});
+                        }
+                    }
                 }
                 Err(e) => {
                     let text = e.to_string();
                     result["status"] = json!(if text.starts_with("denied:") {
                         "denied"
-                    } else if kind == "mcp.call"
+                    } else if matches!(kind.as_str(), "mcp.call" | "desktop.sequence")
                         && !text.starts_with("stale_session")
                         && !text.starts_with("desktop_disabled")
                         && !text.starts_with("cancelled before")
+                        && !text.starts_with("timed_out waiting")
                     {
                         "unknown"
                     } else if cancel.is_cancelled() {
@@ -894,13 +1021,16 @@ impl Engine {
                         "failed"
                     });
                     result["error"] = json!({"message":text});
+                    if let Some(fault) = e.downcast_ref::<crate::model::Fault>() {
+                        result["error"]["code"] = json!(fault.code);
+                    }
                     if let Some(code) = denial_code(&text) {
                         result["error"]["code"] = json!(code);
                     }
                 }
             }
             result["ended_at"] = json!(now());
-            if wire::atomic_json(&path, &result).is_err() {
+            if wire::persist(&path, &result).await.is_err() {
                 crate::logging::event("worker", "persist_failed", json!({"task_id":ident}));
             }
             crate::logging::event(
@@ -926,6 +1056,60 @@ impl Engine {
         dir: &std::path::Path,
         cancel: &CancellationToken,
     ) -> Result<Value> {
+        static EXEC_SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+            std::sync::OnceLock::new();
+        let deadline = tokio::time::Instant::now()
+            + Duration::from_secs(a["timeout_seconds"].as_u64().unwrap_or(3600));
+        let _slot = tokio::select! {
+            slot=tokio::time::timeout_at(deadline,EXEC_SLOTS.get_or_init(||Arc::new(tokio::sync::Semaphore::new(4))).clone().acquire_owned())=>slot.map_err(|_|anyhow::anyhow!("timed_out waiting for command capacity"))??,
+            _=cancel.cancelled()=>bail!("cancelled before command dispatch"),
+        };
+        let cwd = expand(string(a, "cwd")?);
+        let root = a["workspace_root"]
+            .as_str()
+            .map(expand)
+            .unwrap_or_else(|| cwd.clone());
+        self.safety.lock().await.check(&root)?;
+        anyhow::ensure!(
+            crate::workspace::resolve(&cwd)?.starts_with(crate::workspace::resolve(&root)?),
+            "cwd is outside workspace_root"
+        );
+        let mut lease = Some(Arc::new(crate::workspace::Lease::acquire(
+            std::slice::from_ref(&root),
+        )?));
+        if let Some(expected) = a["generation"].as_str() {
+            anyhow::ensure!(
+                crate::workspace::generation(&root).ok().as_deref() == Some(expected),
+                "stale_workspace: synchronize and use the returned generation"
+            );
+        }
+        let mut run_cwd = cwd.clone();
+        if a["snapshot"] == true {
+            let generation = crate::workspace::generation(&root)?;
+            let state = self.data.join("mirrors").join(
+                blake3::hash(root.to_string_lossy().as_bytes())
+                    .to_hex()
+                    .as_str(),
+            );
+            let source = root.clone();
+            let destination = dir.join("workspace");
+            let output = destination.clone();
+            let guard = lease.as_ref().unwrap().clone();
+            let relative = crate::workspace::resolve(&cwd)?
+                .strip_prefix(crate::workspace::resolve(&root)?)?
+                .to_path_buf();
+            crate::wire::blocking(move || {
+                let _guard = guard;
+                crate::snapshot::create(&source, &state, &destination, &generation)
+            })
+            .await??;
+            lease.take();
+            run_cwd = output.join(relative);
+            lease = Some(Arc::new(crate::workspace::Lease::acquire(
+                std::slice::from_ref(&output),
+            )?));
+        }
+        let _lease = lease;
         let env: BTreeMap<String, String> =
             serde_json::from_value(a.get("env").cloned().unwrap_or(json!({})))?;
         let (tx, mut rx) = mpsc::channel(64);
@@ -940,12 +1124,12 @@ impl Engine {
             f.sync_all().await?;
             Ok::<_, anyhow::Error>(())
         });
-        let r = process::run_command(
+        let r = process::run_command_until(
             "/bin/sh",
             &["-c".into(), string(a, "command")?.into()],
-            &expand(string(a, "cwd")?),
+            &run_cwd,
             &env,
-            a["timeout_seconds"].as_u64().unwrap_or(3600),
+            deadline,
             cancel,
             &tx,
             "output.log",
@@ -954,13 +1138,96 @@ impl Engine {
         .await;
         drop(tx);
         writer.await??;
-        Ok(json!({"exit_code":r?}))
+        Ok(json!({"exit_code":r?,"workspace":run_cwd,"snapshot":a["snapshot"]==true}))
+    }
+    fn run_sequence(
+        self: Arc<Self>,
+        args: Value,
+        parent: String,
+        cancel: CancellationToken,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send>> {
+        Box::pin(async move {
+            let server = string(&args, "server")?;
+            let group = self
+                .config
+                .resource_groups
+                .get(server)
+                .map(String::as_str)
+                .unwrap_or("desktop");
+            let deadline = tokio::time::Instant::now()
+                + Duration::from_secs(args["timeout_seconds"].as_u64().unwrap_or(120).min(600));
+            let guard = tokio::select! {
+                r=tokio::time::timeout_at(deadline,crate::scheduler::resource(group).lock_owned())=>r.map_err(|_|anyhow::anyhow!("timed_out waiting for sequence resource"))?,
+                _=cancel.cancelled()=>bail!("cancelled before sequence dispatch"),
+            };
+            let reserved = Arc::new(crate::scheduler::Reservation {
+                group: group.into(),
+                guard,
+            });
+            let mut results = Vec::new();
+            let mut last = json!({});
+            for (index, step) in args["steps"].as_array().unwrap().iter().enumerate() {
+                if cancel.is_cancelled() || tokio::time::Instant::now() >= deadline {
+                    bail!("sequence cancelled or timed_out before next step")
+                }
+                let hash = blake3::hash(format!("sequence:{parent}:{index}").as_bytes());
+                let request = uuid::Uuid::from_slice(&hash.as_bytes()[..16])?.to_string();
+                let child_args = json!({"server":server,"session":args["session"],"tool":step["tool"],"arguments":step.get("arguments").cloned().unwrap_or(json!({})),"request_id":request,"timeout_seconds":deadline.saturating_duration_since(tokio::time::Instant::now()).as_secs().max(1)});
+                let child = self
+                    .submit("mcp.call", child_args, false, Some(reserved.clone()))
+                    .await?;
+                let task = child["task_id"].clone();
+                let outcome = async {
+                    loop {
+                        let value = self
+                            .wait_task(json!({"task_id":task,"wait_ms":25000}))
+                            .await?;
+                        if value.get("ended_at").is_some() {
+                            return Ok::<_, anyhow::Error>(value);
+                        }
+                    }
+                };
+                let done = tokio::select! {
+                    value=tokio::time::timeout_at(deadline,outcome)=>value.unwrap_or_else(|_|Err(anyhow::anyhow!("sequence timed_out"))),
+                    _=cancel.cancelled()=>Err(anyhow::anyhow!("sequence cancelled")),
+                };
+                let done = match done {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = self.handle("task.cancel", json!({"task_id":task})).await;
+                        return Err(error);
+                    }
+                };
+                results.push(json!({"index":index,"task_id":task,"status":done["status"]}));
+                self.external_progress(&parent, json!({"steps":results}))
+                    .await?;
+                if done["status"] == "unknown" {
+                    bail!("sequence stopped: step {index} has unknown effects; task_id={task}");
+                }
+                if done["status"] != "succeeded" {
+                    return Ok(
+                        json!({"steps":results,"result":{"isError":true,"content":[{"type":"text","text":"sequence stopped after unsuccessful step"}]}}),
+                    );
+                }
+                last = done["result"]["result"].clone();
+                if let Some(expect) = step.get("expect") {
+                    let pointer = string(expect, "pointer")?;
+                    if last.pointer(pointer) != Some(&expect["equals"]) {
+                        return Ok(
+                            json!({"steps":results,"result":{"isError":true,"content":[{"type":"text","text":"sequence condition failed; remaining steps were not dispatched"}]}}),
+                        );
+                    }
+                }
+            }
+            Ok(json!({"steps":results,"result":last}))
+        })
     }
     async fn backend_request(
         &self,
         a: &Value,
         method: &str,
         cancel: &CancellationToken,
+        reservation: Option<&Arc<crate::scheduler::Reservation>>,
     ) -> Result<Value> {
         let stop_all = self.backend_stop.lock().await.clone();
         let name = string(a, "server")?;
@@ -973,16 +1240,27 @@ impl Engine {
                 .as_u64()
                 .unwrap_or(if method == "tools/list" { 12 } else { 300 }),
         );
-        static DESKTOP: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-        let _desktop = if method == "tools/call" {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let queued_at = std::time::Instant::now();
+        let group = self
+            .config
+            .resource_groups
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or("desktop");
+        let resource = crate::scheduler::resource(group);
+        if let Some(reserved) = reservation {
+            anyhow::ensure!(reserved.group == group, "wrong reserved resource");
+        }
+        let _desktop = if method == "tools/call" && reservation.is_none() {
             Some(
-                tokio::select! {v=tokio::time::timeout(timeout,DESKTOP.get_or_init(||Mutex::new(())).lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for desktop"))?,_=cancel.cancelled()=>bail!("cancelled before desktop dispatch"),_=stop_all.cancelled()=>bail!("cancelled before desktop dispatch")},
+                tokio::select! {v=tokio::time::timeout_at(deadline,resource.lock_owned())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for desktop"))?,_=cancel.cancelled()=>bail!("cancelled before desktop dispatch"),_=stop_all.cancelled()=>bail!("cancelled before desktop dispatch")},
             )
         } else {
             None
         };
         // Waiting for the per-backend lock is cancellable, but never drops somebody else's client.
-        let mut guard = tokio::select! {v=tokio::time::timeout(timeout,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
+        let mut guard = tokio::select! {v=tokio::time::timeout_at(deadline,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
         if let Some(expected) = a["session"].as_str() {
             if guard.as_ref().is_none_or(|c| c.generation != expected) {
                 bail!("stale_session: rediscover tools and observe the target again");
@@ -999,6 +1277,7 @@ impl Engine {
         if method == "tools/call" && !self.policy.lock().await.desktop_enabled {
             bail!("desktop_disabled before backend dispatch");
         }
+        let queue_ms = queued_at.elapsed().as_millis();
         let operation = async {
             if guard.is_none() {
                 *guard = Some(Client::connect(&self.config.mcp[name]).await?);
@@ -1037,10 +1316,10 @@ impl Engine {
                 }
             }
             Ok::<Value, anyhow::Error>(
-                json!({"server":name,"session":c.generation,"result":result}),
+                json!({"server":name,"session":c.generation,"result":result,"queue_ms":queue_ms,"resource_group":group}),
             )
         };
-        let r = tokio::select! {v=tokio::time::timeout(timeout,operation)=>v.unwrap_or_else(|_|Err(anyhow::anyhow!("timed_out; backend session invalidated; effect may be unknown"))),_=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown")),_=stop_all.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown"))};
+        let r = tokio::select! {v=tokio::time::timeout_at(deadline,operation)=>v.unwrap_or_else(|_|Err(anyhow::anyhow!("timed_out; backend session invalidated; effect may be unknown"))),_=cancel.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown")),_=stop_all.cancelled()=>Err(anyhow::anyhow!("cancelled; backend session invalidated; effect may be unknown"))};
         if r.is_err() {
             if let Some(c) = guard.as_mut() {
                 c.stop().await;

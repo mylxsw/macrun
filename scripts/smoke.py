@@ -12,6 +12,7 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0)
 config=root/'worker.toml';config.write_text(f'[mcp.fixture]\ncommand = {json.dumps(sys.executable)}\nargs = [{json.dumps(str(fixture))}]\n')
 base=[str(binary),'--socket',sock,'--workspace',str(source)]
 children=[];logs=[]
+transport=os.environ.get("MACRUN_TEST_TRANSPORT","quic")
 def spawn(args):
  f=open(root/f'process-{len(children)}.log','w');logs.append(f)
  p=subprocess.Popen([str(binary),*args],stdout=f,stderr=f);children.append(p);return p
@@ -38,13 +39,17 @@ def submit(command,**extra):return call('exec.start',command=command,cwd=str(mir
 try:
  cli('init','--data',str(server))
  srvargs=['--socket',sock,'serve','--listen',f'127.0.0.1:{port}','--data',str(server)]
+ if transport in ('tcp','auto'):
+  srvargs+=['--tcp-listen',f'127.0.0.1:{port}']
+  if transport=='auto':srvargs[srvargs.index('--listen')+1]='127.0.0.1:0'
  srv=spawn(srvargs)
  for _ in range(60):
   if pathlib.Path(sock).exists():break
   time.sleep(.05)
  assert 'worker_offline' in cli('exec','--cwd','/tmp','true',ok=False)
- wrkargs=['worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config)]
+ wrkargs=['worker','--server',(f'{transport}://' if transport!='quic' else '')+f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config)]
  wrk=spawn(wrkargs);ready()
+ assert call('status')['worker']['transport']==('quic' if transport=='quic' else 'tcp_tls')
  # Malformed IDs must return an actionable error without killing the CLI connection.
  assert 'invalid_argument' in cli('call','sync.get','--args','{"job_id":"project-name"}',ok=False)
 
@@ -64,6 +69,8 @@ try:
  blob=os.urandom(1400000);local=root/'binary';local.write_bytes(blob)
  cli('upload',str(local),str(mirror/'binary'));cli('download',str(mirror/'binary'),str(root/'download'))
  assert (root/'download').read_bytes()==blob
+ cli('download','--resume',str(mirror/'binary'),str(root/'resumed'))
+ assert (root/'resumed').read_bytes()==blob and not (root/'resumed.macrun-download').exists()
  call('file.write',path=str(mirror/'text'),text='abcdef')
  assert call('file.read',path=str(mirror/'text'),offset=2,length=3,text=True)['text']=='cde'
  assert any(x['name']=='binary' for x in call('file.list',path=str(mirror))['entries'])
@@ -97,7 +104,7 @@ try:
  def rpc(method,params={}):
   client.stdin.write(json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params})+'\n');client.stdin.flush();return json.loads(client.stdout.readline())
  assert rpc('initialize',{'protocolVersion':'2025-03-26'})['result']['capabilities']['tools']=={}
- assert len(rpc('tools/list')['result']['tools'])==14
+ assert len(rpc('tools/list')['result']['tools'])==15
  out=rpc('tools/call',{'name':'file_image','arguments':{'path':str(mirror/'shot.png')}})
  assert any(c['type']=='image' for c in out['result']['content'])
  out=rpc('tools/call',{'name':'task_get','arguments':{'task_id':mcp()}})
@@ -122,7 +129,9 @@ try:
  else:raise AssertionError('restart did not mark unknown')
  assert not (mirror/'restart-count').exists()
  # Operational logs are JSON lines; request payloads never appear in them.
- records=[json.loads(line) for path in root.glob('process-*.log') for line in path.read_text().splitlines() if line.startswith('{')]
+ # A live writer (or the deliberately SIGKILLed server) can leave a partial
+ # trailing record. Validate every complete JSON line, not an in-flight suffix.
+ records=[json.loads(line) for path in root.glob('process-*.log') for line in path.read_text().splitlines(keepends=True) if line.startswith('{') and line.endswith('\n')]
  operations=[r for r in records if r.get('event')=='operation']
  assert operations and all(r['time'].endswith('Z') and r['duration_ms']>=0 for r in operations)
  assert any(r.get('error_code')=='invalid_argument' for r in operations)

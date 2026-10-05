@@ -7,7 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
-    os::unix::fs::{PermissionsExt, symlink},
+    os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Component, Path, PathBuf},
 };
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,7 +51,61 @@ pub fn hash(path: &Path) -> Outcome<String> {
     }
     Ok(h.finalize().to_hex().to_string())
 }
+#[derive(Clone, PartialEq, Eq)]
+struct Fingerprint {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mtime: i64,
+    mtime_ns: i64,
+    ctime: i64,
+    ctime_ns: i64,
+    mode: u32,
+}
+impl From<&fs::Metadata> for Fingerprint {
+    fn from(m: &fs::Metadata) -> Self {
+        Self {
+            dev: m.dev(),
+            ino: m.ino(),
+            size: m.len(),
+            mtime: m.mtime(),
+            mtime_ns: m.mtime_nsec(),
+            ctime: m.ctime(),
+            ctime_ns: m.ctime_nsec(),
+            mode: m.mode(),
+        }
+    }
+}
+type HashCache = BTreeMap<PathBuf, (Fingerprint, String, std::time::Instant)>;
+static HASH_CACHE: std::sync::OnceLock<std::sync::Mutex<HashCache>> = std::sync::OnceLock::new();
+/// ctime catches same-size edits with restored mtime. Periodic full verification
+/// bounds stale entries on filesystems with unreliable metadata. Strict bypasses it.
+pub fn cached_hash(path: &Path, strict: bool) -> Outcome<String> {
+    let before = fs::metadata(path).map_err(err)?;
+    let key = Fingerprint::from(&before);
+    let cache = HASH_CACHE.get_or_init(Default::default);
+    if !strict
+        && let Some((old, hash, sampled)) = cache.lock().unwrap().get(path)
+        && old == &key
+        && sampled.elapsed() < std::time::Duration::from_secs(600)
+    {
+        return Ok(hash.clone());
+    }
+    let value = hash(path)?;
+    if Fingerprint::from(&fs::metadata(path).map_err(err)?) != key {
+        return Err(Fault::new("source_changed", path.display()));
+    }
+    let mut cache = cache.lock().unwrap();
+    if cache.len() >= 200_000 {
+        cache.clear();
+    }
+    cache.insert(path.into(), (key, value.clone(), std::time::Instant::now()));
+    Ok(value)
+}
 pub fn scan(root: &Path, excludes: &[String]) -> Outcome<Manifest> {
+    scan_with(root, excludes, true)
+}
+pub fn scan_with(root: &Path, excludes: &[String], strict: bool) -> Outcome<Manifest> {
     let root = fs::canonicalize(root).map_err(err)?;
     let mut patterns = globset::GlobSetBuilder::new();
     for p in excludes {
@@ -114,7 +168,7 @@ pub fn scan(root: &Path, excludes: &[String]) -> Outcome<Manifest> {
                 target: target.to_str().ok_or_else(|| err("non-UTF8 link"))?.into(),
             }
         } else if meta.is_file() {
-            let h = hash(path)?;
+            let h = cached_hash(path, strict)?;
             let after = fs::metadata(path).map_err(err)?;
             if meta.len() != after.len() || meta.modified().ok() != after.modified().ok() {
                 return Err(Fault::new("source_changed", &rel));
@@ -132,13 +186,14 @@ pub fn scan(root: &Path, excludes: &[String]) -> Outcome<Manifest> {
     }
     Ok(out)
 }
-fn read_manifest(path: &Path) -> Outcome<Manifest> {
+pub fn read_manifest(path: &Path) -> Outcome<Manifest> {
     if !path.exists() {
         return Ok(Manifest::default());
     }
     serde_json::from_slice(&fs::read(path).map_err(err)?).map_err(err)
 }
 pub struct Receiver {
+    strict: bool,
     pub root: PathBuf,
     pub state: PathBuf,
     pub manifest: Manifest,
@@ -146,7 +201,18 @@ pub struct Receiver {
 }
 impl Receiver {
     pub fn prepare(root: &Path, state: &Path, manifest: Manifest) -> Outcome<Self> {
+        Self::prepare_with(root, state, manifest, true)
+    }
+    pub fn prepare_with(
+        root: &Path,
+        state: &Path,
+        manifest: Manifest,
+        strict: bool,
+    ) -> Outcome<Self> {
         fs::create_dir_all(root).map_err(err)?;
+        crate::retention::incoming(root, crate::model::now().saturating_sub(86_400_000))
+            .map_err(err)?;
+        crate::workspace::invalidate(root).map_err(err)?;
         fs::create_dir_all(state).map_err(err)?;
         let old = read_manifest(&state.join("manifest.json"))?;
         let pending = read_manifest(&state.join("sync_incomplete.json"))?;
@@ -222,12 +288,14 @@ impl Receiver {
                     {
                         return Err(Fault::new("path_conflict", p));
                     }
-                    if meta.is_some() && hash(&dest)? == *expected {
-                        fs::set_permissions(
-                            &dest,
-                            fs::Permissions::from_mode(if *executable { 0o755 } else { 0o644 }),
-                        )
-                        .map_err(err)?;
+                    if let Some(meta) = &meta
+                        && cached_hash(&dest, strict)? == *expected
+                    {
+                        let mode = if *executable { 0o755 } else { 0o644 };
+                        if meta.permissions().mode() & 0o777 != mode {
+                            fs::set_permissions(&dest, fs::Permissions::from_mode(mode))
+                                .map_err(err)?;
+                        }
                     } else {
                         needed.push(p.clone());
                     }
@@ -235,6 +303,7 @@ impl Receiver {
             }
         }
         Ok(Self {
+            strict,
             root: root.into(),
             state: state.into(),
             manifest,
@@ -273,13 +342,19 @@ impl Receiver {
         }
         for (p, e) in &self.manifest.entries {
             if let Entry::File { hash: h, .. } = e
-                && hash(&self.root.join(p))? != *h
+                && cached_hash(&self.root.join(p), self.strict)? != *h
             {
                 return Err(err(format!("incomplete file {p}")));
             }
         }
         wire::atomic_json(&self.state.join("manifest.json"), &self.manifest).map_err(err)?;
         fs::remove_file(self.state.join("sync_incomplete.json")).map_err(err)?;
+        fs::create_dir_all(self.root.join(".macrun")).map_err(err)?;
+        let generation = blake3::hash(&serde_json::to_vec(&self.manifest).map_err(err)?)
+            .to_hex()
+            .to_string();
+        wire::private_write(&self.root.join(".macrun/generation"), generation.as_bytes())
+            .map_err(err)?;
         Ok(())
     }
 }
@@ -299,4 +374,85 @@ fn ensure_parents(root: &Path, dest: &Path) -> Outcome<()> {
         }
     }
     Ok(())
+}
+
+/// Bounded frames for large file trees; binary file data follows on the same stream.
+pub async fn send_manifest<W: tokio::io::AsyncWrite + Unpin>(
+    out: &mut W,
+    manifest: &Manifest,
+) -> anyhow::Result<()> {
+    let entries: Vec<_> = manifest.entries.iter().collect();
+    for page in entries.chunks(256) {
+        wire::send(
+            out,
+            &crate::model::Event::ManifestPage {
+                entries: page
+                    .iter()
+                    .map(|(k, v)| ((*k).clone(), (*v).clone()))
+                    .collect(),
+                skipped: vec![],
+                last: false,
+            },
+        )
+        .await?;
+    }
+    for page in manifest.skipped.chunks(256) {
+        wire::send(
+            out,
+            &crate::model::Event::ManifestPage {
+                entries: BTreeMap::new(),
+                skipped: page.to_vec(),
+                last: false,
+            },
+        )
+        .await?;
+    }
+    wire::send(
+        out,
+        &crate::model::Event::ManifestPage {
+            entries: BTreeMap::new(),
+            skipped: vec![],
+            last: true,
+        },
+    )
+    .await
+}
+pub async fn recv_manifest<R: tokio::io::AsyncRead + Unpin>(
+    input: &mut R,
+) -> anyhow::Result<Manifest> {
+    let mut manifest = Manifest::default();
+    let mut bytes = 0usize;
+    loop {
+        let page = wire::recv::<_, crate::model::Event>(input).await?;
+        bytes += serde_json::to_vec(&page)?.len();
+        anyhow::ensure!(
+            bytes <= 128 * 1024 * 1024,
+            "manifest exceeds 128 MiB aggregate limit"
+        );
+        let crate::model::Event::ManifestPage {
+            entries,
+            skipped,
+            last,
+        } = page
+        else {
+            anyhow::bail!("expected manifest page")
+        };
+        for (path, entry) in entries {
+            relative(&path)?;
+            anyhow::ensure!(
+                manifest.entries.insert(path, entry).is_none(),
+                "duplicate manifest path"
+            );
+        }
+        manifest.skipped.extend(skipped);
+        if last {
+            return Ok(manifest);
+        }
+    }
+}
+
+pub fn digest(manifest: &Manifest) -> anyhow::Result<String> {
+    Ok(blake3::hash(&serde_json::to_vec(manifest)?)
+        .to_hex()
+        .to_string())
 }

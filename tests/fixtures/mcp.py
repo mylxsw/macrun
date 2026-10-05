@@ -21,6 +21,13 @@ for line in sys.stdin:
     elif method=='tools/call':
         a=args.get('arguments',{})
         if a.get('crash'): os._exit(2)
+        if a.get('barrier'):
+            open(a['barrier']['arrive'],'w').close()
+            deadline=time.monotonic()+3
+            while not os.path.exists(a['barrier']['other']) and time.monotonic()<deadline: time.sleep(.01)
+            if not os.path.exists(a['barrier']['other']):
+                print(json.dumps({'jsonrpc':'2.0','id':v['id'],'result':{'isError':True,'content':[{'type':'text','text':'resource group blocked independent work'}]}}),flush=True)
+                continue
         if a.get('serial_probe'):
             # Model a physical desktop resource shared by independent backend processes.
             try:

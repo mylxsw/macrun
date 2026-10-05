@@ -1,0 +1,1016 @@
+{
+  "baseline_commit": "ba326790ea0cc24038e69dc1187496104f05fae7",
+  "runs": [
+    {
+      "before": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 17448.33,
+          "phases_ms": {
+            "dispatch": 87,
+            "scan": 14,
+            "syncing": 17331
+          },
+          "sync": {
+            "bytes": 4096071,
+            "files": 1001,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 91.71,
+            "phases_ms": {
+              "dispatch": 32,
+              "scan": 13,
+              "syncing": 35
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 92.55,
+            "phases_ms": {
+              "dispatch": 34,
+              "scan": 14,
+              "syncing": 36
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 95.75,
+            "phases_ms": {
+              "dispatch": 29,
+              "scan": 14,
+              "syncing": 43
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 462.93,
+          "phases_ms": {
+            "dispatch": 39,
+            "scan": 48,
+            "syncing": 357
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 237.78,
+            "phases_ms": {
+              "dispatch": 70,
+              "scan": 48,
+              "syncing": 109
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 238.91,
+            "phases_ms": {
+              "dispatch": 69,
+              "scan": 47,
+              "syncing": 113
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 235.33,
+            "phases_ms": {
+              "dispatch": 72,
+              "scan": 47,
+              "syncing": 108
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 539.06,
+          "phases_ms": {
+            "dispatch": 69,
+            "scan": 47,
+            "syncing": 411
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 1075.45,
+          "worker_task_records_added": 128
+        },
+        "upload_64MiB": {
+          "wall_ms": 1359.42,
+          "worker_task_records_added": 130
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 634.47
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 17.15,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 16.7,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 16.59,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      },
+      "after": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 2414.68,
+          "phases_ms": {
+            "dispatch": 6,
+            "scan": 17,
+            "syncing": 2374
+          },
+          "sync": {
+            "bytes": 4096071,
+            "commit_ms": 38,
+            "files": 1001,
+            "prepare_ms": 7,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 47.08,
+            "phases_ms": {
+              "dispatch": 2,
+              "scan": 5,
+              "syncing": 25
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 10,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 41.91,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 24
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 7,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 41.86,
+            "phases_ms": {
+              "dispatch": 2,
+              "scan": 3,
+              "syncing": 26
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 9,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 496.06,
+          "phases_ms": {
+            "dispatch": 4,
+            "scan": 38,
+            "syncing": 437
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 41,
+            "files": 1,
+            "prepare_ms": 10,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 33.82,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 22
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 5,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 41.1,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 23
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 5,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 37.77,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 22
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 396.47,
+          "phases_ms": {
+            "dispatch": 2,
+            "scan": 37,
+            "syncing": 343
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 38,
+            "files": 1,
+            "prepare_ms": 8,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 261.88,
+          "worker_task_records_added": 1
+        },
+        "upload_64MiB": {
+          "wall_ms": 325.44,
+          "worker_task_records_added": 1
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 626.6
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 16.86,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.03,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.22,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "new_protocol_checks": "summary omits images; image references persisted; MCP ping bypasses long wait; two image reads use one binary download; independent roots sync concurrently; active build blocks sync without disconnecting worker",
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      }
+    },
+    {
+      "before": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 4923.22,
+          "phases_ms": {
+            "dispatch": 9,
+            "scan": 13,
+            "syncing": 4893
+          },
+          "sync": {
+            "bytes": 4096071,
+            "files": 1001,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 97.23,
+            "phases_ms": {
+              "dispatch": 36,
+              "scan": 14,
+              "syncing": 40
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 96.05,
+            "phases_ms": {
+              "dispatch": 34,
+              "scan": 14,
+              "syncing": 37
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 90.13,
+            "phases_ms": {
+              "dispatch": 30,
+              "scan": 13,
+              "syncing": 39
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 447.95,
+          "phases_ms": {
+            "dispatch": 34,
+            "scan": 46,
+            "syncing": 357
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 227.09,
+            "phases_ms": {
+              "dispatch": 68,
+              "scan": 47,
+              "syncing": 106
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 224.82,
+            "phases_ms": {
+              "dispatch": 63,
+              "scan": 47,
+              "syncing": 108
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 229.19,
+            "phases_ms": {
+              "dispatch": 69,
+              "scan": 47,
+              "syncing": 105
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 460.22,
+          "phases_ms": {
+            "dispatch": 67,
+            "scan": 46,
+            "syncing": 338
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 1019.01,
+          "worker_task_records_added": 128
+        },
+        "upload_64MiB": {
+          "wall_ms": 1463.48,
+          "worker_task_records_added": 130
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 643.67
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 16.45,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 16.33,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.14,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      },
+      "after": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 3041.03,
+          "phases_ms": {
+            "dispatch": 2,
+            "scan": 15,
+            "syncing": 3007
+          },
+          "sync": {
+            "bytes": 4096071,
+            "commit_ms": 42,
+            "files": 1001,
+            "prepare_ms": 7,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 40.55,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 27
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 11,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 64.6,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 21
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 5,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 47.67,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 7,
+              "syncing": 24
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 11,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 1556.7,
+          "phases_ms": {
+            "dispatch": 3,
+            "scan": 38,
+            "syncing": 1377
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 39,
+            "files": 1,
+            "prepare_ms": 9,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 102.09,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 87
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 70,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 153.39,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 22
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 8,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 53.1,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 10,
+              "syncing": 28
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 14,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 1648.8,
+          "phases_ms": {
+            "dispatch": 118,
+            "scan": 36,
+            "syncing": 1485
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 39,
+            "files": 1,
+            "prepare_ms": 20,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 1415.54,
+          "worker_task_records_added": 1
+        },
+        "upload_64MiB": {
+          "wall_ms": 1278.89,
+          "worker_task_records_added": 1
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 704.19
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 17.07,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.25,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 16.94,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "new_protocol_checks": "summary omits images; image references persisted; MCP ping bypasses long wait; two image reads use one binary download; independent roots sync concurrently; active build blocks sync without disconnecting worker",
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      }
+    },
+    {
+      "before": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 13364.16,
+          "phases_ms": {
+            "dispatch": 9,
+            "scan": 13,
+            "syncing": 13328
+          },
+          "sync": {
+            "bytes": 4096071,
+            "files": 1001,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 97.33,
+            "phases_ms": {
+              "dispatch": 37,
+              "scan": 14,
+              "syncing": 37
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 92.2,
+            "phases_ms": {
+              "dispatch": 35,
+              "scan": 13,
+              "syncing": 38
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 104.94,
+            "phases_ms": {
+              "dispatch": 40,
+              "scan": 13,
+              "syncing": 39
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 543.34,
+          "phases_ms": {
+            "dispatch": 42,
+            "scan": 50,
+            "syncing": 417
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 248.82,
+            "phases_ms": {
+              "dispatch": 80,
+              "scan": 48,
+              "syncing": 112
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 233.04,
+            "phases_ms": {
+              "dispatch": 2,
+              "scan": 47,
+              "syncing": 174
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 239.45,
+            "phases_ms": {
+              "dispatch": 72,
+              "scan": 47,
+              "syncing": 108
+            },
+            "sync": {
+              "bytes": 0,
+              "files": 0,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 470.28,
+          "phases_ms": {
+            "dispatch": 70,
+            "scan": 47,
+            "syncing": 346
+          },
+          "sync": {
+            "bytes": 67108864,
+            "files": 1,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 1093.86,
+          "worker_task_records_added": 128
+        },
+        "upload_64MiB": {
+          "wall_ms": 1386.15,
+          "worker_task_records_added": 130
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 621.51
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 17.41,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.08,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 17.53,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      },
+      "after": {
+        "environment": {
+          "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+          "architecture": "arm64",
+          "transport": "QUIC loopback; no latency/loss shaping",
+          "profile": "release"
+        },
+        "small_1000x4KiB_first": {
+          "wall_ms": 1929.35,
+          "phases_ms": {
+            "dispatch": 2,
+            "scan": 14,
+            "syncing": 1903
+          },
+          "sync": {
+            "bytes": 4096071,
+            "commit_ms": 50,
+            "files": 1001,
+            "prepare_ms": 5,
+            "skipped": []
+          }
+        },
+        "small_noop_3": [
+          {
+            "wall_ms": 55.73,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 7,
+              "syncing": 31
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 6,
+              "files": 0,
+              "prepare_ms": 13,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 41.11,
+            "phases_ms": {
+              "dispatch": 2,
+              "scan": 4,
+              "syncing": 24
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 5,
+              "files": 0,
+              "prepare_ms": 10,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 41.44,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 4,
+              "syncing": 25
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 5,
+              "files": 0,
+              "prepare_ms": 10,
+              "skipped": []
+            }
+          }
+        ],
+        "add_64MiB": {
+          "wall_ms": 488.44,
+          "phases_ms": {
+            "dispatch": 2,
+            "scan": 35,
+            "syncing": 440
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 37,
+            "files": 1,
+            "prepare_ms": 8,
+            "skipped": []
+          }
+        },
+        "mixed_noop_3": [
+          {
+            "wall_ms": 31.36,
+            "phases_ms": {
+              "dispatch": 0,
+              "scan": 3,
+              "syncing": 16
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 3,
+              "files": 0,
+              "prepare_ms": 7,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 32.47,
+            "phases_ms": {
+              "dispatch": 1,
+              "scan": 3,
+              "syncing": 16
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 3,
+              "files": 0,
+              "prepare_ms": 7,
+              "skipped": []
+            }
+          },
+          {
+            "wall_ms": 24.45,
+            "phases_ms": {
+              "dispatch": 0,
+              "scan": 3,
+              "syncing": 16
+            },
+            "sync": {
+              "bytes": 0,
+              "commit_ms": 3,
+              "files": 0,
+              "prepare_ms": 6,
+              "skipped": []
+            }
+          }
+        ],
+        "change_one_byte_of_64MiB": {
+          "wall_ms": 379.63,
+          "phases_ms": {
+            "dispatch": 1,
+            "scan": 35,
+            "syncing": 334
+          },
+          "sync": {
+            "bytes": 67108864,
+            "commit_ms": 36,
+            "files": 1,
+            "prepare_ms": 7,
+            "skipped": []
+          }
+        },
+        "download_64MiB": {
+          "wall_ms": 250.54,
+          "worker_task_records_added": 1
+        },
+        "upload_64MiB": {
+          "wall_ms": 313.78,
+          "worker_task_records_added": 1
+        },
+        "two_backends_each_sleep_300ms": {
+          "wall_ms": 631.36
+        },
+        "repeat_completed_image_task": {
+          "raw_image_bytes": 1573919,
+          "samples": [
+            {
+              "wall_ms": 24.15,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 18.41,
+              "image_base64_bytes": 2098560
+            },
+            {
+              "wall_ms": 18.7,
+              "image_base64_bytes": 2098560
+            }
+          ]
+        },
+        "new_protocol_checks": "summary omits images; image references persisted; MCP ping bypasses long wait; two image reads use one binary download; independent roots sync concurrently; active build blocks sync without disconnecting worker",
+        "assertions": "sync content, upload/download hashes, repeated image payload equality all passed"
+      }
+    }
+  ]
+}

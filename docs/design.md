@@ -3,7 +3,7 @@
 ## 职责
 
 - `main/frontend`：JSON CLI 与 stdio MCP；MCP 工具定义、图片内容输出；CLI 分块传文件。
-- `server`：本机 Unix socket 接口、单个 QUIC peer 注册、转发通用请求、源目录扫描与同步任务结果。
+- `server`：本机 Unix socket 接口、多个 QUIC peer 注册、转发通用请求、源目录扫描与同步任务结果。
 - `worker`：主动连接、心跳重连、接收同步流，向持续存活的 Engine 分派通用请求。
 - `engine`：worker 所有的任务、去重、结果落盘、日志查询、取消、backend 会话。
 - `backend`：通用 stdio MCP 初始化、序列化 JSON-RPC、持久进程和 session generation。
@@ -14,7 +14,7 @@
 
 命令和 MCP 调用的 task_id 由调用者的 UUID request_id 指定。worker 先记录 accepted，再启动异步任务；请求参数同编号去重。task.get 返回状态和持久输出。服务器失联不会取消任务，结果查询可在服务器重启后重新路由到 worker。
 
-同步由服务器负责源目录，使用服务器生成的 job_id，结果在 server-data/sync-jobs。单个同步任务可以和普通命令并存，但 agent 负责源目录一致性。如果服务器重启，旧同步标记失败，必须重新同步。单 worker 同时只接受一个同步。
+同步由服务器负责源目录，使用服务器生成的 job_id，结果在 server-data/sync-jobs。同步与普通命令可在不重叠的工作区并存，重叠目录通过 worker 进程级租约互斥；Agent 可把命令绑定到同步返回的 generation。如果服务器重启，旧同步标记失败，必须重新同步。新端允许同 worker 的独立工作区同时同步；旧协议仍串行。
 
 ## 断线与重启
 
@@ -36,10 +36,15 @@ worker 重启：持久 accepted/running 记录标记 unknown；对命令的 proc
 
 ## 目录和文件
 
-同步 config 与命令 cwd 独立。watch 每轮扫描、传变化文件并校验源端第二次扫描；退出 watch 不撤销已发起的同步。轮询重试可修复中断状态；不是原子工作目录快照。
+同步 config 与命令 cwd 独立。watch 由文件系统事件触发并定期严格校验；每轮检查元数据、传变化文件并确认源端清单，内容哈希可缓存；退出 watch 不撤销已发起的同步。轮询重试可修复中断状态；不是原子工作目录快照。
 
-文件读取按字节偏移，二进制用 base64。图片限 8 MiB，QUIC JSON 帧限 16 MiB，文件块限 512 KiB。下载使用大小/mtime 变化检测（不是全文件快照锁），上传写临时文件后重命名，失败留临时文件；初版不自动续传。file.write 可直接覆盖，调用者负责避免与同步相互覆盖。
+文件读取按字节偏移，二进制用 base64。图片限 8 MiB，QUIC JSON 帧限 16 MiB，文件块限 512 KiB。下载使用大小/mtime 变化检测（不是全文件快照锁），上传写临时文件后重命名，失败留临时文件；新端 CLI 上传支持同 transfer_id 的前缀校验续传，旧端保留分块路径。file.write 可直接覆盖，调用者负责避免与同步相互覆盖。
 
 ## 兼容性
 
 v0.2 协议 2，与 v0.1 不互通。保留证书/token 身份方式，不做安全产品化扩展。QUIC 是否适用于真实美中网络要独立验证；当前没有 TCP fallback。电脑的 GUI 会话与本地 MCP 安装仍是使用前提。
+
+
+## 性能协议扩展
+
+协议 2 的可选能力协商、连续文件流、清单摘要与分页、哈希缓存、工作区租约/generation、图片产物分离和任务等待，见 [performance.md](performance.md)。该文档描述新能力与旧端兼容路径的准确边界。
