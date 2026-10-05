@@ -1,0 +1,82 @@
+/* Native-style selection and fast feedback; typography and v2 geometry stay intact. */
+button,
+.switch {
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+button:disabled,
+.switch:disabled {
+  cursor: default;
+}
+.sidebar,
+.page-header,
+.tag,
+.status-card,
+.tray,
+kbd {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.page-view[hidden] {
+  display: none;
+}
+button {
+  transition:
+    background-color 90ms ease-out,
+    border-color 90ms ease-out;
+}
+button:active {
+  transition-duration: 0ms;
+}
+button[aria-busy="true"] {
+  position: relative;
+}
+button[aria-busy="true"]::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pending-turn 700ms linear infinite;
+}
+.switch {
+  transition: background-color 140ms ease-out;
+}
+.switch::before {
+  transition: transform 140ms ease-out;
+}
+.switch:checked::before {
+  left: 3px;
+  transform: translateX(14px);
+}
+::selection {
+  background: Highlight;
+  color: HighlightText;
+}
+@keyframes pending-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .switch,
+  .switch::before {
+    transition: none;
+  }
+  button[aria-busy="true"]::after {
+    animation: none;
+  }
+}
+.term {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.term:focus-visible {
+  outline: 2px solid #2f5bea;
+  outline-offset: 2px;
+}

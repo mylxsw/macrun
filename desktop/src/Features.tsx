@@ -60,11 +60,13 @@ export function Approvals({
   act,
   disabled,
   compact = false,
+  pending = () => false,
 }: {
   tasks: Task[];
   act: Act;
   disabled: boolean;
   compact?: boolean;
+  pending?: (id: string) => boolean;
 }) {
   const waiting = tasks.filter((t) => t.status === "awaiting_approval");
   const [index, setIndex] = useState(0);
@@ -108,7 +110,9 @@ export function Approvals({
                 }}
                 aria-hidden
               />
-              <strong>{desktop ? "桌面操作需要你确认" : "命令需要你确认"}</strong>
+              <strong>
+                {desktop ? "桌面操作需要你确认" : "命令需要你确认"}
+              </strong>
               <small className="approval-left" role="timer">
                 {left} 秒后过期，Agent 会收到 approval_expired
               </small>
@@ -144,15 +148,22 @@ export function Approvals({
                   {r}
                 </span>
               ))}
-              {t.arguments.cwd && <small className="mono">{t.arguments.cwd}</small>}
+              {t.arguments.cwd && (
+                <small className="mono">{t.arguments.cwd}</small>
+              )}
             </div>
             <div className="actions">
-              <button disabled={disabled} onClick={() => decide(t, false)}>
+              <button
+                disabled={disabled || pending(t.task_id)}
+                aria-busy={pending(t.task_id)}
+                onClick={() => decide(t, false)}
+              >
                 拒绝
               </button>
               <span className="push" />
               <button
-                disabled={disabled}
+                disabled={disabled || pending(t.task_id)}
+                aria-busy={pending(t.task_id)}
                 title={
                   desktop
                     ? "15 分钟内，同一后端的同一工具不再询问"
@@ -164,7 +175,8 @@ export function Approvals({
               </button>
               {!compact && (
                 <button
-                  disabled={disabled}
+                  disabled={disabled || pending(t.task_id)}
+                  aria-busy={pending(t.task_id)}
                   title="执行器重启后失效，可在设置与安全中撤销"
                   onClick={() => decide(t, true, "session")}
                 >
@@ -174,7 +186,8 @@ export function Approvals({
                 </button>
               )}
               <button
-                disabled={disabled}
+                disabled={disabled || pending(t.task_id)}
+                aria-busy={pending(t.task_id)}
                 className="primary"
                 onClick={() => decide(t, true)}
               >
@@ -359,7 +372,13 @@ export function Pairing({
               {result?.checks?.map((c: any) => (
                 <div className="feature-line" key={c.name}>
                   <span className={`check-icon ${c.ok ? "ok" : "warn"}`}>
-                    {c.ok ? <Check size={13} /> : c.optional ? <Info size={13} /> : <CircleAlert size={13} />}
+                    {c.ok ? (
+                      <Check size={13} />
+                    ) : c.optional ? (
+                      <Info size={13} />
+                    ) : (
+                      <CircleAlert size={13} />
+                    )}
                   </span>
                   <span className="grow">{c.name}</span>
                   <small>{c.ok ? "已通过" : "尚未通过"}</small>
@@ -574,7 +593,10 @@ export function DesktopTiers({
               ))}
             </div>
             {tools[tier].length > 0 && (
-              <small className="mono tier-tools" title={tools[tier].join(" · ")}>
+              <small
+                className="mono tier-tools"
+                title={tools[tier].join(" · ")}
+              >
                 {tools[tier].slice(0, 5).join(" · ")}
                 {tools[tier].length > 5 ? ` · 共 ${tools[tier].length} 个` : ""}
               </small>
@@ -609,7 +631,8 @@ export function AllowRules({
       <div className="feature-copy">
         <b>临时允许</b>
         <small>
-          在确认弹窗中选择“15 分钟内允许同类”或“本次运行允许”后生成；执行器重启后全部失效。
+          在确认弹窗中选择“15
+          分钟内允许同类”或“本次运行允许”后生成；执行器重启后全部失效。
         </small>
       </div>
       <div className="allow-rule-list">
@@ -1001,12 +1024,14 @@ export function BackendPanel({
   act,
   app,
   mode = "all",
+  active = true,
   read = readNative,
 }: {
   snapshot: Snapshot | null;
   act: Act;
   app: AppState | null;
   mode?: "permissions" | "advanced" | "all";
+  active?: boolean;
   read?: Act;
 }) {
   const [permissions, setPermissions] = useState<any>(null),
@@ -1067,7 +1092,7 @@ export function BackendPanel({
     }
   }, [read]);
   useEffect(() => {
-    if (!app || mode === "advanced") return;
+    if (!app || !active || mode === "advanced") return;
     const refreshPermissions = () => {
       if (document.visibilityState !== "hidden") void check();
     };
@@ -1080,7 +1105,7 @@ export function BackendPanel({
       document.removeEventListener("visibilitychange", refreshPermissions);
       window.clearInterval(timer);
     };
-  }, [!!app, mode, check]);
+  }, [!!app, mode, check, active]);
   const perform = async (
     name: string,
     action: () => Promise<void>,
@@ -1279,7 +1304,13 @@ export function BackendPanel({
                 <span
                   className={`check-icon ${c.ok ? "ok" : permissions && !c.optional ? "warn" : "unchecked"}`}
                 >
-                  {c.ok ? <Check size={13} /> : c.optional ? <Info size={13} /> : <CircleAlert size={13} />}
+                  {c.ok ? (
+                    <Check size={13} />
+                  ) : c.optional ? (
+                    <Info size={13} />
+                  ) : (
+                    <CircleAlert size={13} />
+                  )}
                 </span>
                 <div className="grow">
                   <b>{c.name}</b>
@@ -1327,14 +1358,16 @@ export function BackendPanel({
           <small className="input-permission-note">
             以上权限仅检查 Macrun
             应用，不代表桌面后端的权限。请为实际后端应用（例如 CuaDriver）授权，
-            并在“后端实拍与状态核对”中检查；旧版 macrun 的授权也不等同于 Macrun Desktop。
+            并在“后端实拍与状态核对”中检查；旧版 macrun 的授权也不等同于 Macrun
+            Desktop。
           </small>
-          {permissions && (!permissions.accessibility || !permissions.screen_recording) && (
-            <small className="input-permission-note">
-              如果系统设置中已开启，但当前应用仍未获授权，请完全退出后重新打开。
-              更换过签名的旧授权可能需要在系统设置中重新添加当前应用。返回此页后会自动刷新。
-            </small>
-          )}
+          {permissions &&
+            (!permissions.accessibility || !permissions.screen_recording) && (
+              <small className="input-permission-note">
+                如果系统设置中已开启，但当前应用仍未获授权，请完全退出后重新打开。
+                更换过签名的旧授权可能需要在系统设置中重新添加当前应用。返回此页后会自动刷新。
+              </small>
+            )}
           {permissionError && (
             <p className="error-text" role="alert">
               {permissionError}

@@ -303,13 +303,19 @@ test("navigation keeps all nine task states independently usable", async () => {
   }
   // Groups: in progress and needs attention sum their statuses.
   await user.click(screen.getByRole("button", { name: /^进行中\s*3$/ }));
-  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(3));
+  await waitFor(() =>
+    expect(taskList().getAllByRole("button")).toHaveLength(3),
+  );
   await user.click(screen.getByRole("button", { name: /^需关注\s*4$/ }));
-  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(4));
+  await waitFor(() =>
+    expect(taskList().getAllByRole("button")).toHaveLength(4),
+  );
   // Type filter is independent of status and reaches the worker query.
   await user.click(screen.getByRole("button", { name: /^全部\s*9$/ }));
   await user.click(screen.getByRole("button", { name: "桌面" }));
-  await waitFor(() => expect(taskList().getAllByRole("button")).toHaveLength(1));
+  await waitFor(() =>
+    expect(taskList().getAllByRole("button")).toHaveLength(1),
+  );
   expect(detail().getByText("task-unknown")).toBeTruthy();
   expect(
     bridge.invoke.mock.calls.some(
@@ -536,7 +542,7 @@ test("closing quit restores an underlying tools dialog before its original trigg
   expect(screen.queryByRole("dialog", { name: "退出 Macrun？" })).toBeNull();
   expect(document.activeElement).toBe(toolsClose);
   await user.tab();
-  expect(document.activeElement).toBe(toolsClose);
+  expect(document.activeElement).toBe(tools.querySelector("pre.term"));
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(document.activeElement).toBe(trigger);
@@ -733,7 +739,7 @@ test("live task directory actions retain the task identity for native validation
   });
 });
 
-test("overlapping actions remain busy until the last action completes", async () => {
+test("pending actions only disable their own controls and keep emergency stop available", async () => {
   await mount();
   const original = bridge.invoke.getMockImplementation()!;
   let finishPause!: () => void, finishStop!: () => void;
@@ -758,7 +764,8 @@ test("overlapping actions remain busy until the last action completes", async ()
   await act(async () => {
     finishPause();
   });
-  expect(pause.hasAttribute("disabled")).toBe(true);
+  expect(pause.hasAttribute("disabled")).toBe(false);
+  expect(stop.hasAttribute("disabled")).toBe(true);
   await act(async () => {
     finishStop();
   });
@@ -923,7 +930,9 @@ test.each([
 test("menu bar puts stop first, hides the server address and uses real switches", async () => {
   const user = userEvent.setup();
   await mount("?tray=1");
-  expect(screen.getByRole("heading", { name: "需要你确认 1 个请求" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "需要你确认 1 个请求" }),
+  ).toBeTruthy();
   expect(screen.queryByText(/127\.0\.0\.1/)).toBeNull();
   expect(screen.queryByText("最近")).toBeNull();
   // Running work is listed once; the waiting request is only in the prompt.
@@ -931,7 +940,9 @@ test("menu bar puts stop first, hides the server address and uses real switches"
   expect(working.queryByText("command-awaiting_approval")).toBeNull();
   expect(working.getByText("command-running")).toBeTruthy();
   await user.click(screen.getByRole("checkbox", { name: "接收新任务" }));
-  await user.click(screen.getByRole("checkbox", { name: "允许 Agent 操作桌面" }));
+  await user.click(
+    screen.getByRole("checkbox", { name: "允许 Agent 操作桌面" }),
+  );
   await user.click(screen.getByRole("button", { name: "全部停止" }));
   expect(
     bridge.invoke.mock.calls
@@ -946,11 +957,14 @@ test("menu bar puts stop first, hides the server address and uses real switches"
 
 test("idle menu bar collapses to status and switches", async () => {
   app.snapshot.tasks = app.snapshot.tasks.filter(
-    (task) => !["accepted", "running", "awaiting_approval"].includes(task.status),
+    (task) =>
+      !["accepted", "running", "awaiting_approval"].includes(task.status),
   );
   app.snapshot.active_count = 0;
   await mount("?tray=1");
-  expect(screen.getByRole("heading", { name: "空闲 · 等待 Agent" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "空闲 · 等待 Agent" }),
+  ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "全部停止" })).toBeNull();
   expect(screen.queryByRole("region", { name: "正在进行" })).toBeNull();
   expect(screen.getByText(/今天 9 个任务，1 个失败/)).toBeTruthy();
@@ -1001,16 +1015,48 @@ test("a new approval raises one notification when notifications are enabled", as
 
 test("expired approvals explain that nothing ran", async () => {
   const user = userEvent.setup();
-  Object.assign(app.snapshot.tasks.find((task) => task.status === "denied")!, {
-    error: {
-      code: "approval_expired",
-      message: "denied: approval expired after 60 seconds without a local decision",
+  Object.assign(
+    app.snapshot.tasks.find((task) => task.status === "denied")!,
+    {
+      error: {
+        code: "approval_expired",
+        message:
+          "denied: approval expired after 60 seconds without a local decision",
+      },
     },
-  });
+  );
   await mount();
   await user.click(navigation().getByRole("button", { name: "任务" }));
   await chooseStatus(user, "denied");
   await waitFor(() =>
     expect(detail().getByText(/60 秒内没有人处理这个确认请求/)).toBeTruthy(),
   );
+});
+
+test("visited pages preserve DOM and their own scroll position", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  const main = document.querySelector<HTMLElement>("main.content")!;
+  const list = screen.getByRole("region", { name: "任务列表" });
+  main.scrollTop = 170;
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  expect(main.scrollTop).toBe(0);
+  main.scrollTop = 80;
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  expect(screen.getByRole("region", { name: "任务列表" })).toBe(list);
+  expect(main.scrollTop).toBe(170);
+  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  expect(main.scrollTop).toBe(80);
+});
+
+test("Cmd+A in a log selects only that log, while page controls remain outside the range", async () => {
+  await mount();
+  const log = document.querySelector<HTMLPreElement>("pre.term")!;
+  log.focus();
+  fireEvent.keyDown(log, { key: "a", metaKey: true });
+  const selection = window.getSelection()!;
+  expect(selection.toString()).toBe(log.textContent);
+  expect(log.contains(selection.anchorNode)).toBe(true);
+  expect(log.contains(selection.focusNode)).toBe(true);
 });

@@ -10,7 +10,7 @@ import { SettingsPage } from "./SettingsPage";
 import { useTaskHistory, useReplayHistory } from "./taskHistory";
 import "./task-history.css";
 import appIcon from "./assets/macrun-icon.png";
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -44,6 +44,7 @@ import type { Task, Snapshot, AppState } from "./types";
 import "./style.css";
 import "./v3.css";
 import "./dark.css";
+import "./interaction.css";
 const isTauri = !!(window as any).__TAURI_INTERNALS__;
 const border = new URLSearchParams(location.search).has("border");
 const overlay = new URLSearchParams(location.search).has("overlay");
@@ -118,7 +119,10 @@ function useAppDialog(
     const dialog = ref.current;
     if (!open || !dialog) return;
     if (topDialog() === dialog)
-      dialog.querySelector<HTMLElement>(dialogControls)?.focus();
+      (
+        dialog.querySelector<HTMLElement>("button:not(:disabled)") ||
+        dialog.querySelector<HTMLElement>(dialogControls)
+      )?.focus();
     const handler = (event: KeyboardEvent) => {
       if (event.defaultPrevented || topDialog() !== dialog) return;
       if (event.key === "Escape") {
@@ -162,16 +166,49 @@ function useAppDialog(
   }, [open, ref, returnFocus]);
 }
 
+// Keep a visited page mounted, but skip its React work while another page is shown.
+const RetainedPage = React.memo(
+  function RetainedPage({
+    active,
+    children,
+  }: {
+    active: boolean;
+    children: React.ReactNode;
+  }) {
+    return (
+      <section className="page-view" hidden={!active}>
+        {children}
+      </section>
+    );
+  },
+  (previous, next) => !previous.active && !next.active,
+);
+
 function App() {
   const firstLoad = useRef(true);
-  const pendingActions = useRef(0);
+  const pendingActions = useRef(new Set<string>());
+  const [pending, setPending] = useState<string[]>([]);
+  const isPending = (action: string, id = "") =>
+    pending.includes(`control:${action}:${id}`);
+  const [visited, setVisited] = useState(["live"]);
+  const content = useRef<HTMLElement>(null);
+  const positions = useRef(new Map<string, number>());
+  const pageRef = useRef("live");
+  const setPage = (next: string) => {
+    if (!["live", "tasks", "desktop", "settings"].includes(next)) return;
+    if (content.current)
+      positions.current.set(pageRef.current, content.current.scrollTop);
+    pageRef.current = next;
+    setVisited((old) => (old.includes(next) ? old : [...old, next]));
+    updatePage(next);
+  };
   const quitReturnFocus = useRef<HTMLElement | null>(null);
   const toolsReturnFocus = useRef<HTMLElement | null>(null);
   const quitDialog = useRef<HTMLElement | null>(null);
   const toolsDialog = useRef<HTMLElement | null>(null);
   const toolsRequest = useRef(0);
   const trayContent = useRef<HTMLDivElement>(null);
-  const [page, setPage] = useState("live"),
+  const [page, updatePage] = useState("live"),
     [pairing, setPairing] = useState(false),
     [manualOpen, setManualOpen] = useState(false),
     [app, setApp] = useState<AppState | null>(null),
@@ -179,7 +216,6 @@ function App() {
     [available, setAvailable] = useState(false),
     [error, setError] = useState(""),
     [refreshWarning, setRefreshWarning] = useState(""),
-    [busy, setBusy] = useState(false),
     [filter, setFilter] = useState("all"),
     [kind, setKind] = useState(""),
     [query, setQuery] = useState(""),
@@ -188,6 +224,11 @@ function App() {
     [tools, setTools] = useState<ToolPage | null>(null),
     [toolsServer, setToolsServer] = useState(""),
     [notice, setNotice] = useState("");
+  const busy = pending.some((key) => !key.startsWith("control:"));
+  useLayoutEffect(() => {
+    if (content.current)
+      content.current.scrollTop = positions.current.get(page) || 0;
+  }, [page]);
   const tasks = snapshot?.tasks || [],
     running = tasks.filter(active),
     connected = available && snapshot?.connection.state === "connected",
@@ -223,8 +264,14 @@ function App() {
   ) => {
     setError("");
     setRefreshWarning("");
-    pendingActions.current += 1;
-    setBusy(true);
+    const payload = args.args as Record<string, unknown> | undefined;
+    const key =
+      command === "control"
+        ? `control:${args.action}:${payload?.task_id || payload?.server || ""}`
+        : command;
+    if (pendingActions.current.has(key)) return;
+    pendingActions.current.add(key);
+    setPending([...pendingActions.current]);
     try {
       const r = await invoke(command, args);
       if (success) setNotice(success);
@@ -239,8 +286,8 @@ function App() {
     } catch (e) {
       setError(String(e));
     } finally {
-      pendingActions.current -= 1;
-      setBusy(pendingActions.current > 0);
+      pendingActions.current.delete(key);
+      setPending([...pendingActions.current]);
     }
   };
   const control = (action: string, args: Record<string, unknown> = {}) =>
@@ -257,7 +304,7 @@ function App() {
       }[action],
     );
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isTauri || border) return;
     let disposed = false;
     const unsub: (() => void)[] = [];
     const on = <T,>(event: string, fn: (v: T) => void) =>
@@ -269,7 +316,9 @@ function App() {
       setSnapshot(s);
       setAvailable(true);
       setApp((a) =>
-        a ? { ...a, worker_running: true, worker_starting: false } : a,
+        a && (!a.worker_running || a.worker_starting)
+          ? { ...a, worker_running: true, worker_starting: false }
+          : a,
       );
     });
     on<boolean>("worker-starting", (starting) => {
@@ -296,13 +345,18 @@ function App() {
       setQuit(true);
     });
     on<string>("control-error", setError);
-    const timer = setInterval(() => {
-      refresh().catch(() => {});
-    }, 4000);
+    const foregroundRefresh = () => {
+      if (document.visibilityState !== "hidden") refresh().catch(() => {});
+    };
+    window.addEventListener("focus", foregroundRefresh);
+    document.addEventListener("visibilitychange", foregroundRefresh);
+    const timer = setInterval(foregroundRefresh, 30000);
     return () => {
       disposed = true;
       unsub.forEach((f) => f());
       clearInterval(timer);
+      window.removeEventListener("focus", foregroundRefresh);
+      document.removeEventListener("visibilitychange", foregroundRefresh);
     };
   }, []);
   useEffect(() => {
@@ -338,7 +392,9 @@ function App() {
     } catch {}
     // Approvals notify too: the panel is often closed while a request waits.
     const current = tasks.filter((t) =>
-      ["failed", "unknown", "timed_out", "awaiting_approval"].includes(t.status),
+      ["failed", "unknown", "timed_out", "awaiting_approval"].includes(
+        t.status,
+      ),
     );
     if (sessionStorage.getItem(key))
       current
@@ -608,7 +664,9 @@ function App() {
                   key={t.task_id}
                   onClick={() => choose(t)}
                 >
-                  <span className={`tray-kind ${t.kind === "mcp.call" ? "desktop" : ""}`}>
+                  <span
+                    className={`tray-kind ${t.kind === "mcp.call" ? "desktop" : ""}`}
+                  >
                     {t.kind === "mcp.call" ? (
                       <MousePointer2 size={13} />
                     ) : t.kind === "sync" ? (
@@ -619,7 +677,9 @@ function App() {
                   </span>
                   <span className="grow">
                     <span className="mono ellipsis tray-task-title">
-                      {t.kind === "mcp.call" ? `桌面 · ${t.arguments.tool}` : title(t)}
+                      {t.kind === "mcp.call"
+                        ? `桌面 · ${t.arguments.tool}`
+                        : title(t)}
                     </span>
                     <small className="ellipsis">
                       {t.progress
@@ -647,7 +707,8 @@ function App() {
                 type="checkbox"
                 aria-label="接收新任务"
                 checked={!paused}
-                disabled={!available || busy}
+                disabled={!available || isPending("pause")}
+                aria-busy={isPending("pause")}
                 onChange={pause}
               />
             </label>
@@ -658,7 +719,8 @@ function App() {
                 type="checkbox"
                 aria-label="允许 Agent 操作桌面"
                 checked={snapshot?.policy.desktop_enabled || false}
-                disabled={!available || busy}
+                disabled={!available || isPending("desktop")}
+                aria-busy={isPending("desktop")}
                 onChange={desktopToggle}
               />
             </label>
@@ -756,7 +818,7 @@ function App() {
           </small>
         </div>
       </aside>
-      <main className={`content page-${page}`} key={page}>
+      <main ref={content} className={`content page-${page}`}>
         <div className="drag title-drag" data-tauri-drag-region />
         {!isTauri && (
           <div className="alert">
@@ -773,21 +835,26 @@ function App() {
             </span>
           </div>
         )}
-        {page === "live" && (
-          <>
+        {visited.includes("live") && (
+          <RetainedPage active={page === "live"}>
             <header className="page-header">
               <div>
                 <h1>现场</h1>
                 <p>服务器上的 Agent 正通过 Macrun 在这台 Mac 上做的事。</p>
               </div>
               <div className="actions">
-                <button disabled={!available || busy} onClick={pause}>
+                <button
+                  disabled={!available || isPending("pause")}
+                  aria-busy={isPending("pause")}
+                  onClick={pause}
+                >
                   {paused ? <Play size={15} /> : <Pause size={15} />}{" "}
                   {paused ? "恢复接收" : "暂停接收新任务"}
                 </button>
                 <button
                   className="danger"
-                  disabled={!available || busy}
+                  disabled={!available || isPending("stop_all")}
+                  aria-busy={isPending("stop_all")}
                   onClick={stop}
                 >
                   <Square size={15} />
@@ -795,7 +862,12 @@ function App() {
                 </button>
               </div>
             </header>
-            <Approvals tasks={tasks} act={act} disabled={busy || !available} />
+            <Approvals
+              tasks={tasks}
+              act={act}
+              disabled={!available}
+              pending={(id) => isPending("approve", id)}
+            />
             {paused && (
               <div className="alert">
                 已暂停接收新任务。正在运行的任务继续完成；新请求返回 busy。
@@ -864,7 +936,8 @@ function App() {
                     task={t}
                     view={() => choose(t)}
                     cancel={() => control("cancel", { task_id: t.task_id })}
-                    disabled={!available || busy}
+                    disabled={!available || isPending("cancel", t.task_id)}
+                    pending={isPending("cancel", t.task_id)}
                     openDirectory={() =>
                       act("open_workspace", {
                         root: t.arguments.cwd || t.arguments.remote_root,
@@ -881,10 +954,10 @@ function App() {
                       {available && approvals.length
                         ? "请先处理上方的确认请求"
                         : available
-                        ? "等待 Agent 发起任务"
-                        : app?.worker_starting
-                          ? "正在启动执行器"
-                          : "连接你的服务器"}
+                          ? "等待 Agent 发起任务"
+                          : app?.worker_starting
+                            ? "正在启动执行器"
+                            : "连接你的服务器"}
                     </h3>
                     <p>
                       {available
@@ -937,10 +1010,10 @@ function App() {
                 )}
               </aside>
             </div>
-          </>
+          </RetainedPage>
         )}
-        {page === "tasks" && (
-          <>
+        {visited.includes("tasks") && (
+          <RetainedPage active={page === "tasks"}>
             <header className="page-header">
               <div>
                 <h1>任务</h1>
@@ -1062,6 +1135,42 @@ function App() {
                   aria-label="任务列表"
                   ref={history.list}
                   aria-busy={history.loading}
+                  data-updating={history.stale || undefined}
+                  onKeyDown={(event) => {
+                    if (
+                      !["ArrowUp", "ArrowDown", "Home", "End"].includes(
+                        event.key,
+                      ) ||
+                      event.altKey ||
+                      event.metaKey ||
+                      event.ctrlKey
+                    )
+                      return;
+                    const rows = Array.from(
+                      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                        ":scope > button",
+                      ),
+                    );
+                    const at = rows.indexOf(
+                      document.activeElement as HTMLButtonElement,
+                    );
+                    if (at < 0) return;
+                    event.preventDefault();
+                    const next =
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? rows.length - 1
+                          : Math.max(
+                              0,
+                              Math.min(
+                                rows.length - 1,
+                                at + (event.key === "ArrowDown" ? 1 : -1),
+                              ),
+                            );
+                    rows[next]?.focus();
+                    rows[next]?.click();
+                  }}
                 >
                   {filtered.map((t) => (
                     <button
@@ -1217,8 +1326,12 @@ function App() {
                       <small>输出</small>
                       <small>最后 8 KB</small>
                     </div>
-                    <pre className="term">
-                      {history.detailLoading
+                    <pre
+                      className="term"
+                      tabIndex={0}
+                      onKeyDown={selectLogText}
+                    >
+                      {history.detailLoading && !history.detailRefreshing
                         ? "正在读取输出…"
                         : sel.output_tail ||
                           sel.error?.message ||
@@ -1241,7 +1354,10 @@ function App() {
                       )}
                       {active(sel) && (
                         <button
-                          disabled={!available || busy}
+                          disabled={
+                            !available || isPending("cancel", sel.task_id)
+                          }
+                          aria-busy={isPending("cancel", sel.task_id)}
                           className="danger"
                           onClick={() =>
                             control("cancel", { task_id: sel.task_id })
@@ -1257,10 +1373,10 @@ function App() {
                 )}
               </section>
             </div>
-          </>
+          </RetainedPage>
         )}
-        {page === "desktop" && (
-          <>
+        {visited.includes("desktop") && (
+          <RetainedPage active={page === "desktop"}>
             <header className="page-header">
               <div>
                 <h1>桌面控制</h1>
@@ -1272,7 +1388,8 @@ function App() {
                   className="switch"
                   type="checkbox"
                   checked={snapshot?.policy.desktop_enabled || false}
-                  disabled={!available || busy}
+                  disabled={!available || isPending("desktop")}
+                  aria-busy={isPending("desktop")}
                   onChange={desktopToggle}
                 />
               </label>
@@ -1281,7 +1398,7 @@ function App() {
             <DesktopTiers
               snapshot={snapshot}
               act={act}
-              disabled={!available || busy}
+              disabled={!available || isPending("safety")}
             />
             <div className="desktop-grid">
               <section>
@@ -1326,7 +1443,8 @@ function App() {
                       </div>
                     </div>
                     <button
-                      disabled={!available || busy}
+                      disabled={!available || isPending("tools", b.name)}
+                      aria-busy={isPending("tools", b.name)}
                       onClick={async () => {
                         const request = ++toolsRequest.current;
                         const trigger = document.activeElement as HTMLElement;
@@ -1345,7 +1463,10 @@ function App() {
                     </button>
                     <button
                       className="ghost"
-                      disabled={!available || busy}
+                      disabled={
+                        !available || isPending("restart_backend", b.name)
+                      }
+                      aria-busy={isPending("restart_backend", b.name)}
                       onClick={() =>
                         control("restart_backend", { server: b.name })
                       }
@@ -1382,6 +1503,7 @@ function App() {
                 act={act}
                 app={app}
                 mode="permissions"
+                active={page === "desktop"}
               />
             </div>
             <h2 className="section-heading">操作时</h2>
@@ -1441,21 +1563,23 @@ function App() {
               act={act}
               onTasks={() => setPage("tasks")}
             />
-          </>
+          </RetainedPage>
         )}
-        {page === "settings" && (
-          <SettingsPage
-            app={app}
-            snapshot={snapshot}
-            busy={busy}
-            actionError={error}
-            available={available}
-            act={act}
-            refresh={refresh}
-            setError={setError}
-            onPair={() => setPairing(true)}
-            manualOpen={manualOpen}
-          />
+        {visited.includes("settings") && (
+          <RetainedPage active={page === "settings"}>
+            <SettingsPage
+              app={app}
+              snapshot={snapshot}
+              busy={busy}
+              actionError={error}
+              available={available}
+              act={act}
+              refresh={refresh}
+              setError={setError}
+              onPair={() => setPairing(true)}
+              manualOpen={manualOpen}
+            />
+          </RetainedPage>
         )}
       </main>
       {tools && (
@@ -1469,13 +1593,16 @@ function App() {
             aria-label="后端工具列表"
           >
             <h2>后端工具列表</h2>
-            <pre className="term">{JSON.stringify(tools, null, 2)}</pre>
+            <pre className="term" tabIndex={0} onKeyDown={selectLogText}>
+              {JSON.stringify(tools, null, 2)}
+            </pre>
             <div className="row between">
               <small>已读取 {tools.result?.tools?.length || 0} 个工具</small>
               <div className="actions">
                 {tools.result?.nextCursor && (
                   <button
-                    disabled={busy}
+                    disabled={isPending("tools", toolsServer)}
+                    aria-busy={isPending("tools", toolsServer)}
                     onClick={async () => {
                       const request = ++toolsRequest.current;
                       const next = await control("tools", {
@@ -1507,7 +1634,9 @@ function App() {
                       });
                     }}
                   >
-                    {busy ? "读取中…" : "读取更多工具"}
+                    {isPending("tools", toolsServer)
+                      ? "读取中…"
+                      : "读取更多工具"}
                   </button>
                 )}
                 <button autoFocus onClick={closeTools}>
@@ -1527,6 +1656,16 @@ function App() {
     </div>
   );
 }
+function selectLogText(event: React.KeyboardEvent<HTMLPreElement>) {
+  if (event.key.toLowerCase() !== "a" || (!event.metaKey && !event.ctrlKey))
+    return;
+  event.preventDefault();
+  const range = document.createRange();
+  range.selectNodeContents(event.currentTarget);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
 function TerminalTail({ text }: { text: string }) {
   const ref = useRef<HTMLPreElement>(null),
     follow = useRef(true);
@@ -1537,6 +1676,8 @@ function TerminalTail({ text }: { text: string }) {
   return (
     <pre
       className="term"
+      tabIndex={0}
+      onKeyDown={selectLogText}
       ref={ref}
       onScroll={() => {
         const el = ref.current;
@@ -1576,12 +1717,14 @@ function TaskCard({
   view,
   cancel,
   disabled,
+  pending = false,
   openDirectory,
 }: {
   task: Task;
   view: () => void;
   cancel: () => void;
   disabled: boolean;
+  pending?: boolean;
   openDirectory: () => void;
 }) {
   const sync = t.kind === "sync";
@@ -1592,11 +1735,10 @@ function TaskCard({
         <div className="row task-meta">
           <span className={`dot ${t.status}`} />
           <span className="tag desktop-active">桌面</span>
-          <span className="tag">
-            {tierLabels[t.desktop_tier || "control"]}
-          </span>
+          <span className="tag">{tierLabels[t.desktop_tier || "control"]}</span>
           <small>
-            {label(t.status)} · 已用时 <span className="mono">{duration(t)}</span>
+            {label(t.status)} · 已用时{" "}
+            <span className="mono">{duration(t)}</span>
           </small>
         </div>
         <h3 className="mono command">
@@ -1607,7 +1749,12 @@ function TaskCard({
         </small>
         <div className="actions">
           <button onClick={view}>查看任务详情</button>
-          <button disabled={disabled} className="danger push" onClick={cancel}>
+          <button
+            disabled={disabled}
+            aria-busy={pending}
+            className="danger push"
+            onClick={cancel}
+          >
             取消任务
           </button>
         </div>
@@ -1669,7 +1816,12 @@ function TaskCard({
               在终端打开目录
             </button>
           )}
-          <button disabled={disabled} className="danger push" onClick={cancel}>
+          <button
+            disabled={disabled}
+            aria-busy={pending}
+            className="danger push"
+            onClick={cancel}
+          >
             取消任务
           </button>
         </div>

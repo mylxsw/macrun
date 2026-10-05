@@ -89,7 +89,8 @@ test("a slow obsolete status request cannot overwrite a newer filter", async () 
   await waitFor(() => expect(result.current.tasks[0]?.task_id).toBe("first"));
   rerender({ ...props, filter: "failed" });
   await waitFor(() => expect(result.current.loading).toBe(true));
-  expect(result.current.tasks).toEqual([]);
+  expect(result.current.tasks[0]?.task_id).toBe("first");
+  expect(result.current.stale).toBe(true);
   rerender({ ...props, filter: "succeeded" });
   await waitFor(() => expect(result.current.tasks[0]?.task_id).toBe("newer"));
   await act(async () => old.resolve(page([task("obsolete", "failed")])));
@@ -280,4 +281,42 @@ test("MCP errors without text still explain failure and successful text is prese
     expect(result.current.selectedTask?.output_tail).toBe("工具已完成"),
   );
   expect(result.current.selectedTask?.error).toBeUndefined();
+});
+
+test("live output refresh keeps the confirmed detail while the next read is pending", async () => {
+  let hold = false;
+  const next = deferred<any>();
+  bridge.invoke.mockImplementation(async (_command, args) => {
+    if (args.action === "task_list") return page([task("live", "running")]);
+    if (hold) return next.promise;
+    return { ...task("live", "running"), output: { text: "confirmed output" } };
+  });
+  const props = {
+    ...initial(),
+    selected: "live",
+    snapshot: snapshot([task("live", "running")]),
+  };
+  const { result, rerender } = renderHook(useTaskHistory, {
+    initialProps: props,
+  });
+  await waitFor(() =>
+    expect(result.current.selectedTask?.output_tail).toBe("confirmed output"),
+  );
+  hold = true;
+  rerender({
+    ...props,
+    snapshot: snapshot([
+      { ...task("live", "running"), output_tail: "incoming" },
+    ]),
+  });
+  await waitFor(() => expect(result.current.detailLoading).toBe(true));
+  expect(result.current.detailRefreshing).toBe(true);
+  expect(result.current.selectedTask?.output_tail).toBe("confirmed output");
+  await act(async () =>
+    next.resolve({
+      ...task("live", "running"),
+      output: { text: "new output" },
+    }),
+  );
+  expect(result.current.selectedTask?.output_tail).toBe("new output");
 });

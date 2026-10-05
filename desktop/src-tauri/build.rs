@@ -4,6 +4,11 @@ fn main() {
             .file("src/platform.m")
             .flag("-std=c11")
             .compile("macrun_platform");
+        cc::Build::new()
+            .file("src/native_panel.m")
+            .flag("-fobjc-arc")
+            .compile("macrun_panel");
+        println!("cargo:rerun-if-changed=src/native_panel.m");
         println!("cargo:rustc-link-lib=framework=ApplicationServices");
         println!("cargo:rustc-link-lib=framework=AppKit");
         println!("cargo:rustc-link-lib=framework=IOKit");

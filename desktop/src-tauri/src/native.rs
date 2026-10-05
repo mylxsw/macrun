@@ -238,7 +238,9 @@ pub async fn migrate_legacy(app: tauri::AppHandle) -> std::result::Result<Value,
             }
         }
         let _guard = Guard(&rt.migrating);
-        migrate_legacy_inner(&rt).map_err(|e| e.to_string())
+        let result = migrate_legacy_inner(&rt).map_err(|e| e.to_string());
+        *rt.system_state.lock().unwrap() = None;
+        result
     })
     .await
     .map_err(|_| "迁移任务异常中断，请检查保留的备份".to_owned())?

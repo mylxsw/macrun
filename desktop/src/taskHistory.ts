@@ -171,7 +171,7 @@ export function useTaskHistory({
   }, [enabled, available, filter, kind, search, cursor, signature, retry]);
   const searchPending = search !== query.trim();
   const current = available
-    ? page?.key === requestKey && !searchPending
+    ? page
       ? page.value
       : {
           tasks: [],
@@ -185,7 +185,6 @@ export function useTaskHistory({
   const live = snapshot?.tasks.find((t) => t.task_id === selectedId);
   useEffect(() => {
     setDetailError("");
-    setDetail(null);
     if (!enabled || !selectedId) {
       setDetailLoading(false);
       return;
@@ -261,25 +260,32 @@ export function useTaskHistory({
   return {
     ...current,
     loading: loading || (available && searchPending),
+    stale: available && !!page && (page.key !== requestKey || searchPending),
     error,
     detailError,
     detailLoading,
+    detailRefreshing: detailLoading && detail?.task_id === selectedId,
     list,
     selectedTask:
       detail?.task_id === selectedId
         ? detail
         : current.tasks.find((t) => t.task_id === selectedId) || live,
     pageNumber: index + 1,
-    previous: index > 0 ? () => setIndex((n) => n - 1) : undefined,
-    next: current.next_cursor
-      ? () => {
-          setCursors((old) => [
-            ...old.slice(0, index + 1),
-            current.next_cursor,
-          ]);
-          setIndex(index + 1);
-        }
-      : undefined,
+    previous:
+      index > 0 && (!available || (!loading && page?.key === requestKey))
+        ? () => setIndex((n) => n - 1)
+        : undefined,
+    next:
+      (!available || (!loading && page?.key === requestKey)) &&
+      current.next_cursor
+        ? () => {
+            setCursors((old) => [
+              ...old.slice(0, index + 1),
+              current.next_cursor,
+            ]);
+            setIndex(index + 1);
+          }
+        : undefined,
     reload: () => setRetry((n) => n + 1),
   };
 }

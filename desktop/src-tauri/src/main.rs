@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod migration;
 mod native;
+#[cfg(target_os = "macos")]
+mod native_panel;
 mod supervisor;
 mod tray;
 use anyhow::{Context, Result};
@@ -14,7 +16,7 @@ use std::{
         Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -76,6 +78,13 @@ fn save_preferences(
     *rt.preferences.lock().unwrap() = preferences;
     Ok(())
 }
+#[derive(Clone)]
+struct SystemState {
+    checked: Instant,
+    legacy_running: bool,
+    legacy_detected: bool,
+    autostart: bool,
+}
 struct Runtime {
     data: PathBuf,
     socket: PathBuf,
@@ -88,6 +97,7 @@ struct Runtime {
     desired_running: AtomicBool,
     migrating: AtomicBool,
     window_layout: Mutex<WindowLayout>,
+    system_state: Mutex<Option<SystemState>>,
 }
 #[derive(Default)]
 struct WindowLayout {
@@ -163,6 +173,10 @@ fn tray_status(app: &tauri::AppHandle, v: &Value) {
 }
 
 fn overlay_visible(app: &tauri::AppHandle, visible: bool) {
+    static VISIBLE: AtomicBool = AtomicBool::new(false);
+    if VISIBLE.swap(visible, Ordering::SeqCst) == visible {
+        return;
+    }
     for (label, w) in app.webview_windows() {
         if label == "overlay" || label.starts_with("border-") {
             if visible {
@@ -184,6 +198,15 @@ fn show(app: &tauri::AppHandle, route: Option<&str>) {
     }
 }
 fn show_tray(app: &tauri::AppHandle, toggle: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        native_panel::show_panel(app, toggle);
+    }
+    #[cfg(not(target_os = "macos"))]
+    show_web_tray(app, toggle);
+}
+#[cfg(not(target_os = "macos"))]
+fn show_web_tray(app: &tauri::AppHandle, toggle: bool) {
     let Some(window) = app.get_webview_window("tray") else {
         return;
     };
@@ -308,17 +331,38 @@ fn legacy_plist_exists(launch_agents: &std::path::Path) -> bool {
 }
 
 #[tauri::command]
-fn app_state(app: tauri::AppHandle, rt: tauri::State<Runtime>) -> Value {
-    let legacy_loaded = legacy_running();
-    let legacy_detected = legacy_loaded
-        || std::env::var_os("HOME").is_some_and(|home| {
-            legacy_plist_exists(&PathBuf::from(home).join("Library/LaunchAgents"))
-        });
+async fn app_state(app: tauri::AppHandle) -> std::result::Result<Value, String> {
+    // launchctl, filesystem and login-item APIs must never block AppKit's UI thread.
+    tauri::async_runtime::spawn_blocking(move || read_app_state(&app))
+        .await
+        .map_err(|error| error.to_string())
+}
+fn read_app_state(app: &tauri::AppHandle) -> Value {
+    let rt = app.state::<Runtime>();
+    let system = {
+        let mut cache = rt.system_state.lock().unwrap();
+        if cache
+            .as_ref()
+            .is_none_or(|state| state.checked.elapsed() >= Duration::from_secs(30))
+        {
+            let legacy_loaded = legacy_running();
+            *cache = Some(SystemState {
+                checked: Instant::now(),
+                legacy_running: legacy_loaded,
+                legacy_detected: legacy_loaded
+                    || std::env::var_os("HOME").is_some_and(|home| {
+                        legacy_plist_exists(&PathBuf::from(home).join("Library/LaunchAgents"))
+                    }),
+                autostart: app.autolaunch().is_enabled().unwrap_or(false),
+            });
+        }
+        cache.as_ref().unwrap().clone()
+    };
     let mut child = rt.child.lock().unwrap();
     let running = child
         .as_mut()
         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"worker_starting":rt.starting.load(Ordering::SeqCst),"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":legacy_loaded,"legacy_detected":legacy_detected,"autostart":app.autolaunch().is_enabled().unwrap_or(false),"platform":std::env::consts::OS})
+    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"worker_starting":rt.starting.load(Ordering::SeqCst),"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":system.legacy_running,"legacy_detected":system.legacy_detected,"autostart":system.autostart,"platform":std::env::consts::OS})
 }
 
 #[cfg(test)]
@@ -514,6 +558,7 @@ mod startup_tests {
             desired_running: AtomicBool::new(false),
             migrating: AtomicBool::new(false),
             window_layout: Mutex::new(WindowLayout::default()),
+            system_state: Mutex::new(None),
         };
         assert!(configuration_edit_guard(&rt).is_ok());
         for (flag, message) in [
@@ -832,17 +877,25 @@ fn open_log(task_id: Option<String>, rt: tauri::State<Runtime>) -> std::result::
     Ok(())
 }
 #[tauri::command]
-fn autostart(enabled: bool, app: tauri::AppHandle) -> std::result::Result<(), String> {
-    if enabled {
-        app.autolaunch().enable()
-    } else {
-        app.autolaunch().disable()
-    }
-    .map_err(|e| e.to_string())
+async fn autostart(enabled: bool, app: tauri::AppHandle) -> std::result::Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = if enabled {
+            app.autolaunch().enable()
+        } else {
+            app.autolaunch().disable()
+        }
+        .map_err(|e| e.to_string());
+        *app.state::<Runtime>().system_state.lock().unwrap() = None;
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn open_main(app: tauri::AppHandle, route: String) {
     show(&app, Some(&route));
+    #[cfg(target_os = "macos")]
+    native_panel::hide();
     if let Some(w) = app.get_webview_window("tray") {
         let _ = w.hide();
     }
@@ -860,12 +913,22 @@ fn request_exit(app: &tauri::AppHandle) {
     show(app, None);
     let _ = app.emit("exit-requested", ());
 }
+fn isolated_preview() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("MACRUN_DESKTOP_DATA").is_some()
+}
 fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+    let builder = tauri::Builder::default();
+    // A debug fixture may run beside the installed app without stealing its shortcut
+    // or redirecting its launch. Release builds always retain single-instance safety.
+    let builder = if isolated_preview() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
             show(app, None)
         }))
+    };
+    builder
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -947,10 +1010,13 @@ fn main() {
                 desired_running: AtomicBool::new(false),
                 migrating: AtomicBool::new(false),
                 window_layout: Mutex::new(WindowLayout::default()),
+                system_state: Mutex::new(None),
             });
             app.manage(Mutex::new(None::<tray::Presentation>));
             let handle = app.handle().clone();
-            app.global_shortcut().register("Control+Alt+Super+Period")?;
+            if !isolated_preview() {
+                app.global_shortcut().register("Control+Alt+Super+Period")?;
+            }
             tauri::tray::TrayIconBuilder::with_id("macrun")
                 .icon(tray_image(tray::TrayState::Offline))
                 .icon_as_template(true)
@@ -965,6 +1031,9 @@ fn main() {
                     }
                 })
                 .build(app)?;
+            #[cfg(target_os = "macos")]
+            native_panel::init(app.handle());
+            #[cfg(not(target_os = "macos"))]
             tauri::WebviewWindowBuilder::new(
                 app,
                 "tray",
@@ -1148,7 +1217,17 @@ fn main() {
                                 active && preferences.show_overlay && !observing,
                             );
                             tray_status(&handle, &v);
-                            let _ = handle.emit("worker-state", v);
+                            #[cfg(target_os = "macos")]
+                            native_panel::update(&handle, &v);
+                            // Border windows are static and do not need a worker subscription.
+                            let _ = handle.emit_to("main", "worker-state", &v);
+                            for label in ["overlay", "tray"] {
+                                if let Some(window) = handle.get_webview_window(label)
+                                    && window.is_visible().unwrap_or(false)
+                                {
+                                    let _ = window.emit("worker-state", &v);
+                                }
+                            }
                         }
                     }
                     .await;
@@ -1157,7 +1236,10 @@ fn main() {
                             native::macrun_keep_awake(false);
                         }
                         overlay_visible(&handle, false);
+                        *handle.state::<Runtime>().snapshot.lock().unwrap() = Value::Null;
                         tray_status(&handle, &Value::Null);
+                        #[cfg(target_os = "macos")]
+                        native_panel::update(&handle, &Value::Null);
                         let _ = handle.emit("worker-unavailable", ());
                     }
                     tokio::time::sleep(Duration::from_secs(1)).await;
