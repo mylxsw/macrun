@@ -657,10 +657,13 @@ test("large task history pages without mounting every row and searches beyond th
   expect(screen.getByRole("button", { name: /^全部\s*1$/ })).toBeTruthy();
   expect(screen.getByRole("option", { name: /^失败\s*0$/ })).toBeTruthy();
   expect(detail().getByText("tail-1499")).toBeTruthy();
-  expect(bridge.invoke).toHaveBeenCalledWith("control", {
-    action: "task_detail",
-    args: { task_id: "history-1499", tail_bytes: 8192 },
-  });
+  // The summary can render before the separate detail effect starts.
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("control", {
+      action: "task_detail",
+      args: { task_id: "history-1499", tail_bytes: 8192 },
+    }),
+  );
 });
 
 test("native navigation loads an old task by id even outside the current page and snapshot", async () => {
