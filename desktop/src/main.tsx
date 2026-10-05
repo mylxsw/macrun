@@ -9,6 +9,7 @@ import {
 import { SettingsPage } from "./SettingsPage";
 import { useTaskHistory, useReplayHistory } from "./taskHistory";
 import "./task-history.css";
+import appIcon from "./assets/macrun-icon.png";
 import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -709,7 +710,7 @@ function App() {
         <div className="drag" data-tauri-drag-region />
         <div className="brand" data-tauri-drag-region>
           <div className="logo" data-tauri-drag-region>
-            <Terminal size={19} style={{ pointerEvents: "none" }} />
+            <img src={appIcon} alt="" className="brand-icon" />
           </div>
           <div>
             <b data-tauri-drag-region>Macrun</b>

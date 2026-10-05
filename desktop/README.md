@@ -81,3 +81,9 @@ npm run build
 ```
 
 自动化使用隔离测试数据、本机端口或临时 Linux Docker 服务；MCP fixture 返回图片用于协议测试，不代表真实桌面截图已验收。具体状态见 [完整验收清单](../docs/desktop/completion-checklist.md)。
+
+## 本机更新与权限身份
+
+安装前执行 `make desktop-build && make desktop-sign`。签名步骤使用钥匙串中唯一的 Developer ID Application 证书；有多个证书时用 `MACRUN_SIGNING_IDENTITY` 指定。它不会导出私钥，也不自动公证。不要用 `codesign --sign -` 覆盖安装：这种临时签名将授权绑定到具体二进制，更新后系统设置中旧开关可能仍开启，但新进程未获授权。
+
+从旧临时签名迁移到稳定签名时，可能仍需在系统设置重新添加当前 `/Applications/Macrun Desktop.app` 并重启一次。后续保持 bundle ID 和同一签名身份。Macrun 页面的权限检查只检查当前桌面应用，实际截图、点击由独立后端（例如 CuaDriver）执行，后端需单独授权。页面在重新获得焦点和可见时每 5 秒刷新，不把 Macrun 自身未授权显示为后端故障。

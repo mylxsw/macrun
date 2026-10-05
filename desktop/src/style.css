@@ -1181,3 +1181,6 @@ a:focus-visible {
   user-select: none;
   -webkit-user-select: none;
 }
+
+.logo:has(.brand-icon) { background: transparent; overflow: visible; }
+.brand-icon { width: 40px; height: 40px; object-fit: contain; pointer-events: none; }

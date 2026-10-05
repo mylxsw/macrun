@@ -66,3 +66,12 @@
 - 透明页面的选择器优先于深色根背景，菜单栏窗口关闭原生矩形阴影，避免 CSS 圆角外出现直角边框。
 - 验证：前端 104 项、原生 22 项测试通过，原生 Clippy 无警告，debug/release 构建通过。使用隔离原生应用检查深色面板圆角、绿色开关、暂停／恢复及打开主窗口；执行了顶部拖动操作（自动化工具未返回窗口位置，无法量化位移）。真实用户数据和连接配置未修改。
 - 修复版已安装至 `/Applications/Macrun Desktop.app`。重新连接需要 macOS 对新构建的钥匙串访问确认；安装时仍等待用户完成该步骤。
+
+## 2026-10-05：权限范围与应用图标
+
+- 现场核对：系统设置中 CuaDriver 的辅助功能、屏幕录制均开启；Macrun Desktop 的辅助功能列表开启，屏幕录制列表是旧 `macrun`。通过真实后端 `check_permissions`（`prompt: false`）确认两项后端权限均为 granted；这次只读检查未探测 Direct ScreenCaptureKit。
+- 原生接口检查当前 Macrun 进程，不检查 CuaDriver。页面改为“Macrun 自身状态”，明确显示检查对象和真实结果，未把后端已授权当成 Macrun 已授权，也不再将 Macrun 自身缺少权限标成后端故障。返回窗口、恢复可见及可见期间每 5 秒刷新。
+- 旧安装的 designated requirement 只包含二进制 cdhash。新版改用已有 Developer ID Application 身份，签名约束为稳定 bundle ID 与开发团队；新增 `make desktop-sign`，避免后续本机安装继续使用 ad-hoc 签名。正式签名不等同于已完成公证。旧授权没有被重置或绕过；Macrun 自身仍未获授权时如实显示并给出重新打开／重新添加应用的提示。
+- 新图标由内置 imagegen 生成蓝色双环连接图形；原图与提示词在 `desktop/assets/`，应用包包含 ICNS，多尺寸 PNG 和 ICO，侧栏及首次配对使用统一图标。菜单栏改为抗锯齿单色连接图形，保留状态提示与原子更新。
+- 验证：105 项前端、22 项原生测试通过，Clippy、release 构建和正式签名校验通过；访达“显示简介”确认图标正常，实际应用侧栏与权限页截图复查通过。安装后服务器连接、证书、认证、协议检查全部通过，原始迁移数据与全部 1495 个旧任务仍保留。
+- 系统权限是对具体应用身份的授权，签名身份与 designated requirement 的关系见 [Apple TN2206](https://developer.apple.com/library/archive/technotes/tn2206/_index.html)。后端检查通过不代表 Macrun 自身的旧系统授权已经迁移。

@@ -546,3 +546,25 @@ test("replay reveals a newly selected detail once and respects reduced motion", 
     else delete (HTMLElement.prototype as any).scrollIntoView;
   }
 });
+
+test("returning from System Settings refreshes permissions without implying backend denial", async () => {
+  let granted = false;
+  const read = vi.fn(async (command: string) => command === "permissions"
+    ? { accessibility: granted, screen_recording: granted, graphical_session: true }
+    : { available: true });
+  const mutate = vi.fn();
+  const view = render(<BackendPanel snapshot={snapshot} app={app} act={mutate} read={read} mode="permissions" />);
+  expect(await screen.findByText("当前应用未获授权；不代表桌面后端未授权")).toBeTruthy();
+  expect(screen.getByText("当前应用未获授权；截图由后端完成，无需为此重复授权")).toBeTruthy();
+  const accessibilityRow = screen.getByText("辅助功能 · Macrun Desktop").closest(".requirement-row")!;
+  expect(accessibilityRow.querySelector(".warn")).toBeNull();
+  granted = true;
+  fireEvent(window, new Event("focus"));
+  expect(await screen.findByText("当前应用已授权；后端点击和输入仍使用后端自己的权限")).toBeTruthy();
+  expect(accessibilityRow.querySelector(".ok")).toBeTruthy();
+  expect(mutate).not.toHaveBeenCalled();
+  view.unmount();
+  const before = read.mock.calls.length;
+  fireEvent(window, new Event("focus"));
+  expect(read.mock.calls.length).toBe(before);
+});

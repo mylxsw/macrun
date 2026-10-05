@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Check,
   CircleAlert,
+  Info,
   Folder,
   Monitor,
   Plus,
@@ -24,6 +25,7 @@ import {
   tierPolicyLabels,
 } from "./model.mjs";
 import "./features.css";
+import appIcon from "./assets/macrun-icon.png";
 export type Act = (
   c: string,
   a?: Record<string, unknown>,
@@ -241,7 +243,7 @@ export function Pairing({
       <aside className="pairing-sidebar" aria-label="配对步骤">
         <div className="pairing-brand">
           <span className="logo">
-            <Terminal size={17} />
+            <img src={appIcon} alt="" className="brand-icon" />
           </span>
           <b>连接到服务器</b>
         </div>
@@ -357,7 +359,7 @@ export function Pairing({
               {result?.checks?.map((c: any) => (
                 <div className="feature-line" key={c.name}>
                   <span className={`check-icon ${c.ok ? "ok" : "warn"}`}>
-                    {c.ok ? <Check size={13} /> : <CircleAlert size={13} />}
+                    {c.ok ? <Check size={13} /> : c.optional ? <Info size={13} /> : <CircleAlert size={13} />}
                   </span>
                   <span className="grow">{c.name}</span>
                   <small>{c.ok ? "已通过" : "尚未通过"}</small>
@@ -1027,7 +1029,7 @@ export function BackendPanel({
     [observationRetry, setObservationRetry] = useState(0);
   const operationLock = useRef(false),
     permissionLock = useRef(false);
-  const check = async () => {
+  const check = useCallback(async () => {
     if (permissionLock.current) return;
     permissionLock.current = true;
     setPermissionPending(true);
@@ -1063,10 +1065,22 @@ export function BackendPanel({
       permissionLock.current = false;
       setPermissionPending(false);
     }
-  };
+  }, [read]);
   useEffect(() => {
-    if (app && mode !== "advanced") void check();
-  }, [!!app, mode]);
+    if (!app || mode === "advanced") return;
+    const refreshPermissions = () => {
+      if (document.visibilityState !== "hidden") void check();
+    };
+    refreshPermissions();
+    window.addEventListener("focus", refreshPermissions);
+    document.addEventListener("visibilitychange", refreshPermissions);
+    const timer = window.setInterval(refreshPermissions, 5000);
+    return () => {
+      window.removeEventListener("focus", refreshPermissions);
+      document.removeEventListener("visibilitychange", refreshPermissions);
+      window.clearInterval(timer);
+    };
+  }, [!!app, mode, check]);
   const perform = async (
     name: string,
     action: () => Promise<void>,
@@ -1212,19 +1226,21 @@ export function BackendPanel({
     });
   const checks = [
     {
-      name: "辅助功能",
+      name: "辅助功能 · Macrun Desktop",
+      optional: true,
       ok: permissions?.accessibility,
       detail: permissions?.accessibility
-        ? "Macrun 已授权；后端需单独授权"
-        : "用于应用点击和输入",
+        ? "当前应用已授权；后端点击和输入仍使用后端自己的权限"
+        : "当前应用未获授权；不代表桌面后端未授权",
       kind: "accessibility",
     },
     {
-      name: "屏幕录制",
+      name: "屏幕录制 · Macrun Desktop",
+      optional: true,
       ok: permissions?.screen_recording,
       detail: permissions?.screen_recording
-        ? "应用已授权；请通过后端实拍验证"
-        : "授权后仍需通过后端截图核对",
+        ? "当前应用已授权；实际截图由后端完成"
+        : "当前应用未获授权；截图由后端完成，无需为此重复授权",
       kind: "screen",
     },
     {
@@ -1248,7 +1264,7 @@ export function BackendPanel({
       {mode !== "advanced" && (
         <section className="requirements-section">
           <div className="row between">
-            <h2>这台 Mac 是否具备条件</h2>
+            <h2>Macrun 自身状态</h2>
             <button
               className="link"
               disabled={permissionPending}
@@ -1261,9 +1277,9 @@ export function BackendPanel({
             {checks.map((c) => (
               <div className="feature-line requirement-row" key={c.name}>
                 <span
-                  className={`check-icon ${c.ok ? "ok" : permissions ? "warn" : "unchecked"}`}
+                  className={`check-icon ${c.ok ? "ok" : permissions && !c.optional ? "warn" : "unchecked"}`}
                 >
-                  {c.ok ? <Check size={13} /> : <CircleAlert size={13} />}
+                  {c.ok ? <Check size={13} /> : c.optional ? <Info size={13} /> : <CircleAlert size={13} />}
                 </span>
                 <div className="grow">
                   <b>{c.name}</b>
@@ -1310,8 +1326,15 @@ export function BackendPanel({
           </div>
           <small className="input-permission-note">
             以上权限仅检查 Macrun
-            应用；后端需单独授权，截图和控制能力仍需实际验证。
+            应用，不代表桌面后端的权限。请为实际后端应用（例如 CuaDriver）授权，
+            并在“后端实拍与状态核对”中检查；旧版 macrun 的授权也不等同于 Macrun Desktop。
           </small>
+          {permissions && (!permissions.accessibility || !permissions.screen_recording) && (
+            <small className="input-permission-note">
+              如果系统设置中已开启，但当前应用仍未获授权，请完全退出后重新打开。
+              更换过签名的旧授权可能需要在系统设置中重新添加当前应用。返回此页后会自动刷新。
+            </small>
+          )}
           {permissionError && (
             <p className="error-text" role="alert">
               {permissionError}

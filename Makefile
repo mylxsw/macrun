@@ -133,3 +133,7 @@ sync: build ## Synchronize WORKSPACE once and wait for completion
 
 sync-watch: build ## Continuously synchronize WORKSPACE; foreground process
 	'$(BINARY)' --socket '$(SOCKET)' --workspace '$(WORKSPACE)' sync --watch --interval-ms '$(INTERVAL_MS)'
+
+.PHONY: desktop-sign
+desktop-sign: ## Sign the built release app using a stable Developer ID identity from Keychain
+	@./scripts/sign-desktop.sh
