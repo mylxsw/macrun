@@ -129,7 +129,9 @@ try:
  else:raise AssertionError('restart did not mark unknown')
  assert not (mirror/'restart-count').exists()
  # Operational logs are JSON lines; request payloads never appear in them.
- records=[json.loads(line) for path in root.glob('process-*.log') for line in path.read_text().splitlines() if line.startswith('{')]
+ # A live writer (or the deliberately SIGKILLed server) can leave a partial
+ # trailing record. Validate every complete JSON line, not an in-flight suffix.
+ records=[json.loads(line) for path in root.glob('process-*.log') for line in path.read_text().splitlines(keepends=True) if line.startswith('{') and line.endswith('\n')]
  operations=[r for r in records if r.get('event')=='operation']
  assert operations and all(r['time'].endswith('Z') and r['duration_ms']>=0 for r in operations)
  assert any(r.get('error_code')=='invalid_argument' for r in operations)

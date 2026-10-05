@@ -13,6 +13,11 @@ jobs:
           components: rustfmt, clippy
       - run: make check
       - run: make smoke PROFILE=debug
+      - name: TCP and UDP-unavailable fallback regression
+        run: |
+          for transport in tcp auto; do
+            MACRUN_TEST_TRANSPORT="$transport" python3 scripts/smoke.py target/debug/macrun
+          done
   desktop:
     runs-on: macos-latest
     steps:
