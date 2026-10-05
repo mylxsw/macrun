@@ -159,15 +159,26 @@ async fn approval_expires_after_sixty_seconds_without_execution() {
         )
         .await
         .unwrap();
-    tokio::task::yield_now().await;
+    let mut changes = e.subscribe();
+    while e
+        .handle("task.get", json!({"task_id":v["task_id"]}))
+        .await
+        .unwrap()["status"]
+        != "awaiting_approval"
+    {
+        changes.changed().await.unwrap();
+    }
     tokio::time::advance(std::time::Duration::from_secs(61)).await;
-    tokio::task::yield_now().await;
-    assert_eq!(
-        e.handle("task.get", json!({"task_id":v["task_id"]}))
+    loop {
+        if e.handle("task.get", json!({"task_id":v["task_id"]}))
             .await
-            .unwrap()["status"],
-        "denied"
-    );
+            .unwrap()["status"]
+            == "denied"
+        {
+            break;
+        }
+        changes.changed().await.unwrap();
+    }
     assert!(!d.path().join("forbidden").exists());
 }
 #[test]

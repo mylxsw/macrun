@@ -115,7 +115,7 @@ impl TaskHistory {
 
     pub async fn records(&self) -> Result<Vec<Value>> {
         let history = self.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::wire::blocking(move || {
             let mut cache = history
                 .cache
                 .lock()

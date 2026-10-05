@@ -205,7 +205,7 @@ macrun task TASK_UUID
 macrun sync --watch --interval-ms 1000
 ```
 
-保持进程运行，Ctrl-C 停止。它会同步未提交改动，传播已受管理文件的删除，同时保留 Mac 上生成的无关文件；它不会自动触发构建。若构建要求源码不变，请暂停编辑和 watcher，或使用固定副本。
+保持进程运行，Ctrl-C 停止。它会同步未提交改动，传播已受管理文件的删除，同时保留 Mac 上生成的无关文件；它不会自动触发构建。新版本使用文件系统通知、哈希缓存和分页清单协商，`sync --strict` 可强制完整哈希校验。Macrun 命令与文件写入会协调重叠工作区；可用 `exec --workspace-root PATH --generation DIGEST` 将构建绑定到同步结果。外部编辑器仍需自行协调，详见[性能与兼容性说明](docs/performance.md)。
 
 ### 取回文件
 

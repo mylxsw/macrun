@@ -93,12 +93,40 @@ pub enum Control {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    Need { paths: Vec<String> },
-    SyncCommit { manifest: Manifest },
-    Log { name: String, text: String },
-    Progress { phase: String },
-    Detail { value: Value },
-    Done { error: Option<Fault> },
+    ManifestMatch {
+        matched: bool,
+    },
+    ConfirmManifest {
+        digest: String,
+    },
+    ManifestPage {
+        entries: std::collections::BTreeMap<String, crate::sync::Entry>,
+        skipped: Vec<String>,
+        last: bool,
+    },
+    NeedPage {
+        paths: Vec<String>,
+        last: bool,
+    },
+    Need {
+        paths: Vec<String>,
+    },
+    SyncCommit {
+        manifest: Manifest,
+    },
+    Log {
+        name: String,
+        text: String,
+    },
+    Progress {
+        phase: String,
+    },
+    Detail {
+        value: Value,
+    },
+    Done {
+        error: Option<Fault>,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileHeader {

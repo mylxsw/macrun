@@ -205,7 +205,7 @@ To keep the working copy updated:
 macrun sync --watch --interval-ms 1000
 ```
 
-Keep the watcher running and stop it with Ctrl-C. It copies uncommitted changes and propagates deletion of files it previously managed, while preserving unrelated files generated on the Mac. It does not start builds. If a build requires unchanging source, pause editing and the watcher or use a fixed copy.
+Keep the watcher running and stop it with Ctrl-C. It copies uncommitted changes and propagates deletion of files it previously managed, while preserving unrelated files generated on the Mac. It does not start builds. New peers use filesystem notifications, cached hashes and paged manifest negotiation; `sync --strict` forces full hashing. Macrun commands and writes coordinate overlapping workspaces. Bind a build to the sync result with `exec --workspace-root PATH --generation DIGEST`; external editors still need coordination. See [performance and compatibility](docs/performance.md).
 
 ### Get files back
 

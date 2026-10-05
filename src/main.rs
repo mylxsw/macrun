@@ -81,6 +81,12 @@ enum Cmd {
         #[arg(long)]
         cwd: String,
         #[arg(long)]
+        workspace_root: Option<String>,
+        #[arg(long)]
+        generation: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        wait_ms: u64,
+        #[arg(long)]
         request_id: Option<String>,
         #[arg(long, default_value_t = 3600)]
         timeout: u64,
@@ -94,8 +100,11 @@ enum Cmd {
     Cancel {
         task_id: String,
     },
-    /// Synchronize once; --watch continuously polls for changes. Does not run commands.
+    /// Synchronize once; --watch observes filesystem changes. Does not run commands.
     Sync {
+        /// Bypass metadata hash caches on both ends.
+        #[arg(long)]
+        strict: bool,
         #[arg(long)]
         watch: bool,
         #[arg(long, default_value_t = 1000)]
@@ -106,6 +115,9 @@ enum Cmd {
         local: PathBuf,
     },
     Upload {
+        /// Reuse this UUID to resume an interrupted binary upload.
+        #[arg(long)]
+        transfer_id: Option<String>,
         local: PathBuf,
         remote: String,
     },
@@ -191,29 +203,55 @@ async fn entry() -> anyhow::Result<()> {
         Cmd::Call { operation, args } => (operation, serde_json::from_str(&args)?),
         Cmd::Exec {
             cwd,
+            workspace_root,
+            generation,
+            wait_ms,
             request_id,
             timeout,
             command,
         } => (
             "exec.start".into(),
-            json!({"cwd":cwd,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
+            json!({"cwd":cwd,"workspace_root":workspace_root,"generation":generation,"wait_ms":wait_ms,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
         ),
         Cmd::Task { task_id, offset } => (
             "task.get".into(),
             json!({"task_id":task_id,"offset":offset}),
         ),
         Cmd::Cancel { task_id } => ("task.cancel".into(), json!({"task_id":task_id})),
-        Cmd::Sync { watch, interval_ms } => {
+        Cmd::Sync {
+            watch,
+            interval_ms,
+            strict,
+        } => {
             if interval_ms == 0 {
                 anyhow::bail!("interval must be positive");
             }
+            let mut watcher = if watch {
+                match macrun::watch::source(&root) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        eprintln!("watch unavailable; using polling: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let mut verified = std::time::Instant::now();
             loop {
+                if let Some((_, rx)) = &mut watcher {
+                    rx.borrow_and_update();
+                }
+                let verify = strict || verified.elapsed() >= Duration::from_secs(600);
+                if verify {
+                    verified = std::time::Instant::now();
+                }
                 let operation = async {
                     let accepted = frontend::request_for(
                         &cli.socket,
                         &root,
                         "sync",
-                        json!({"detach":true}),
+                        json!({"detach":true,"strict":verify}),
                         cli.client.as_deref(),
                     )
                     .await?;
@@ -241,13 +279,41 @@ async fn entry() -> anyhow::Result<()> {
                 if !watch {
                     return r;
                 }
+                let succeeded = r.is_ok();
                 if let Err(e) = r {
                     eprintln!("sync retry: {e}");
+                }
+                if succeeded && let Some((_, rx)) = &mut watcher {
+                    let remaining = Duration::from_secs(600).saturating_sub(verified.elapsed());
+                    tokio::select! {_=rx.changed()=>{},_=tokio::time::sleep(remaining)=>{},_=tokio::signal::ctrl_c()=>return Ok(())}
                 }
                 tokio::select! {_=tokio::time::sleep(Duration::from_millis(interval_ms))=>{},_=tokio::signal::ctrl_c()=>return Ok(())}
             }
         }
         Cmd::Download { remote, local } => {
+            if macrun::transfer::capable(&cli.socket, &root, cli.client.as_deref()).await? {
+                let temp = local.with_extension(format!("{}.part", id()));
+                let mut file = tokio::fs::File::create(&temp).await?;
+                let result = macrun::transfer::download(
+                    &cli.socket,
+                    &root,
+                    "file.download",
+                    json!({"path":remote}),
+                    cli.client.as_deref(),
+                    &mut file,
+                )
+                .await;
+                if let Err(error) = result {
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&temp).await;
+                    return Err(error);
+                }
+                file.sync_all().await?;
+                drop(file);
+                tokio::fs::rename(temp, &local).await?;
+                println!("{}", local.display());
+                return Ok(());
+            }
             let temp = local.with_extension(format!("{}.part", id()));
             let mut f = tokio::fs::File::create(&temp).await?;
             let mut offset = 0;
@@ -281,7 +347,28 @@ async fn entry() -> anyhow::Result<()> {
             println!("{}", local.display());
             return Ok(());
         }
-        Cmd::Upload { local, remote } => {
+        Cmd::Upload {
+            local,
+            remote,
+            transfer_id,
+        } => {
+            if macrun::transfer::capable(&cli.socket, &root, cli.client.as_deref()).await? {
+                let transfer_id = transfer_id.unwrap_or_else(id);
+                let upload = macrun::transfer::upload(
+                    &cli.socket,
+                    &root,
+                    &local,
+                    &remote,
+                    cli.client.as_deref(),
+                    &transfer_id,
+                )
+                .await;
+                if let Err(error) = upload {
+                    anyhow::bail!("{error}; resume with --transfer-id {transfer_id}");
+                }
+                println!("{remote}");
+                return Ok(());
+            }
             let temp = format!("{remote}.macrun-upload-{}", id());
             let mut f = tokio::fs::File::open(local).await?;
             let mut offset = 0;

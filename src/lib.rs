@@ -16,5 +16,9 @@ pub mod logging;
 
 pub mod local;
 
+pub mod artifact;
 pub mod pairing;
 pub mod safety;
+pub mod transfer;
+pub mod watch;
+pub mod workspace;

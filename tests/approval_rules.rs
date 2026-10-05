@@ -200,10 +200,21 @@ async fn expiry_reports_its_own_code() {
         .handle("exec.start", json!({"cwd":d.path(),"command":"touch ran"}))
         .await
         .unwrap();
-    tokio::task::yield_now().await;
+    // Durable state transitions now run on the blocking pool. Wait for the
+    // approval timer to be installed instead of relying on one executor yield.
+    let id = v["task_id"].as_str().unwrap();
+    let mut changes = e.subscribe();
+    while status(&e, id).await["status"] != "awaiting_approval" {
+        changes.changed().await.unwrap();
+    }
     tokio::time::advance(Duration::from_secs(61)).await;
-    tokio::task::yield_now().await;
-    let v = status(&e, v["task_id"].as_str().unwrap()).await;
+    let v = loop {
+        let v = status(&e, id).await;
+        if v["status"] == "denied" {
+            break v;
+        }
+        changes.changed().await.unwrap();
+    };
     assert_eq!(v["status"], "denied");
     assert_eq!(v["error"]["code"], "approval_expired");
     assert!(v["error"]["message"].as_str().unwrap().contains("expired"));

@@ -111,3 +111,50 @@ where
     });
     rx
 }
+
+/// Move serialization and durable filesystem writes off the async executor.
+pub async fn persist<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    // Keep writes ordered even if the awaiting future is cancelled: blocking
+    // filesystem work cannot be aborted and must finish before a newer record.
+    // Stripes bound lock storage; the owned guard outlives the caller's future.
+    use std::hash::{Hash, Hasher};
+    static WRITES: std::sync::OnceLock<Vec<Arc<tokio::sync::Mutex<()>>>> =
+        std::sync::OnceLock::new();
+    let locks = WRITES.get_or_init(|| {
+        (0..64)
+            .map(|_| Arc::new(tokio::sync::Mutex::new(())))
+            .collect()
+    });
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hash);
+    let guard = locks[hash.finish() as usize % locks.len()]
+        .clone()
+        .lock_owned()
+        .await;
+    let path = path.to_path_buf();
+    let value = serde_json::to_value(value)?;
+    tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        atomic_json(&path, &value)
+    })
+    .await?
+}
+
+/// Bound expensive hashing/artifact work independently of Tokio's shared pool.
+pub async fn blocking<F, T>(work: F) -> Result<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    static SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+    let permit = SLOTS
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(8)))
+        .clone()
+        .acquire_owned()
+        .await?;
+    Ok(tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await?)
+}

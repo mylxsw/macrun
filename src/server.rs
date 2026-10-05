@@ -21,6 +21,8 @@ struct Peer {
 }
 #[derive(Clone)]
 struct Active {
+    client_id: String,
+    key: String,
     job_id: String,
     directory: PathBuf,
     reply: broadcast::Sender<Reply>,
@@ -59,7 +61,7 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
                     "server restarted during job",
                 )),
             );
-            wire::atomic_json(&p.join("result.json"), &v)?;
+            wire::persist(&p.join("result.json"), &v).await?;
         }
         std::fs::remove_file(journal)?;
     }
@@ -98,6 +100,7 @@ async fn register(
     let conn = tokio::time::timeout(Duration::from_secs(5), incoming).await??;
     let (mut send, mut recv) =
         tokio::time::timeout(Duration::from_secs(5), conn.accept_bi()).await??;
+    send.set_priority(10)?;
     let hello: Control =
         tokio::time::timeout(Duration::from_secs(5), wire::recv(&mut recv)).await??;
     if let Control::Pair { protocol, code } = &hello {
@@ -222,7 +225,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
     log.context(&req.args);
     if req.kind == "status" {
         let s = state.lock().await;
-        let workers: Vec<Value> = s.peers.iter().map(|(id,p)| json!({"client_id":id,"instance":p.instance,"status":p.status,"sampled_at":p.seen,"active":s.active.get(id).map(|a|json!({"job_id":a.job_id,"directory":a.directory}))})).collect();
+        let workers: Vec<Value> = s.peers.iter().map(|(id,p)| json!({"client_id":id,"instance":p.instance,"status":p.status,"sampled_at":p.seen,"active":s.active.values().find(|a| &a.client_id==id).map(|a|json!({"job_id":a.job_id,"directory":a.directory}))})).collect();
         let selected = target.as_ref().or_else(|| {
             if s.peers.len() == 1 {
                 s.peers.keys().next()
@@ -232,9 +235,10 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         });
         let peer = selected.and_then(|id| s.peers.get(id));
         let active = selected
-            .and_then(|id| s.active.get(id))
+            .and_then(|id| s.active.values().find(|a| &a.client_id == id))
             .map(|a| json!({"job_id":a.job_id,"directory":a.directory}));
-        let value = json!({"connected":!s.peers.is_empty(),"workers":workers,"worker":peer.map(|p|&p.status),"sampled_at":peer.map(|p|p.seen),"active":active,"last":s.last});
+        let value = json!({"server_capabilities":["binary_transfer_v1"],"connected":!s.peers.is_empty(),"workers":workers,"worker":peer.map(|p|&p.status),"sampled_at":peer.map(|p|p.seen),"active":active,"last":s.last});
+        drop(s);
         log.send(&mut socket, &Reply::Status { value }).await?;
         return Ok(());
     }
@@ -273,12 +277,46 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
             }
         }
     };
+    if crate::transfer::supported(&req.kind) {
+        let peer = state
+            .lock()
+            .await
+            .peers
+            .get(&client_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("worker offline"))?;
+        let kind = req.kind.clone();
+        let (mut send, mut recv) = peer.connection.open_bi().await?;
+        send.set_priority(-1)?;
+        let task = Task {
+            job_id: request_id,
+            request: req,
+            project: Project::default(),
+            manifest: None,
+        };
+        wire::send(&mut send, &task).await?;
+        let r = tokio::time::timeout(
+            Duration::from_secs(3600),
+            crate::transfer::relay(&mut socket, &mut send, &mut recv, &kind),
+        )
+        .await;
+        match r {
+            Ok(Ok(true)) => log.status("succeeded"),
+            _ => {
+                send.reset(2u32.into()).ok();
+                recv.stop(2u32.into()).ok();
+                log.status("failed");
+            }
+        }
+        return Ok(());
+    }
     if req.kind != "sync" {
         let peer = state.lock().await.peers.get(&client_id).cloned();
         let reply = if let Some(peer) = peer {
             let task_request_id = req.args.get("request_id").cloned();
             let operation = async {
                 let (mut send, mut recv) = peer.connection.open_bi().await?;
+                send.set_priority(5)?;
                 wire::send(
                     &mut send,
                     &Task {
@@ -318,8 +356,9 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
             return Ok(());
         }
     };
+    let active_key = format!("{client_id}:{}", project.remote_root);
     let mut s = state.lock().await;
-    if let Some(a) = s.active.get(&client_id) {
+    if let Some(a) = s.active.get(&active_key) {
         log.send(
             &mut socket,
             &Reply::Error {
@@ -354,6 +393,8 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
     std::fs::create_dir_all(&directory)?;
     let (reply, receiver) = broadcast::channel(512);
     let active = Active {
+        client_id: client_id.clone(),
+        key: active_key.clone(),
         job_id: job_id.clone(),
         directory: directory.clone(),
         reply,
@@ -368,12 +409,13 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
     let mut initial = initial_result(&task);
     initial["directory"] = json!(directory);
     initial["client_id"] = json!(client_id);
-    wire::atomic_json(&directory.join("result.json"), &initial)?;
-    wire::atomic_json(
-        &data.join("active").join(format!("{client_id}.json")),
+    wire::persist(&directory.join("result.json"), &initial).await?;
+    wire::persist(
+        &data.join("active").join(format!("{}.json", active.job_id)),
         &initial,
-    )?;
-    s.active.insert(client_id.clone(), active.clone());
+    )
+    .await?;
+    s.active.insert(active_key, active.clone());
     drop(s);
     let background = active.clone();
     tokio::spawn(async move {
@@ -444,7 +486,13 @@ async fn execute(
     active: Active,
     mut result: Value,
 ) {
-    let r = execute_inner(&mut task, &peer, &active, &mut result).await;
+    let timeout = Duration::from_secs(task.project.sync_timeout_seconds);
+    let r = tokio::time::timeout(
+        timeout,
+        execute_inner(&mut task, &peer, &active, &mut result),
+    )
+    .await
+    .unwrap_or_else(|_| Err(Fault::new("timed_out", "sync overall deadline exceeded").into()));
     let error = r.err().map(|e| {
         e.downcast_ref::<Fault>()
             .cloned()
@@ -456,14 +504,10 @@ async fn execute(
         "task_finished",
         json!({"operation":"sync", "job_id":task.job_id, "status":result["status"], "duration_ms":now().saturating_sub(result["started_at"].as_u64().unwrap_or(now())), "error_code":result.pointer("/error/code")}),
     );
-    if wire::atomic_json(&active.directory.join("result.json"), &result).is_err() {
-        crate::logging::event("server", "persist_failed", json!({"job_id":task.job_id}));
-    }
-    let _ = std::fs::remove_file(data.join("active").join(format!("{client_id}.json")));
     {
         let mut s = state.lock().await;
         s.last = Some(result.clone());
-        s.active.remove(&client_id);
+        s.active.remove(&active.key);
         if let Some(p) = s.peers.get_mut(&client_id)
             && p.instance == peer.instance
         {
@@ -473,10 +517,28 @@ async fn execute(
             p.status["job_id"] = Value::Null;
         }
     }
+    // Once a terminal result is visible, the next sync must be admissible.
+    if wire::persist(&active.directory.join("result.json"), &result)
+        .await
+        .is_err()
+    {
+        crate::logging::event("server", "persist_failed", json!({"job_id":task.job_id}));
+    }
+    let _ = std::fs::remove_file(data.join("active").join(format!("{}.json", active.job_id)));
     let _ = active.reply.send(Reply::Done {
         result,
         directory: active.directory,
     });
+}
+struct SyncStreams {
+    send: quinn::SendStream,
+    recv: quinn::RecvStream,
+}
+impl Drop for SyncStreams {
+    fn drop(&mut self) {
+        let _ = self.send.reset(2u32.into());
+        let _ = self.recv.stop(2u32.into());
+    }
 }
 async fn execute_inner(
     task: &mut Task,
@@ -488,31 +550,65 @@ async fn execute_inner(
     if sync_needed {
         let root = task.request.workspace.clone();
         let exclusions = task.project.exclude.clone();
-        let before = now();
-        task.manifest =
-            Some(tokio::task::spawn_blocking(move || sync::scan(&root, &exclusions)).await??);
-        result["phases_ms"]["scan"] = json!(now() - before);
+        let before = std::time::Instant::now();
+        let strict = task.request.args["strict"] == true;
+        task.manifest = Some(
+            crate::wire::blocking(move || sync::scan_with(&root, &exclusions, strict)).await??,
+        );
+        result["phases_ms"]["scan"] = json!(before.elapsed().as_millis());
     }
-    let (mut send, mut recv) = peer.connection.open_bi().await?;
-    wire::send(&mut send, task).await?;
+    let (send, recv) = peer.connection.open_bi().await?;
+    let mut streams = SyncStreams { send, recv };
+    let (mut send, mut recv) = (&mut streams.send, &mut streams.recv);
+    send.set_priority(-1)?;
+    let streamed = peer.status["capabilities"]
+        .as_array()
+        .is_some_and(|c| c.iter().any(|v| v == "sync_stream_v1"));
+    task.request.args["stream_sync"] = json!(streamed);
+    if streamed {
+        let manifest = task.manifest.take().unwrap_or_default();
+        task.request.args["manifest_digest"] = json!(sync::digest(&manifest)?);
+        wire::send(&mut send, task).await?;
+        let Event::ManifestMatch { matched } = wire::recv(&mut recv).await? else {
+            anyhow::bail!("expected manifest negotiation")
+        };
+        if !matched {
+            sync::send_manifest(&mut send, &manifest).await?;
+        }
+        task.manifest = Some(manifest);
+    } else {
+        wire::send(&mut send, task).await?;
+    }
+    let mut needed = Vec::new();
     let mut phase = "dispatch".to_string();
-    let mut phase_start = now();
+    let mut phase_start = std::time::Instant::now();
     loop {
         let event: Event = wire::recv(&mut recv).await?;
         match event {
+            Event::NeedPage { paths, last } if streamed => {
+                anyhow::ensure!(
+                    needed.len() + paths.len() <= task.manifest.as_ref().unwrap().entries.len(),
+                    "invalid Need count"
+                );
+                needed.extend(paths);
+                if last {
+                    send_files(task, &peer.connection, &needed, send).await?;
+                }
+            }
             Event::Need { paths } => {
-                let transfer = send_files(task, &peer.connection, &paths, &mut send);
+                let transfer = send_files(task, &peer.connection, &paths, send);
                 if let Err(e) = transfer.await {
-                    peer.connection.close(2u32.into(), b"sync source failed");
+                    send.reset(2u32.into()).ok();
+                    recv.stop(2u32.into()).ok();
                     return Err(e);
                 }
             }
             Event::Progress { phase: new } => {
-                result["phases_ms"][&phase] = json!(now() - phase_start);
+                result["phases_ms"][&phase] = json!(phase_start.elapsed().as_millis());
                 phase = new;
-                phase_start = now();
+                phase_start = std::time::Instant::now();
                 result["status"] = json!(phase);
-                wire::atomic_json(&active.directory.join("result.json"), result)?;
+                wire::persist(&active.directory.join("result.json"), result).await?;
             }
             Event::Detail { value } => {
                 if let Some(m) = value.as_object() {
@@ -522,7 +618,7 @@ async fn execute_inner(
                 }
             }
             Event::Done { error } => {
-                result["phases_ms"][&phase] = json!(now() - phase_start);
+                result["phases_ms"][&phase] = json!(phase_start.elapsed().as_millis());
                 return error.map_or(Ok(()), |e| Err(e.into()));
             }
             _ => anyhow::bail!("unexpected task message"),
@@ -543,27 +639,44 @@ async fn send_files(
         let Some(Entry::File { size, .. }) = manifest.entries.get(path) else {
             return Err(Fault::new("sync_failed", "worker requested unknown file").into());
         };
-        let mut stream = conn.open_uni().await?;
-        wire::send(
-            &mut stream,
-            &FileHeader {
-                job_id: task.job_id.clone(),
-                path: path.clone(),
-                size: *size,
-            },
-        )
-        .await?;
+        let header = FileHeader {
+            job_id: task.job_id.clone(),
+            path: path.clone(),
+            size: *size,
+        };
         let file =
             tokio::fs::File::open(task.request.workspace.join(sync::relative(path)?)).await?;
-        let copied = tokio::io::copy(&mut file.take(*size), &mut stream).await?;
+        let copied = if task.request.args["stream_sync"] == true {
+            wire::send(send, &header).await?;
+            tokio::io::copy(&mut file.take(*size), send).await?
+        } else {
+            let mut stream = conn.open_uni().await?;
+            wire::send(&mut stream, &header).await?;
+            let copied = tokio::io::copy(&mut file.take(*size), &mut stream).await?;
+            stream.finish()?;
+            copied
+        };
         if copied != *size {
             return Err(Fault::new("source_changed", path).into());
         }
-        stream.finish()?;
     }
     let root = task.request.workspace.clone();
     let exclude = task.project.exclude.clone();
-    let confirmed = tokio::task::spawn_blocking(move || sync::scan(&root, &exclude)).await??;
+    let strict = task.request.args["strict"] == true;
+    let confirmed =
+        crate::wire::blocking(move || sync::scan_with(&root, &exclude, strict)).await??;
+    if task.request.args["stream_sync"] == true {
+        if &confirmed != manifest {
+            return Err(Fault::new("source_changed", "workspace changed during sync").into());
+        }
+        return wire::send(
+            send,
+            &Event::ConfirmManifest {
+                digest: sync::digest(&confirmed)?,
+            },
+        )
+        .await;
+    }
     wire::send(
         send,
         &Event::SyncCommit {

@@ -259,7 +259,8 @@ async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
         connection,
     } = state;
     let (mut out, mut input) = conn.open_bi().await?;
-    let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
+    out.set_priority(10)?;
+    let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1","binary_transfer_v1","artifact_refs_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
     wire::send(
         &mut out,
         &Control::Hello {
@@ -313,13 +314,21 @@ async fn handle(
     lock: Arc<Mutex<()>>,
     source: String,
 ) -> Result<()> {
-    let mut task: Task = wire::recv(&mut input).await?;
+    let mut task: Task =
+        tokio::time::timeout(Duration::from_secs(30), wire::recv(&mut input)).await??;
+    out.set_priority(if crate::transfer::supported(&task.request.kind) {
+        -1
+    } else {
+        5
+    })?;
     if source != "primary" {
         if let Some(request) = task.request.args["request_id"].as_str() {
             task.request.args["request_id"] = json!(scoped_id(&source, request));
         }
-        if matches!(task.request.kind.as_str(), "task.get" | "task.cancel")
-            && let Some(task_id) = task.request.args["task_id"].as_str()
+        if matches!(
+            task.request.kind.as_str(),
+            "task.get" | "task.wait" | "task.cancel" | "artifact.download"
+        ) && let Some(task_id) = task.request.args["task_id"].as_str()
             && !engine.owns_task(task_id)
         {
             task.request.args["task_id"] = json!(scoped_id(&source, task_id));
@@ -327,6 +336,30 @@ async fn handle(
     }
     let mut log = crate::logging::Operation::new("worker", &task.request.kind, &task.job_id);
     log.context(&task.request.args);
+    if crate::transfer::supported(&task.request.kind) {
+        let transfer = crate::transfer::serve(
+            &task.request.kind,
+            &task.request.args,
+            &mut input,
+            &mut out,
+            &engine,
+        )
+        .await;
+        match transfer {
+            Ok(succeeded) => log.status(if succeeded { "succeeded" } else { "failed" }),
+            Err(error) => {
+                log.send(
+                    &mut out,
+                    &Reply::Error {
+                        error: Fault::new("transfer_failed", error),
+                    },
+                )
+                .await?;
+            }
+        }
+        out.finish()?;
+        return Ok(());
+    }
     if task.request.kind != "sync" {
         let r = engine.handle(&task.request.kind, task.request.args).await;
         let reply = match r {
@@ -342,7 +375,38 @@ async fn handle(
         out.finish()?;
         return Ok(());
     }
-    let Ok(_guard) = lock.try_lock() else {
+    if task.request.args["stream_sync"] == true {
+        let root = task.project.root();
+        let state = opts
+            .data
+            .join("mirrors")
+            .join(
+                blake3::hash(root.to_string_lossy().as_bytes())
+                    .to_hex()
+                    .as_str(),
+            )
+            .join("manifest.json");
+        let cached = crate::wire::blocking(move || sync::read_manifest(&state)).await?;
+        let matched = cached.as_ref().ok().is_some_and(|m| {
+            sync::digest(m).ok().as_deref() == task.request.args["manifest_digest"].as_str()
+        });
+        wire::send(&mut out, &Event::ManifestMatch { matched }).await?;
+        task.manifest = Some(if matched {
+            cached?
+        } else {
+            tokio::time::timeout(
+                Duration::from_secs(task.project.sync_timeout_seconds),
+                sync::recv_manifest(&mut input),
+            )
+            .await??
+        });
+    }
+    let legacy_guard = if task.request.args["stream_sync"] == true {
+        Ok(None)
+    } else {
+        lock.try_lock().map(Some)
+    };
+    let Ok(_guard) = legacy_guard else {
         log.status("busy");
         wire::send(
             &mut out,
@@ -417,13 +481,47 @@ async fn receive_sync(
                 .to_hex()
                 .as_str(),
         );
+        let lease = Arc::new(
+            crate::workspace::Lease::acquire(std::slice::from_ref(&root)).map_err(sync_error)?,
+        );
+        let streamed = task.request.args["stream_sync"] == true;
         let operation = async {
-            let receiver = sync::Receiver::prepare(&root, &state, manifest)?;
-            tx.send(Event::Need {
-                paths: receiver.needed.clone(),
-            })
-            .await
-            .map_err(disconnected)?;
+            let r = root.clone();
+            let st = state.clone();
+            let guard = lease.clone();
+            let strict = task.request.args["strict"] == true;
+            let before = std::time::Instant::now();
+            let receiver = Arc::new(
+                crate::wire::blocking(move || {
+                    let _guard = guard;
+                    sync::Receiver::prepare_with(&r, &st, manifest, strict)
+                })
+                .await
+                .map_err(sync_error)??,
+            );
+            let prepare_ms = before.elapsed().as_millis();
+            if streamed {
+                for paths in receiver.needed.chunks(256) {
+                    tx.send(Event::NeedPage {
+                        paths: paths.to_vec(),
+                        last: false,
+                    })
+                    .await
+                    .map_err(disconnected)?;
+                }
+                tx.send(Event::NeedPage {
+                    paths: vec![],
+                    last: true,
+                })
+                .await
+                .map_err(disconnected)?;
+            } else {
+                tx.send(Event::Need {
+                    paths: receiver.needed.clone(),
+                })
+                .await
+                .map_err(disconnected)?;
+            }
             let mut bytes = 0;
             let mut files = 0;
             engine
@@ -435,9 +533,19 @@ async fn receive_sync(
                 .map_err(sync_error)?;
             let mut remaining: std::collections::BTreeSet<_> =
                 receiver.needed.iter().cloned().collect();
+            let mut progress_at = std::time::Instant::now();
             while !remaining.is_empty() {
-                let mut stream = conn.accept_uni().await.map_err(disconnected)?;
-                let h: FileHeader = wire::recv(&mut stream).await.map_err(disconnected)?;
+                let mut uni = if streamed {
+                    None
+                } else {
+                    Some(conn.accept_uni().await.map_err(disconnected)?)
+                };
+                let stream = if let Some(s) = uni.as_mut() {
+                    s
+                } else {
+                    &mut *input
+                };
+                let h: FileHeader = wire::recv(stream).await.map_err(disconnected)?;
                 if h.job_id != task.job_id || !remaining.remove(&h.path) {
                     return Err(Fault::new("sync_failed", "unexpected file stream"));
                 }
@@ -454,7 +562,10 @@ async fn receive_sync(
                 let temp = tempdir.join(id());
                 let mut f = tokio::fs::File::create(&temp).await.map_err(sync_error)?;
                 let copied = tokio::io::copy(
-                    &mut tokio::io::AsyncReadExt::take(&mut stream, size + 1),
+                    &mut tokio::io::AsyncReadExt::take(
+                        stream,
+                        if streamed { *size } else { size + 1 },
+                    ),
                     &mut f,
                 )
                 .await
@@ -465,23 +576,56 @@ async fn receive_sync(
                 if copied != *size {
                     return Err(Fault::new("sync_failed", "truncated file"));
                 }
-                receiver.install(&h.path, &temp)?;
+                let installer = receiver.clone();
+                let guard = lease.clone();
+                crate::wire::blocking(move || {
+                    let _guard = guard;
+                    installer.install(&h.path, &temp)
+                })
+                .await
+                .map_err(sync_error)??;
                 bytes += copied;
                 files += 1;
-                engine
-                    .external_progress(
-                        ident,
-                        json!({"received":files,"total":receiver.needed.len(),"bytes":bytes}),
-                    )
-                    .await
-                    .map_err(sync_error)?;
+                if remaining.is_empty() || progress_at.elapsed() >= Duration::from_millis(250) {
+                    engine
+                        .external_progress(
+                            ident,
+                            json!({"received":files,"total":receiver.needed.len(),"bytes":bytes}),
+                        )
+                        .await
+                        .map_err(sync_error)?;
+                    progress_at = std::time::Instant::now();
+                }
             }
-            let Event::SyncCommit { manifest } = wire::recv(input).await.map_err(disconnected)?
-            else {
-                return Err(Fault::new("sync_failed", "missing source confirmation"));
+            let manifest = if streamed {
+                let Event::ConfirmManifest { digest } =
+                    wire::recv(input).await.map_err(disconnected)?
+                else {
+                    return Err(Fault::new("sync_failed", "missing source confirmation"));
+                };
+                if sync::digest(&receiver.manifest).map_err(sync_error)? != digest {
+                    return Err(Fault::new("source_changed", "source manifest differs"));
+                }
+                receiver.manifest.clone()
+            } else {
+                let Event::SyncCommit { manifest } =
+                    wire::recv(input).await.map_err(disconnected)?
+                else {
+                    return Err(Fault::new("sync_failed", "missing source confirmation"));
+                };
+                manifest
             };
-            receiver.commit(&manifest)?;
-            detail(tx,json!({"sync":{"files":receiver.needed.len(),"bytes":bytes,"skipped":receiver.manifest.skipped}})).await;
+            let commit = receiver.clone();
+            let guard = lease.clone();
+            let before = std::time::Instant::now();
+            crate::wire::blocking(move || {
+                let _guard = guard;
+                commit.commit(&manifest)
+            })
+            .await
+            .map_err(sync_error)??;
+            let generation = crate::workspace::generation(&root).map_err(sync_error)?;
+            detail(tx,json!({"generation":generation,"workspace_root":root,"sync":{"files":receiver.needed.len(),"bytes":bytes,"skipped":receiver.manifest.skipped,"prepare_ms":prepare_ms,"commit_ms":before.elapsed().as_millis()}})).await;
             Ok(())
         };
         tokio::select! {result=operation=>result?,_=cancel.cancelled()=>return Err(Fault::new("cancelled","sync cancelled")),_=tokio::time::sleep(Duration::from_secs(task.project.sync_timeout_seconds))=>return Err(Fault::new("timed_out","sync timeout"))}

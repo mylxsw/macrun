@@ -35,8 +35,11 @@ try:
  task=call('exec.start',request_id=str(uuid.uuid4()),command='uname -s; cat uncommitted.txt',cwd=str(mirror))['task_id']
  v=wait(task);assert v['status']=='succeeded' and 'Darwin' in v['output']['text']
  (source/'uncommitted.txt').write_text('Linux source v2')
+ # Docker Desktop can refresh bind-mount stat metadata only on the first read
+ # after a host write. Establish the Linux view before timing/testing Macrun.
+ assert run(['docker','exec',name,'cat','/source/uncommitted.txt'])=='Linux source v2'
  result=json.loads(run(['docker','exec',name,'macrun','--workspace','/source','sync']))
- assert result['sync']['files']==1
+ assert result['sync']['files']==1 and (mirror/'uncommitted.txt').read_text()=='Linux source v2'
  discovery=call('mcp.tools',server='fixture')
  task=call('mcp.call',request_id=str(uuid.uuid4()),server='fixture',session=discovery['session'],tool='observe',arguments={'text':'跨平台'})['task_id']
  v=wait(task);assert v['result']['result']['content'][1]['type']=='image'

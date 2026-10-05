@@ -88,6 +88,31 @@ pub async fn run_command(
     log: &str,
     journal: &Path,
 ) -> Outcome<i32> {
+    run_command_until(
+        program,
+        args,
+        cwd,
+        env,
+        tokio::time::Instant::now() + Duration::from_secs(timeout),
+        cancel,
+        events,
+        log,
+        journal,
+    )
+    .await
+}
+#[allow(clippy::too_many_arguments)]
+pub async fn run_command_until(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &std::collections::BTreeMap<String, String>,
+    deadline: tokio::time::Instant,
+    cancel: &CancellationToken,
+    events: &mpsc::Sender<Event>,
+    log: &str,
+    journal: &Path,
+) -> Outcome<i32> {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .envs(env)
@@ -97,17 +122,30 @@ pub async fn run_command(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     cmd.process_group(0);
-    wire::atomic_json(journal, &serde_json::json!({"state":"spawning"}))
+    wire::persist(journal, &serde_json::json!({"state":"spawning"}))
+        .await
         .map_err(|e| Fault::new("recovery_required", e))?;
+    if cancel.is_cancelled() {
+        let _ = std::fs::remove_file(journal);
+        return Err(Fault::new("cancelled", "cancelled before command dispatch"));
+    }
+    if tokio::time::Instant::now() >= deadline {
+        let _ = std::fs::remove_file(journal);
+        return Err(Fault::new(
+            "timed_out",
+            "command deadline exceeded before dispatch",
+        ));
+    }
     let mut child = cmd
         .spawn()
         .map_err(|e| Fault::new("invalid_config", format!("{program}: {e}")))?;
     let pid = child.id().unwrap();
     let guard = KillGroup(pid);
-    wire::atomic_json(
+    wire::persist(
         journal,
         &serde_json::json!({"state":"running","identity":identity(pid),"pid":pid}),
     )
+    .await
     .map_err(|e| Fault::new("recovery_required", e))?;
     let out = child.stdout.take().unwrap();
     let err = child.stderr.take().unwrap();
@@ -116,7 +154,7 @@ pub async fn run_command(
     let result = tokio::select! {
         status=child.wait()=>status.map_err(|e|Fault::new("recovery_required",e)).map(|s| s.code().unwrap_or(128)),
         _=cancel.cancelled()=>Err(Fault::new("cancelled","task cancelled")),
-        _=tokio::time::sleep(Duration::from_secs(timeout))=>Err(Fault::new("timed_out",format!("{program} exceeded {timeout}s"))),
+        _=tokio::time::sleep_until(deadline)=>Err(Fault::new("timed_out",format!("{program} exceeded command deadline"))),
     };
     if result
         .as_ref()

@@ -140,4 +140,4 @@ Network reconnect retains worker tasks and backend sessions, but worker restart 
 macrun --workspace /absolute/source/project sync --watch --interval-ms 1000
 ```
 
-Keep it in a terminal, stop with Ctrl-C, or configure its own service if requested. A running server does not start watchers. Avoid duplicate watchers for one mirror. Wait for complete sync before executing against changed source; use a fixed copy if the command requires immutable inputs.
+Keep it in a terminal, stop with Ctrl-C, or configure its own service if requested. A running server does not start watchers. Avoid duplicate watchers for one mirror. Wait for complete sync before executing against changed source; bind commands to the returned workspace generation, and coordinate external writers if immutable input is required. New peers coordinate commands, writes and sync through workspace leases. See [performance, limits and transfer recovery](performance.md) for event-based watch, strict hashing, stream negotiation and resumable uploads.
