@@ -111,6 +111,7 @@ export function Approvals({
                 aria-hidden
               />
               <strong>
+                {t.connection_name ? `${t.connection_name} · ` : ""}
                 {desktop ? "桌面操作需要你确认" : "命令需要你确认"}
               </strong>
               <small className="approval-left" role="timer">
@@ -207,7 +208,9 @@ export function Pairing({
   onComplete,
   onManual,
   onClose,
+  adding = false,
 }: {
+  adding?: boolean;
   act: Act;
   running: boolean;
   onComplete?: (route?: "desktop" | "main") => void;
@@ -258,7 +261,7 @@ export function Pairing({
           <span className="logo">
             <img src={appIcon} alt="" className="brand-icon" />
           </span>
-          <b>连接到服务器</b>
+          <b>{adding ? "添加服务器" : "连接到服务器"}</b>
         </div>
         {["配对码", "检查连接", "桌面控制"].map((name, i) => (
           <div
@@ -292,6 +295,11 @@ export function Pairing({
               在服务器上运行下面这条命令，它会生成一个 10
               分钟内有效、只能用一次的配对码。
             </p>
+            {adding && (
+              <p className="muted">
+                这台服务器将作为新增连接保存，现有服务器和任务记录会保留。
+              </p>
+            )}
             <pre className="term pairing-command">
               {"$ macrun invite --data 服务端数据目录 --server 服务器地址:7443"}
             </pre>
@@ -947,7 +955,10 @@ export function WorkspaceList({
       <div className="card workspace-list">
         {workspaces.length ? (
           workspaces.slice(0, limit).map((w) => (
-            <div className="feature-line workspace-row" key={w.root}>
+            <div
+              className="feature-line workspace-row"
+              key={`${w.connection_id || "primary"}:${w.root}`}
+            >
               <Folder size={17} />
               <div className="grow">
                 <b className="ellipsis" title={w.root}>
@@ -1418,7 +1429,9 @@ export function BackendPanel({
                 >
                   <option value="">选择后端</option>
                   {snapshot?.backends.map((b) => (
-                    <option key={b.name}>{b.name}</option>
+                    <option key={b.name} value={b.name}>
+                      {b.display_name || b.name}
+                    </option>
                   ))}
                 </select>
               </label>

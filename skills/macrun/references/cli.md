@@ -13,6 +13,8 @@ macrun status
 macrun --workspace /path/to/source sync
 ```
 
+For a server with multiple clients, choose a stable ID from `macrun status` (`workers[].client_id`) and pass `--client CLIENT_UUID` or set `MACRUN_CLIENT`. Use it consistently for execution, task polling, synchronization and files. Set `--client CLIENT_UUID` before `mcp` to give that MCP entry a default; tools may override it with their `client_id` argument. Without a selection, multiple online clients produce `client_required` rather than choosing a machine arbitrarily.
+
 The source directory contains `macrun.toml`:
 
 ```toml

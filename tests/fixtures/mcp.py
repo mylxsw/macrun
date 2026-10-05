@@ -21,6 +21,14 @@ for line in sys.stdin:
     elif method=='tools/call':
         a=args.get('arguments',{})
         if a.get('crash'): os._exit(2)
+        if a.get('serial_probe'):
+            # Model a physical desktop resource shared by independent backend processes.
+            try:
+                fd=os.open(a['serial_probe'],os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+            except FileExistsError:
+                print(json.dumps({'jsonrpc':'2.0','id':v['id'],'result':{'isError':True,'content':[{'type':'text','text':'overlapping desktop operation'}]}}),flush=True)
+                continue
+            time.sleep(.2);os.close(fd);os.unlink(a['serial_probe'])
         if a.get('sleep'): time.sleep(a['sleep'])
         count+=1
         result={'content':[{'type':'text','text':json.dumps({'count':count,'text':a.get('text')})},{'type':'image','mimeType':'image/png','data':PNG}],'isError':bool(a.get('error'))}

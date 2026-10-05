@@ -5,7 +5,7 @@ description: Use Macrun to run commands, synchronize source files, retrieve resu
 
 # Macrun
 
-Macrun connects an agent host to one remote worker. Prefer the configured Macrun MCP tools; use the CLI on the server host when MCP is unavailable or for upload/download and continuous sync. This skill guides use of an existing connection; it does not authorize installing services, changing other MCP entries, or replacing the user's chosen computer-use backend.
+Macrun connects agent hosts to remote workers, including many-to-many connections. Prefer the configured Macrun MCP tools; use the CLI on the server host when MCP is unavailable or for upload/download and continuous sync. This skill guides use of an existing connection; it does not authorize installing services, changing other MCP entries, or replacing the user's chosen computer-use backend.
 
 ## Establish where work happens
 
@@ -13,7 +13,8 @@ Macrun connects an agent host to one remote worker. Prefer the configured Macrun
 - **Worker:** remote shell commands, command `cwd`, file tool paths, GUI apps and local MCP backends.
 - Read the project's instructions and existing configuration. Discover the actual socket, source directory, remote directory and backend names; do not assume example addresses or personal deployment paths.
 - Call `device_status` before remote work. `connected: true` confirms the worker link, not GUI permissions or successful compilation. If offline, report the observed connection error; inspect logs/configuration within scope instead of silently switching machines or redeploying.
-- Macrun 0.2 has no dedicated `build`, `test`, `run`, `shot` or `ui` commands. Compose generic capabilities for the requested task. It supports one worker per server, not device selection/routing.
+- On versions supporting many-to-many connections, `device_status.workers` lists online clients with stable `client_id` values and host names. When more than one is online, choose the user's intended client and pass the same `client_id` on every operation, including task queries and file transfers. If the intended device is unclear, ask before executing. Never choose an arbitrary device or broadcast a command. A single online client remains the default.
+- Macrun 0.2 has no dedicated `build`, `test`, `run`, `shot` or `ui` commands. Compose generic capabilities for the requested task.
 
 Read [references/cli.md](references/cli.md) only when using the CLI, diagnosing connection setup, or transferring files without MCP.
 
@@ -44,7 +45,7 @@ There is no implicit synchronization before commands. Uncommitted source files a
 
 ## Handle async tasks and uncertain delivery
 
-- Generate a UUID `request_id` before each new `exec_start` or `mcp_call`. Record it with the arguments before sending. It equals the returned `task_id`.
+- Generate a UUID `request_id` before each new `exec_start` or `mcp_call`. Record it with the arguments before sending. Use the returned `task_id` for subsequent queries; connections to additional servers namespace the original UUID to prevent collisions. After uncertain delivery, the original UUID remains queryable on that same client and server.
 - The initial `accepted`/`running`/`awaiting_approval` response is not completion. Poll `task_get`; for long jobs use a reasonable interval (for example 1–3 seconds initially, then longer), bounded by the task deadline and user intent. Give progress updates rather than busy polling indefinitely.
 - Logs combine stdout/stderr. Use returned `output.next_offset` for incremental reads; offsets count **bytes**, not characters. Each read is bounded, so continue until the available output is consumed.
 - Inspect task `status`, command `result.exit_code`, and backend errors. A successful tool transport or CLI query is not proof the underlying job succeeded.
@@ -61,7 +62,7 @@ There is no implicit synchronization before commands. Uncommitted source files a
 4. After an action, obtain a fresh observation and verify the requested effect. “AXPress succeeded” or “input sent” alone is not an outcome. Do not blindly reuse stale elements after a new snapshot.
 5. On a stale or invalid backend session, call `mcp_tools` again, then re-observe the UI. Preserve existing windows and user work; do not kill unrelated apps to recover a session.
 
-Backend calls execute serially per backend. Macrun forwards original results rather than translating every backend into Cua-specific methods. Completed image blocks are surfaced by `task_get` to the agent; inspect those images when visual verification matters.
+Backend calls execute serially per backend; desktop tool calls from different server connections also serialize on the same physical client. Macrun forwards original results rather than translating every backend into Cua-specific methods. Completed image blocks are surfaced by `task_get` to the agent; inspect those images when visual verification matters.
 
 ## Files and result delivery
 

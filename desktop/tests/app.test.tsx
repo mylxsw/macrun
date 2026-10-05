@@ -1060,3 +1060,82 @@ test("Cmd+A in a log selects only that log, while page controls remain outside t
   expect(log.contains(selection.anchorNode)).toBe(true);
   expect(log.contains(selection.focusNode)).toBe(true);
 });
+
+test("server filter routes the history query and labels each server independently", async () => {
+  const user = userEvent.setup();
+  const saved = {
+    id: "connection-two",
+    name: "Build Server",
+    server: "192.0.2.20:7443",
+    cert: "/test/two.der",
+    token_file: "",
+  };
+  Object.assign(app.settings, { connections: [saved] });
+  app.snapshot.connections = [
+    {
+      id: "primary",
+      name: "Main Server",
+      connection: app.snapshot.connection,
+      policy: app.snapshot.policy,
+    },
+    {
+      id: saved.id,
+      name: saved.name,
+      connection: { ...app.snapshot.connection, server: saved.server },
+      policy: app.snapshot.policy,
+    },
+  ];
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "按服务器筛选" }),
+    saved.id,
+  );
+  await waitFor(() =>
+    expect(
+      bridge.invoke.mock.calls.some(
+        ([name, args]) =>
+          name === "control" &&
+          args.action === "task_list" &&
+          args.args.connection_id === saved.id,
+      ),
+    ).toBe(true),
+  );
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  expect(
+    within(
+      document.querySelector<HTMLElement>(".server-connections")!,
+    ).getByText(saved.name),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "添加服务器" }).hasAttribute("disabled"),
+  ).toBe(true);
+});
+
+test("stopped worker does not show saved multi-server snapshots as online", async () => {
+  const user = userEvent.setup();
+  app.worker_running = false;
+  app.snapshot.connections = ["primary", "extra"].map((id) => ({
+    id,
+    name: id,
+    connection: app.snapshot.connection,
+    policy: app.snapshot.policy,
+  }));
+  app.settings.connections = [
+    {
+      id: "extra",
+      name: "Extra server",
+      server: "192.0.2.20:7443",
+      cert: "/test/two.der",
+      token_file: "",
+    },
+  ];
+  await mount();
+  expect(screen.getByText("0/2 在线")).toBeTruthy();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  const list = within(
+    document.querySelector<HTMLElement>(".server-connections")!,
+  );
+  expect(list.queryByText("已连接")).toBeNull();
+  expect(list.getAllByText("未连接")).toHaveLength(2);
+});

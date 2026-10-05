@@ -1,4 +1,6 @@
 export type Task = {
+  connection_id?: string;
+  connection_name?: string;
   task_id: string;
   kind: string;
   status: string;
@@ -27,7 +29,17 @@ export type AllowRule = {
   created_at: number;
   expires_at?: number | null;
 };
+export type SavedConnection = {
+  id: string;
+  name: string;
+  server: string;
+  cert: string;
+  token_file: string;
+  keychain_account?: string;
+  certificate_fingerprint?: string;
+};
 export type Settings = {
+  connections?: SavedConnection[];
   server: string;
   cert: string;
   token_file: string;
@@ -36,6 +48,12 @@ export type Settings = {
   certificate_fingerprint?: string;
 };
 export type Snapshot = {
+  connections?: {
+    id: string;
+    name: string;
+    connection: Snapshot["connection"];
+    policy: Snapshot["policy"];
+  }[];
   today_summary: Record<string, number>;
   safety: {
     restrict_paths: boolean;
@@ -47,6 +65,8 @@ export type Snapshot = {
   };
   allow_rules?: AllowRule[];
   workspaces: {
+    connection_id?: string;
+    connection_name?: string;
     root: string;
     time: number;
     status: string;
@@ -58,6 +78,9 @@ export type Snapshot = {
   active_count: number;
   backends: {
     name: string;
+    display_name?: string;
+    backend_name?: string;
+    connection_id?: string;
     state: string;
     session?: string;
     command: string;

@@ -105,6 +105,7 @@ export function useTaskHistory({
   snapshot,
   filter,
   kind = "",
+  connectionId = "",
   query,
   selected,
 }: {
@@ -113,6 +114,7 @@ export function useTaskHistory({
   snapshot: Snapshot | null;
   filter: string;
   kind?: string;
+  connectionId?: string;
   query: string;
   selected: string;
 }) {
@@ -138,9 +140,15 @@ export function useTaskHistory({
   useEffect(() => {
     setIndex(0);
     setCursors([null]);
-  }, [filter, kind, search, available]);
+  }, [filter, kind, search, available, connectionId]);
   const cursor = cursors[index];
-  const requestKey = JSON.stringify([filter, kind, search, cursor]);
+  const requestKey = JSON.stringify([
+    filter,
+    kind,
+    search,
+    cursor,
+    connectionId,
+  ]);
   useEffect(() => {
     list.current?.scrollTo?.({ top: 0 });
   }, [requestKey]);
@@ -154,6 +162,7 @@ export function useTaskHistory({
       status: filter,
       query: search,
       ...(kind ? { kind } : {}),
+      ...(connectionId ? { connection_id: connectionId } : {}),
       cursor,
     })
       .then((result) => {
@@ -168,7 +177,17 @@ export function useTaskHistory({
     return () => {
       cancelled = true;
     };
-  }, [enabled, available, filter, kind, search, cursor, signature, retry]);
+  }, [
+    enabled,
+    available,
+    filter,
+    kind,
+    search,
+    cursor,
+    signature,
+    retry,
+    connectionId,
+  ]);
   const searchPending = search !== query.trim();
   const current = available
     ? page
@@ -180,7 +199,20 @@ export function useTaskHistory({
           counts: {},
           next_cursor: null,
         }
-    : fallbackPage(snapshot, filter, query, index, kind);
+    : fallbackPage(
+        connectionId && snapshot
+          ? {
+              ...snapshot,
+              tasks: snapshot.tasks.filter(
+                (t) => t.connection_id === connectionId,
+              ),
+            }
+          : snapshot,
+        filter,
+        query,
+        index,
+        kind,
+      );
   const selectedId = selected || current.tasks[0]?.task_id || "";
   const live = snapshot?.tasks.find((t) => t.task_id === selectedId);
   useEffect(() => {
@@ -221,6 +253,8 @@ export function useTaskHistory({
           : "";
         const task: Task = {
           task_id: record.task_id,
+          connection_id: record.connection_id,
+          connection_name: record.connection_name,
           kind: record.kind,
           status: record.status,
           arguments: record.arguments,

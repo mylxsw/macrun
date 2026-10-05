@@ -22,8 +22,22 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SavedConnection {
+    id: String,
+    name: String,
+    server: String,
+    cert: String,
+    token_file: String,
+    #[serde(default)]
+    keychain_account: String,
+    #[serde(default)]
+    certificate_fingerprint: String,
+}
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Settings {
+    #[serde(default)]
+    connections: Vec<SavedConnection>,
     server: String,
     cert: String,
     token_file: String,
@@ -428,11 +442,19 @@ fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Res
     let original = rt.settings.lock().unwrap().clone();
     // This native migration setting is not editable through the webview.
     settings.worker_path = original.worker_path.clone();
+    settings.connections = original.connections.clone();
     let result: Result<()> = (|| {
         {
             let _guard = configuration_edit_guard(rt)?;
         }
         anyhow::ensure!(!settings.server.trim().is_empty(), "请填写服务器地址");
+        anyhow::ensure!(
+            !settings
+                .connections
+                .iter()
+                .any(|c| c.server == settings.server),
+            "该服务器已在连接列表中"
+        );
         anyhow::ensure!(
             PathBuf::from(&settings.cert).is_file(),
             "服务器证书文件不存在"
@@ -633,11 +655,17 @@ async fn start_worker(
             return Err("固定证书已变化，请重新配对或导入".into());
         }
     }
-    let address = tokio::net::lookup_host(&cfg.server)
-        .await
-        .map_err(|e| format!("服务器地址无效：{e}"))?
-        .find(|a| a.is_ipv4())
-        .ok_or("当前版本需要 IPv4 地址")?;
+    let address = if cfg.connections.is_empty() {
+        Some(
+            tokio::net::lookup_host(&cfg.server)
+                .await
+                .map_err(|e| format!("服务器地址无效：{e}"))?
+                .find(|a| a.is_ipv4())
+                .ok_or("当前版本需要 IPv4 地址")?,
+        )
+    } else {
+        None
+    }; // Multi-server workers resolve each address independently.
     if legacy_running() {
         return Err(
             "检测到旧 LaunchAgent。请先完成迁移，避免重复运行；本版本不会自动停止旧服务。".into(),
@@ -657,6 +685,57 @@ async fn start_worker(
             .await?,
         )
     };
+    let mut profiles = Vec::new();
+    let mut credentials = std::collections::BTreeMap::new();
+    if let Some(token) = &token {
+        credentials.insert(
+            "primary".to_owned(),
+            String::from_utf8(token.clone()).map_err(|e| e.to_string())?,
+        );
+    }
+    profiles.push(macrun::worker::Profile {
+        id: "primary".into(),
+        name: cfg.server.clone(),
+        options: macrun::worker::Options {
+            server: cfg.server.clone(),
+            cert: cfg.cert.clone().into(),
+            token_file: cfg.token_file.clone().into(),
+            data: rt.data.join("worker"),
+            config: (!cfg.backend_config.is_empty()).then(|| cfg.backend_config.clone().into()),
+        },
+    });
+    for c in &cfg.connections {
+        uuid::Uuid::parse_str(&c.id).map_err(|_| "无效的连接编号")?;
+        if !c.certificate_fingerprint.is_empty() {
+            let bytes = std::fs::read(&c.cert).map_err(|e| e.to_string())?;
+            if blake3::hash(&bytes).to_hex().as_str() != c.certificate_fingerprint {
+                return Err(format!("{} 的固定证书已变化，请重新配对", c.name));
+            }
+        }
+        if !c.keychain_account.is_empty() {
+            let account = c.keychain_account.clone();
+            let token = read_credential_in_background(move || {
+                security_framework::passwords::get_generic_password("dev.macrun.desktop", &account)
+                    .map_err(|_| "无法读取服务器连接凭据".to_owned())
+            })
+            .await?;
+            credentials.insert(
+                c.id.clone(),
+                String::from_utf8(token).map_err(|e| e.to_string())?,
+            );
+        }
+        profiles.push(macrun::worker::Profile {
+            id: c.id.clone(),
+            name: c.name.clone(),
+            options: macrun::worker::Options {
+                server: c.server.clone(),
+                cert: c.cert.clone().into(),
+                token_file: c.token_file.clone().into(),
+                data: rt.data.join("worker/servers").join(&c.id),
+                config: (!cfg.backend_config.is_empty()).then(|| cfg.backend_config.clone().into()),
+            },
+        });
+    }
     let result: Result<()> = (|| {
         let mut slot = rt.child.lock().unwrap();
         anyhow::ensure!(
@@ -714,27 +793,53 @@ async fn start_worker(
             .open(rt.data.join("worker.log"))?;
         let mut command = Command::new(binary);
         cfg.apply_worker_environment(&mut command);
-        command
-            .args([
-                "worker",
+        command.arg("worker");
+        let multi = profiles.len() > 1;
+        if multi {
+            for profile in profiles.iter().skip(1) {
+                for name in ["safety.json", "desktop-policy.json"] {
+                    let destination = profile.options.data.join(name);
+                    if !destination.exists() {
+                        let value: Value =
+                            serde_json::from_slice(&std::fs::read(worker_data.join(name))?)?;
+                        wire::atomic_json(&destination, &value)?;
+                    }
+                }
+            }
+            let path = rt.data.join("worker-connections.json");
+            wire::atomic_json(&path, &profiles)?;
+            command.arg("--connections").arg(path);
+        } else {
+            command.args([
                 "--server",
-                &address.to_string(),
+                &address
+                    .context("missing single-server address")?
+                    .to_string(),
                 "--cert",
                 &cfg.cert,
                 "--token-file",
                 &cfg.token_file,
-                "--data",
-            ])
-            .arg(rt.data.join("worker"))
+            ]);
+            if !cfg.backend_config.is_empty() {
+                command.arg("--config").arg(&cfg.backend_config);
+            }
+        }
+        command
+            .arg("--data")
+            .arg(&worker_data)
             .arg("--control-socket")
             .arg(&rt.socket)
             .arg("--parent-pipe")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::from(log));
-        if !cfg.backend_config.is_empty() {
-            command.arg("--config").arg(&cfg.backend_config);
-        }
+        let token = if multi {
+            (!credentials.is_empty())
+                .then(|| serde_json::to_vec(&credentials))
+                .transpose()?
+        } else {
+            token
+        };
         *rt.snapshot.lock().unwrap() = Value::Null;
         if token.is_some() {
             command.arg("--token-stdin");
@@ -755,22 +860,50 @@ async fn start_worker(
     Ok(())
 }
 #[tauri::command]
-async fn pair(uri: String, rt: tauri::State<'_, Runtime>) -> std::result::Result<Value, String> {
+async fn pair(
+    uri: String,
+    add: Option<bool>,
+    rt: tauri::State<'_, Runtime>,
+) -> std::result::Result<Value, String> {
     let result:Result<Value>=async {
-        anyhow::ensure!(!rt.child.lock().unwrap().as_mut().is_some_and(|c|c.try_wait().ok().flatten().is_none()),"请先断开现有连接");
+        {let _guard=configuration_edit_guard(&rt)?;}
+        let original=rt.settings.lock().unwrap().clone();
+        anyhow::ensure!(add!=Some(true) || original.connections.len()<15,"最多可保存 16 台服务器");
+        let (candidate,_) = macrun::pairing::parse(&uri)?;
+        anyhow::ensure!(!original.connections.iter().any(|c|c.server==candidate.server),"该服务器已经保存，请先移除原连接后重新添加");
+        if add==Some(true) {anyhow::ensure!(original.server!=candidate.server,"该服务器已是主连接");}
         let cert=rt.data.join(format!("paired-{}.der",uuid::Uuid::new_v4()));
         let (invite,token)=macrun::pairing::exchange(&uri,&cert).await?;
         let account=uuid::Uuid::new_v4().to_string();
-        security_framework::passwords::set_generic_password("dev.macrun.desktop",&account,token.as_bytes())
-            .map_err(|_|anyhow::anyhow!("钥匙串写入失败，请检查系统授权并生成新邀请"))?;
-        let mut settings=rt.settings.lock().unwrap().clone();
-        settings.server=invite.server;settings.cert=cert.to_string_lossy().into();
-        settings.token_file="/dev/null".into();settings.keychain_account=account;
-        settings.certificate_fingerprint=invite.fingerprint.clone();
+        security_framework::passwords::set_generic_password("dev.macrun.desktop",&account,token.as_bytes()).map_err(|_|anyhow::anyhow!("钥匙串写入失败，请检查系统授权并生成新邀请"))?;
+        let _guard=configuration_edit_guard(&rt)?;
+        let mut current=rt.settings.lock().unwrap();
+        anyhow::ensure!(*current==original,"连接配置已变化，请重新配对");
+        let mut settings=original;
+        if add==Some(true) && !settings.server.is_empty() {
+            settings.connections.push(SavedConnection{id:account.clone(),name:invite.server.clone(),server:invite.server,cert:cert.to_string_lossy().into(),token_file:"/dev/null".into(),keychain_account:account,certificate_fingerprint:invite.fingerprint.clone()});
+        } else {
+            settings.server=invite.server;settings.cert=cert.to_string_lossy().into();settings.token_file="/dev/null".into();settings.keychain_account=account;settings.certificate_fingerprint=invite.fingerprint.clone();
+        }
         wire::atomic_json(&rt.data.join("connection.json"),&settings)?;
-        *rt.settings.lock().unwrap()=settings;
+        *current=settings;
         Ok(json!({"fingerprint":invite.fingerprint,"protocol":invite.protocol,"credentials":"keychain"}))
     }.await;
+    result.map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn remove_connection(id: String, rt: tauri::State<Runtime>) -> std::result::Result<(), String> {
+    let result: Result<()> = (|| {
+        let _guard = configuration_edit_guard(&rt)?;
+        let mut current = rt.settings.lock().unwrap();
+        let mut next = current.clone();
+        anyhow::ensure!(next.connections.iter().any(|c| c.id == id), "未找到连接");
+        next.connections.retain(|c| c.id != id);
+        wire::atomic_json(&rt.data.join("connection.json"), &next)?;
+        *current = next;
+        // History and credentials are retained for recovery; no task directory is deleted.
+        Ok(())
+    })();
     result.map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -953,6 +1086,7 @@ fn main() {
             save_settings,
             save_preferences,
             pair,
+            remove_connection,
             native::input_status,
             native::notify_task,
             native::permissions,

@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     io::AsyncReadExt,
     net::{UnixListener, UnixStream},
@@ -27,8 +27,8 @@ struct Active {
 }
 #[derive(Default)]
 struct State {
-    peer: Option<Peer>,
-    active: Option<Active>,
+    peers: BTreeMap<String, Peer>,
+    active: BTreeMap<String, Active>,
     last: Option<Value>,
 }
 type Shared = Arc<Mutex<State>>;
@@ -40,8 +40,17 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
     if token.is_empty() {
         anyhow::bail!("empty connection token");
     }
-    if let Ok(v) = std::fs::read(data.join("active.json")) {
-        let mut v: Value = serde_json::from_slice(&v)?;
+    let mut journals = vec![data.join("active.json")];
+    if data.join("active").exists() {
+        for entry in std::fs::read_dir(data.join("active"))? {
+            journals.push(entry?.path());
+        }
+    }
+    for journal in journals {
+        if !journal.is_file() {
+            continue;
+        }
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&journal)?)?;
         if let Some(p) = v["directory"].as_str().map(PathBuf::from) {
             finish(
                 &mut v,
@@ -52,7 +61,7 @@ pub async fn serve(listen: std::net::SocketAddr, socket: PathBuf, data: PathBuf)
             );
             wire::atomic_json(&p.join("result.json"), &v)?;
         }
-        std::fs::remove_file(data.join("active.json"))?;
+        std::fs::remove_file(journal)?;
     }
     if socket.exists() {
         std::fs::remove_file(&socket)?;
@@ -137,25 +146,33 @@ async fn register(
         send.finish()?;
         return Ok(());
     }
+    let client_id = status["client_id"].as_str().unwrap_or(&instance).to_owned();
+    anyhow::ensure!(
+        uuid::Uuid::parse_str(&client_id).is_ok(),
+        "invalid client identity"
+    );
     {
         let mut s = state.lock().await;
-        if s.peer.is_some() {
+        if s.peers.contains_key(&client_id) {
             wire::send(
                 &mut send,
                 &Control::Reject {
-                    error: Fault::new("busy", "worker already connected"),
+                    error: Fault::new("busy", "this client is already connected"),
                 },
             )
             .await?;
             return Ok(());
         }
         wire::send(&mut send, &Control::Welcome { protocol: PROTOCOL }).await?;
-        s.peer = Some(Peer {
-            connection: conn.clone(),
-            instance: instance.clone(),
-            status,
-            seen: now(),
-        });
+        s.peers.insert(
+            client_id.clone(),
+            Peer {
+                connection: conn.clone(),
+                instance: instance.clone(),
+                status,
+                seen: now(),
+            },
+        );
     }
     crate::logging::event("server", "worker_connected", json!({"instance":instance}));
     let mut control_rx = wire::read_channel::<_, Control>(recv);
@@ -164,16 +181,19 @@ async fn register(
         loop {tokio::select! {
             message=control_rx.recv()=>{match message.ok_or_else(||anyhow::anyhow!("control stream closed"))?? {Control::Heartbeat{status}=>{
                 let mut s=state.lock().await;
-                if let Some(p)=s.peer.as_mut(){p.status=status;p.seen=now();}
+                if let Some(p)=s.peers.get_mut(&client_id){p.status=status;p.seen=now();}
             },_=>anyhow::bail!("unexpected control")}},
-            _=heartbeat.tick()=>{if state.lock().await.peer.as_ref().is_none_or(|p|now()-p.seen>15000){anyhow::bail!("heartbeat timeout");}wire::send(&mut send,&Control::Heartbeat{status:json!({})}).await?;},
+            _=heartbeat.tick()=>{if state.lock().await.peers.get(&client_id).is_none_or(|p|now()-p.seen>15000){anyhow::bail!("heartbeat timeout");}wire::send(&mut send,&Control::Heartbeat{status:json!({})}).await?;},
             _=conn.closed()=>break,
         }}Ok(())
     }.await;
     conn.close(1u32.into(), b"control disconnected");
     let mut s = state.lock().await;
-    if s.peer.as_ref().is_some_and(|p| p.instance == instance) {
-        s.peer = None;
+    if s.peers
+        .get(&client_id)
+        .is_some_and(|p| p.instance == instance)
+    {
+        s.peers.remove(&client_id);
     }
     drop(s);
     crate::logging::event(
@@ -184,13 +204,37 @@ async fn register(
     result
 }
 async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Result<()> {
-    let req: Request = wire::recv(&mut socket).await?;
+    let mut req: Request = wire::recv(&mut socket).await?;
+    let target_value = req.args.as_object_mut().and_then(|a| a.remove("client_id"));
+    if target_value.as_ref().is_some_and(|v| !v.is_string()) {
+        wire::send(
+            &mut socket,
+            &Reply::Error {
+                error: Fault::new("invalid_argument", "client_id must be a string"),
+            },
+        )
+        .await?;
+        return Ok(());
+    }
+    let target = target_value.and_then(|v| v.as_str().map(str::to_owned));
     let request_id = id();
     let mut log = crate::logging::Operation::new("server", &req.kind, &request_id);
     log.context(&req.args);
     if req.kind == "status" {
         let s = state.lock().await;
-        let value = json!({"connected":s.peer.is_some(),"worker":s.peer.as_ref().map(|p|&p.status),"sampled_at":s.peer.as_ref().map(|p|p.seen),"active":s.active.as_ref().map(|a|json!({"job_id":a.job_id,"directory":a.directory})),"last":s.last});
+        let workers: Vec<Value> = s.peers.iter().map(|(id,p)| json!({"client_id":id,"instance":p.instance,"status":p.status,"sampled_at":p.seen,"active":s.active.get(id).map(|a|json!({"job_id":a.job_id,"directory":a.directory}))})).collect();
+        let selected = target.as_ref().or_else(|| {
+            if s.peers.len() == 1 {
+                s.peers.keys().next()
+            } else {
+                None
+            }
+        });
+        let peer = selected.and_then(|id| s.peers.get(id));
+        let active = selected
+            .and_then(|id| s.active.get(id))
+            .map(|a| json!({"job_id":a.job_id,"directory":a.directory}));
+        let value = json!({"connected":!s.peers.is_empty(),"workers":workers,"worker":peer.map(|p|&p.status),"sampled_at":peer.map(|p|p.seen),"active":active,"last":s.last});
         log.send(&mut socket, &Reply::Status { value }).await?;
         return Ok(());
     }
@@ -218,8 +262,19 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         log.send(&mut socket, &reply).await?;
         return Ok(());
     }
+    let client_id = {
+        let s = state.lock().await;
+        match select_client(&s, target.as_deref()) {
+            Ok(id) => id,
+            Err(error) => {
+                drop(s);
+                log.send(&mut socket, &Reply::Error { error }).await?;
+                return Ok(());
+            }
+        }
+    };
     if req.kind != "sync" {
-        let peer = state.lock().await.peer.clone();
+        let peer = state.lock().await.peers.get(&client_id).cloned();
         let reply = if let Some(peer) = peer {
             let task_request_id = req.args.get("request_id").cloned();
             let operation = async {
@@ -264,7 +319,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         }
     };
     let mut s = state.lock().await;
-    if let Some(a) = &s.active {
+    if let Some(a) = s.active.get(&client_id) {
         log.send(
             &mut socket,
             &Reply::Error {
@@ -274,7 +329,7 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         .await?;
         return Ok(());
     }
-    let Some(peer) = s.peer.clone() else {
+    let Some(peer) = s.peers.get(&client_id).cloned() else {
         log.send(
             &mut socket,
             &Reply::Error {
@@ -312,13 +367,17 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
     };
     let mut initial = initial_result(&task);
     initial["directory"] = json!(directory);
+    initial["client_id"] = json!(client_id);
     wire::atomic_json(&directory.join("result.json"), &initial)?;
-    wire::atomic_json(&data.join("active.json"), &initial)?;
-    s.active = Some(active.clone());
+    wire::atomic_json(
+        &data.join("active").join(format!("{client_id}.json")),
+        &initial,
+    )?;
+    s.active.insert(client_id.clone(), active.clone());
     drop(s);
     let background = active.clone();
     tokio::spawn(async move {
-        execute(task, peer, state, data, background, initial).await;
+        execute(task, peer, client_id, state, data, background, initial).await;
     });
     if detached {
         log.send(
@@ -379,6 +438,7 @@ async fn follow(
 async fn execute(
     mut task: Task,
     peer: Peer,
+    client_id: String,
     state: Shared,
     data: PathBuf,
     active: Active,
@@ -399,12 +459,12 @@ async fn execute(
     if wire::atomic_json(&active.directory.join("result.json"), &result).is_err() {
         crate::logging::event("server", "persist_failed", json!({"job_id":task.job_id}));
     }
-    let _ = std::fs::remove_file(data.join("active.json"));
+    let _ = std::fs::remove_file(data.join("active").join(format!("{client_id}.json")));
     {
         let mut s = state.lock().await;
         s.last = Some(result.clone());
-        s.active = None;
-        if let Some(p) = s.peer.as_mut()
+        s.active.remove(&client_id);
+        if let Some(p) = s.peers.get_mut(&client_id)
             && p.instance == peer.instance
         {
             p.status["ready"] = json!(
@@ -512,4 +572,22 @@ async fn send_files(
     )
     .await?;
     Ok(())
+}
+
+fn select_client(state: &State, target: Option<&str>) -> Outcome<String> {
+    if let Some(target) = target {
+        return state
+            .peers
+            .contains_key(target)
+            .then(|| target.to_owned())
+            .ok_or_else(|| Fault::new("worker_offline", "selected client is not connected"));
+    }
+    match state.peers.len() {
+        0 => Err(Fault::new("worker_offline", "worker is not connected")),
+        1 => Ok(state.peers.keys().next().unwrap().clone()),
+        _ => Err(Fault::new(
+            "client_required",
+            "multiple clients connected; select client_id from status",
+        )),
+    }
 }

@@ -818,5 +818,5 @@ test("connection checks cannot show an old success after connection settings cha
     finish({ checks: [{ name: "Old connection", ok: true }] }),
   );
   expect(screen.queryByText(/Old connection/)).toBeNull();
-  expect(screen.getByText("changed:7443")).toBeTruthy();
+  expect(screen.getAllByText("changed:7443").length).toBeGreaterThan(0);
 });

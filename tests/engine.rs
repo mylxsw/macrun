@@ -258,3 +258,49 @@ async fn paginated_tool_counts_accumulate_distinct_names_and_reset_with_discover
     );
     engine.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn different_server_engines_do_not_overlap_on_the_same_desktop() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = WorkerConfig::default();
+    config.mcp.insert(
+        "fixture".into(),
+        macrun::config::Backend {
+            command: "python3".into(),
+            args: vec![format!(
+                "{}/tests/fixtures/mcp.py",
+                env!("CARGO_MANIFEST_DIR")
+            )],
+            env: Default::default(),
+            cwd: None,
+        },
+    );
+    let first = Engine::open(root.path().join("one"), config.clone()).unwrap();
+    let second = Engine::open(root.path().join("two"), config).unwrap();
+    first.set_policy(None, Some(true), false).await.unwrap();
+    second.set_policy(None, Some(true), false).await.unwrap();
+    let session_one = first
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    let session_two = second
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    let one = id();
+    let two = id();
+    let args = |request: &str, session: &Value| json!({"server":"fixture","session":session["session"],"tool":"observe","request_id":request,"arguments":{"serial_probe":root.path().join("physical-desktop")}});
+    let (a, b) = tokio::join!(
+        first.handle("mcp.call", args(&one, &session_one)),
+        second.handle("mcp.call", args(&two, &session_two))
+    );
+    a.unwrap();
+    b.unwrap();
+    let (a, b) = tokio::join!(wait(&first, &one), wait(&second, &two));
+    assert_eq!(a["status"], "succeeded");
+    assert_eq!(b["status"], "succeeded");
+    assert_ne!(a["result"]["isError"], true);
+    assert_ne!(b["result"]["isError"], true);
+    first.shutdown().await.unwrap();
+    second.shutdown().await.unwrap();
+}

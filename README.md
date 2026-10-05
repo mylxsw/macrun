@@ -253,7 +253,7 @@ Macrun is a **working demo**, not a production remote-execution platform.
 
 - **Verified:** commands, files, sync/watch, async results, and real Linux ARM64 → Mac communication; CuaDriver app launch, a Calculator button press, and a screenshot returned through MCP. See [validation evidence](docs/validation.md).
 - **Connection loss:** tasks remain on the worker and can be queried after reconnecting. A worker restart can leave a task `unknown`; it is not automatically replayed. Reuse request IDs after uncertain delivery rather than creating duplicate work.
-- **Current scope:** one server and one worker, trusted single-user access, QUIC/UDP only. No interactive terminal, multi-device routing, or automatic build orchestration.
+- **Connections:** many clients per server and up to 16 simultaneous servers per client. Select `client_id` explicitly when a server has multiple online clients. See [many-to-many setup](docs/many-to-many.md). Trusted single-user access, QUIC/UDP only; no interactive terminal or automatic build orchestration.
 - **Desktop limits:** no promise of unattended operation through sleep, logout or reboot. Actual app testing depends on your tools, permissions and login session.
 
 Long tasks return IDs rather than blocking. The agent must check the final state and real exit code. For the full tool contract, file limits and recovery details, read [the usage Skill](skills/macrun/SKILL.md) and its [CLI reference](skills/macrun/references/cli.md).

@@ -13,9 +13,9 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 use tokio_util::sync::CancellationToken;
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Options {
-    pub server: std::net::SocketAddr,
+    pub server: String,
     pub cert: PathBuf,
     pub token_file: PathBuf,
     pub data: PathBuf,
@@ -24,34 +24,79 @@ pub struct Options {
 pub async fn worker(opts: Options) -> Result<()> {
     worker_managed(opts, None, None, false).await
 }
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    #[serde(flatten)]
+    pub options: Options,
+}
 pub async fn worker_managed(
     opts: Options,
     control: Option<PathBuf>,
     injected_token: Option<String>,
     parent_pipe: bool,
 ) -> Result<()> {
-    let _lock = wire::lock(&opts.data)?;
-    let config: WorkerConfig = if let Some(p) = &opts.config {
-        toml::from_str(&std::fs::read_to_string(p)?)?
+    let mut tokens = std::collections::BTreeMap::new();
+    if let Some(token) = injected_token {
+        tokens.insert("primary".to_owned(), token);
+    }
+    worker_profiles(
+        vec![Profile {
+            id: "primary".into(),
+            name: opts.server.to_string(),
+            options: opts,
+        }],
+        control,
+        tokens,
+        parent_pipe,
+    )
+    .await
+}
+pub async fn worker_profiles(
+    profiles: Vec<Profile>,
+    control: Option<PathBuf>,
+    tokens: std::collections::BTreeMap<String, String>,
+    parent_pipe: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        !profiles.is_empty() && profiles.len() <= 16,
+        "one to sixteen server connections required"
+    );
+    let mut ids = std::collections::BTreeSet::new();
+    let mut paths = std::collections::BTreeSet::new();
+    let mut targets = std::collections::BTreeSet::new();
+    for profile in &profiles {
+        anyhow::ensure!(
+            profile.id == "primary" || uuid::Uuid::parse_str(&profile.id).is_ok(),
+            "invalid connection id"
+        );
+        anyhow::ensure!(
+            ids.insert(profile.id.clone())
+                && paths.insert(profile.options.data.clone())
+                && targets.insert(profile.options.server.clone()),
+            "duplicate connection id, data directory or server address"
+        );
+    }
+    let mut locks = Vec::new();
+    for profile in &profiles {
+        locks.push(wire::lock(&profile.options.data)?);
+    }
+    let identity = profiles[0].options.data.join("client-id");
+    let client_id = if identity.exists() {
+        std::fs::read_to_string(&identity)?.trim().to_owned()
     } else {
-        WorkerConfig::default()
+        let value = id();
+        wire::private_write(&identity, value.as_bytes())?;
+        value
     };
-    let engine = Engine::open(opts.data.clone(), config)?;
-    engine.prune_history().await?;
-    let sync_lock = Arc::new(Mutex::new(()));
-    let endpoint = wire::client(&opts.cert)?;
-    let token = if let Some(token) = injected_token {
-        token
-    } else {
-        std::fs::read_to_string(&opts.token_file)?
-            .trim()
-            .to_string()
-    };
-    anyhow::ensure!(!token.is_empty(), "empty connection token");
+    anyhow::ensure!(
+        uuid::Uuid::parse_str(&client_id).is_ok(),
+        "invalid saved client identity"
+    );
     let shutdown = CancellationToken::new();
     if parent_pipe {
         let stop = shutdown.clone();
-        // A dedicated thread must not hold Tokio runtime shutdown open.
         std::thread::spawn(move || {
             use std::io::Read;
             let mut buf = [0u8; 1];
@@ -59,84 +104,168 @@ pub async fn worker_managed(
             stop.cancel();
         });
     }
-    let (connection, rx) = tokio::sync::watch::channel(crate::local::ConnectionState::initial(
-        opts.server.to_string(),
-    ));
-    let local_task = control.map(|socket| {
-        let e = engine.clone();
-        let s = shutdown.clone();
-        tokio::spawn(async move {
-            let r = crate::local::serve(socket, e, rx, s.clone()).await;
-            if r.is_err() {
-                s.cancel();
+    let sync_lock = Arc::new(Mutex::new(()));
+    let mut locals = Vec::new();
+    let mut jobs = Vec::new();
+    let mut engines = Vec::new();
+    // Prepare every connection before spawning: a configuration failure cannot leave orphan jobs.
+    for profile in profiles {
+        let opts = &profile.options;
+        let config = if let Some(path) = &opts.config {
+            toml::from_str(&std::fs::read_to_string(path)?)?
+        } else {
+            WorkerConfig::default()
+        };
+        let engine = Engine::open(opts.data.clone(), config)?;
+        engine.prune_history().await?;
+        let endpoint = wire::client(&opts.cert)?;
+        let token = tokens.get(&profile.id).cloned().unwrap_or(
+            std::fs::read_to_string(&opts.token_file)
+                .unwrap_or_default()
+                .trim()
+                .to_owned(),
+        );
+        anyhow::ensure!(
+            !token.is_empty(),
+            "missing credential for connection {}",
+            profile.id
+        );
+        let (tx, rx) = tokio::sync::watch::channel(crate::local::ConnectionState::initial(
+            opts.server.to_string(),
+        ));
+        locals.push(crate::local::LocalConnection {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+            engine: engine.clone(),
+            connection: rx,
+        });
+        engines.push(engine.clone());
+        jobs.push((profile, endpoint, token, engine, tx));
+    }
+    let mut tasks = tokio::task::JoinSet::new();
+    for (profile, endpoint, token, engine, connection) in jobs {
+        let lock = sync_lock.clone();
+        let stop = shutdown.clone();
+        let client = client_id.clone();
+        tasks.spawn(async move {
+            run_connection(
+                endpoint,
+                stop,
+                Session {
+                    opts: profile.options,
+                    token,
+                    instance: id(),
+                    client_id: client,
+                    connection_id: profile.id,
+                    engine,
+                    sync_lock: lock,
+                    connection,
+                },
+            )
+            .await
+        });
+    }
+    if let Some(socket) = control {
+        let stop = shutdown.clone();
+        tasks.spawn(async move {
+            let result = crate::local::serve_connections(socket, locals, stop.clone()).await;
+            if result.is_err() {
+                stop.cancel();
             }
-            r
-        })
-    });
-    let cleanup_engine = engine.clone();
-    let cleanup_stop = shutdown.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _=cleanup_stop.cancelled()=>break,
-                _=tokio::time::sleep(Duration::from_secs(3600))=>{let _=cleanup_engine.prune_history().await;}
-            }
+            result
+        });
+    }
+    let cleanup = engines.clone();
+    let stop = shutdown.clone();
+    tasks.spawn(async move {loop{tokio::select!{_=stop.cancelled()=>break,_=tokio::time::sleep(Duration::from_secs(3600))=>{for engine in &cleanup{let _=engine.prune_history().await;}}}}Ok(())});
+    let mut outcome = tokio::select! {
+        _=shutdown.cancelled()=>Ok(()),
+        result=tokio::signal::ctrl_c()=>result.map_err(anyhow::Error::from),
+        result=tasks.join_next()=>match result {
+            Some(Ok(result)) => result,
+            Some(Err(error)) => Err(error.into()),
+            None => Ok(()),
         }
-    });
-    let instance = id();
+    };
+    shutdown.cancel();
+    for engine in &engines {
+        if let Err(error) = engine.shutdown().await
+            && outcome.is_ok()
+        {
+            outcome = Err(error);
+        }
+    }
+    while let Some(result) = tasks.join_next().await {
+        let result = result.map_err(anyhow::Error::from).and_then(|r| r);
+        if outcome.is_ok() {
+            outcome = result;
+        }
+    }
+    drop(locks);
+    outcome
+}
+struct Session {
+    opts: Options,
+    token: String,
+    instance: String,
+    client_id: String,
+    connection_id: String,
+    engine: Arc<Engine>,
+    sync_lock: Arc<Mutex<()>>,
+    connection: tokio::sync::watch::Sender<crate::local::ConnectionState>,
+}
+async fn run_connection(
+    endpoint: quinn::Endpoint,
+    shutdown: CancellationToken,
+    state: Session,
+) -> Result<()> {
+    let connection = &state.connection;
     let mut retry = 1;
     loop {
         let attempt = async {
             connection.send_modify(|s|{s.state="connecting".into();s.checks=json!({"transport":false,"certificate":false,"authentication":false,"protocol":false});});
-            let conn = tokio::time::timeout(
+            let address = tokio::time::timeout(
                 Duration::from_secs(5),
-                endpoint.connect(opts.server, "macrun")?,
+                tokio::net::lookup_host(&state.opts.server),
             )
-            .await??;
+            .await??
+            .find(|a| a.is_ipv4())
+            .ok_or_else(|| anyhow::anyhow!("server has no IPv4 address"))?;
+            let conn =
+                tokio::time::timeout(Duration::from_secs(5), endpoint.connect(address, "macrun")?)
+                    .await??;
             connection.send_modify(|s| {
                 s.checks["transport"] = json!(true);
                 s.checks["certificate"] = json!(true);
             });
-            session(
-                conn,
-                &opts,
-                &token,
-                &instance,
-                engine.clone(),
-                sync_lock.clone(),
-                &connection,
-            )
-            .await
+            session(conn, &state).await
         };
-        tokio::select! {r=attempt=>{connection.send_modify(|s|{s.state="disconnected".into();s.since=now();s.rtt_ms=None;s.error=r.as_ref().err().map(ToString::to_string);});crate::logging::event("worker", "reconnecting", json!({"status":if r.is_err(){"disconnected"}else{"closed"},"retry_seconds":retry}));},_=tokio::signal::ctrl_c()=>break,_=shutdown.cancelled()=>break}
-        tokio::select! {_=tokio::time::sleep(Duration::from_secs(retry))=>{},_=tokio::signal::ctrl_c()=>break,_=shutdown.cancelled()=>break}
+        tokio::select! {r=attempt=>{connection.send_modify(|s|{s.state="disconnected".into();s.since=now();s.rtt_ms=None;s.error=r.as_ref().err().map(ToString::to_string);});},_=shutdown.cancelled()=>break}
+        tokio::select! {_=tokio::time::sleep(Duration::from_secs(retry))=>{},_=shutdown.cancelled()=>break}
         retry = (retry * 2).min(5);
-    }
-    shutdown.cancel();
-    engine.shutdown().await?;
-    if let Some(task) = local_task {
-        task.await??;
     }
     endpoint.close(0u32.into(), b"worker stopped");
     Ok(())
 }
-async fn session(
-    conn: quinn::Connection,
-    opts: &Options,
-    token: &str,
-    instance: &str,
-    engine: Arc<Engine>,
-    sync_lock: Arc<Mutex<()>>,
-    connection: &tokio::sync::watch::Sender<crate::local::ConnectionState>,
-) -> Result<()> {
+async fn session(conn: quinn::Connection, state: &Session) -> Result<()> {
+    let Session {
+        opts,
+        token,
+        instance,
+        client_id,
+        connection_id,
+        engine,
+        sync_lock,
+        connection,
+    } = state;
     let (mut out, mut input) = conn.open_bi().await?;
-    let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance});
+    let status = json!({"ready":true,"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
     wire::send(
         &mut out,
         &Control::Hello {
             protocol: PROTOCOL,
-            token: token.into(),
-            instance: instance.into(),
+            token: token.clone(),
+            instance: instance.clone(),
             status: status.clone(),
         },
     )
@@ -168,7 +297,7 @@ async fn session(
     loop {
         tokio::select! {
             m=rx.recv()=>{if let Control::Heartbeat{..}=m.ok_or_else(||anyhow::anyhow!("control closed"))?? {last=now();}},
-            stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();tokio::spawn(async move {if handle(out,input,c,o,e,lock).await.is_err(){crate::logging::event("worker", "request_error", json!({"reason":"request_decode_or_transport_failed"}));}});},
+            stream=conn.accept_bi()=>{let (out,input)=stream?;let e=engine.clone();let o=opts.clone();let c=conn.clone();let lock=sync_lock.clone();let source=connection_id.to_owned();tokio::spawn(async move {if handle(out,input,c,o,e,lock,source).await.is_err(){crate::logging::event("worker", "request_error", json!({"reason":"request_decode_or_transport_failed"}));}});},
             _=tick.tick()=>{connection.send_modify(|s|s.rtt_ms=Some(conn.rtt().as_millis() as u64));if now()-last>15000{conn.close(1u32.into(),b"heartbeat timeout");anyhow::bail!("heartbeat timeout");}wire::send(&mut out,&Control::Heartbeat{status:status.clone()}).await?;},
             _=conn.closed()=>break,
         }
@@ -182,8 +311,20 @@ async fn handle(
     opts: Options,
     engine: Arc<Engine>,
     lock: Arc<Mutex<()>>,
+    source: String,
 ) -> Result<()> {
-    let task: Task = wire::recv(&mut input).await?;
+    let mut task: Task = wire::recv(&mut input).await?;
+    if source != "primary" {
+        if let Some(request) = task.request.args["request_id"].as_str() {
+            task.request.args["request_id"] = json!(scoped_id(&source, request));
+        }
+        if matches!(task.request.kind.as_str(), "task.get" | "task.cancel")
+            && let Some(task_id) = task.request.args["task_id"].as_str()
+            && !engine.owns_task(task_id)
+        {
+            task.request.args["task_id"] = json!(scoped_id(&source, task_id));
+        }
+    }
     let mut log = crate::logging::Operation::new("worker", &task.request.kind, &task.job_id);
     log.context(&task.request.args);
     if task.request.kind != "sync" {
@@ -362,4 +503,11 @@ async fn progress(tx: &mpsc::Sender<Event>, phase: &str) {
 }
 async fn detail(tx: &mpsc::Sender<Event>, value: Value) {
     let _ = tx.send(Event::Detail { value }).await;
+}
+
+fn scoped_id(source: &str, request: &str) -> String {
+    let digest = blake3::hash(format!("macrun-request:{source}:{request}").as_bytes());
+    uuid::Uuid::from_slice(&digest.as_bytes()[..16])
+        .unwrap()
+        .to_string()
 }

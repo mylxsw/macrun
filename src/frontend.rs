@@ -6,17 +6,33 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-pub async fn request(
+pub async fn request(socket: &Path, workspace: &Path, kind: &str, args: Value) -> Result<Value> {
+    request_for(
+        socket,
+        workspace,
+        kind,
+        args,
+        std::env::var("MACRUN_CLIENT").ok().as_deref(),
+    )
+    .await
+}
+pub async fn request_for(
     socket: &Path,
     workspace: &Path,
     kind: &str,
     mut args: Value,
+    client: Option<&str>,
 ) -> Result<Value> {
     if !args.is_object() {
         bail!("arguments must be a JSON object");
     }
     if ["exec.start", "mcp.call"].contains(&kind) && args.get("request_id").is_none() {
         args["request_id"] = json!(id());
+    }
+    if let Some(client) = client
+        && args.get("client_id").is_none()
+    {
+        args["client_id"] = json!(client);
     }
     let request_id = args.get("request_id").cloned();
     let mut stream = tokio::net::UnixStream::connect(socket).await?;
@@ -50,7 +66,7 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
 pub fn tools() -> Vec<Value> {
     let string = json!({"type":"string"});
     let number = json!({"type":"integer","minimum":0});
-    vec![
+    let mut tools = vec![
         tool(
             "device_status",
             "Inspect the outbound-connected worker and latest directory sync.",
@@ -135,7 +151,11 @@ pub fn tools() -> Vec<Value> {
             json!({"job_id":string}),
             &["job_id"],
         ),
-    ]
+    ];
+    for tool in &mut tools {
+        tool["inputSchema"]["properties"]["client_id"] = json!({"type":"string","description":"Target client_id from device_status. Required when multiple clients are connected; never broadcast."});
+    }
+    tools
 }
 pub fn content(v: &Value) -> Value {
     let mut summary = v.clone();
@@ -154,6 +174,9 @@ pub fn content(v: &Value) -> Value {
     json!({"content":items,"isError":matches!(v["status"].as_str(),Some("failed"|"unknown"|"cancelled"|"timed_out"|"denied"))})
 }
 pub async fn mcp(socket: PathBuf, workspace: PathBuf) -> Result<()> {
+    mcp_for(socket, workspace, std::env::var("MACRUN_CLIENT").ok()).await
+}
+pub async fn mcp_for(socket: PathBuf, workspace: PathBuf, client: Option<String>) -> Result<()> {
     let mut input = BufReader::new(tokio::io::stdin()).lines();
     let mut out = tokio::io::stdout();
     let mut initialized = false;
@@ -207,7 +230,7 @@ pub async fn mcp(socket: PathBuf, workspace: PathBuf) -> Result<()> {
                         if kind == "sync" {
                             args["detach"] = json!(true);
                         }
-                        match request(&socket, &root, &kind, args).await {
+                        match request_for(&socket, &root, &kind, args, client.as_deref()).await {
                             Ok(value) => Ok(content(&value)),
                             Err(e) => Ok(
                                 json!({"content":[{"type":"text","text":e.to_string()}],"isError":true}),

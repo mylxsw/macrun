@@ -132,20 +132,32 @@ fn presentation(v: &Value, pending: Vec<String>, error: String) -> Value {
         let title = task["arguments"]["command"].as_str()
             .or_else(|| task["arguments"]["tool"].as_str())
             .unwrap_or("同步任务");
-        json!({"id":task["task_id"],"title":title.chars().take(90).collect::<String>(),"approval":task["status"]=="awaiting_approval"})
+        json!({"id":task["task_id"],"title":format!("{}{}",task["connection_name"].as_str().map(|name|format!("{name} · ")).unwrap_or_default(),title).chars().take(90).collect::<String>(),"approval":task["status"]=="awaiting_approval"})
     }).collect();
-    let subtitle = if connected {
-        if active_count > 0 {
+    let connection_text =
+        if let Some(connections) = v["connections"].as_array().filter(|c| c.len() > 1) {
             format!(
-                "{} 个任务进行中 · 已连接 {} ms",
-                active_count,
-                v["connection"]["rtt_ms"].as_u64().unwrap_or(0)
+                "{}/{} 台服务器在线",
+                connections
+                    .iter()
+                    .filter(|c| c["connection"]["state"] == "connected")
+                    .count(),
+                connections.len()
             )
         } else {
             format!(
-                "今天 {} 个任务 · 已连接 {} ms",
-                v["today_summary"]["total"].as_u64().unwrap_or(0),
+                "已连接 {} ms",
                 v["connection"]["rtt_ms"].as_u64().unwrap_or(0)
+            )
+        };
+    let subtitle = if connected {
+        if active_count > 0 {
+            format!("{} 个任务进行中 · {}", active_count, connection_text)
+        } else {
+            format!(
+                "今天 {} 个任务 · {}",
+                v["today_summary"]["total"].as_u64().unwrap_or(0),
+                connection_text
             )
         }
     } else {
@@ -174,6 +186,18 @@ pub fn hide() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_panel_counts_servers_and_identifies_task_source() {
+        let v = json!({"connection":{"state":"connected"},"connections":[{"connection":{"state":"connected"}},{"connection":{"state":"disconnected"}}],"tasks":[{"task_id":"task","status":"running","connection_name":"Build server","arguments":{"command":"test"}}]});
+        let panel = presentation(&v, vec![], "".into());
+        assert!(
+            panel["subtitle"]
+                .as_str()
+                .unwrap()
+                .contains("1/2 台服务器在线")
+        );
+        assert_eq!(panel["tasks"][0]["title"], "Build server · test");
+    }
     #[test]
     fn native_panel_keeps_confirmed_policy_and_prioritizes_approvals() {
         let v = json!({"connection":{"state":"connected"},"policy":{"paused":true,"desktop_enabled":false},"tasks":[{"task_id":"running","status":"running","arguments":{"command":"echo running"}},{"task_id":"approval","status":"awaiting_approval","arguments":{"command":"echo waiting"}}]});

@@ -604,6 +604,20 @@ impl Engine {
         uuid::Uuid::parse_str(id)?;
         Ok(self.data.join("tasks").join(id))
     }
+    pub fn owns_task(&self, ident: &str) -> bool {
+        uuid::Uuid::parse_str(ident).is_ok()
+            && (self
+                .data
+                .join("tasks")
+                .join(ident)
+                .join("result.json")
+                .is_file()
+                || self
+                    .data
+                    .join("dedup")
+                    .join(format!("{ident}.json"))
+                    .is_file())
+    }
     pub async fn handle(self: &Arc<Self>, kind: &str, a: Value) -> Result<Value> {
         match kind {
             "exec.start" | "mcp.call" => self.submit(kind, a, false).await,
@@ -934,6 +948,14 @@ impl Engine {
                 .as_u64()
                 .unwrap_or(if method == "tools/list" { 12 } else { 300 }),
         );
+        static DESKTOP: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+        let _desktop = if method == "tools/call" {
+            Some(
+                tokio::select! {v=tokio::time::timeout(timeout,DESKTOP.get_or_init(||Mutex::new(())).lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for desktop"))?,_=cancel.cancelled()=>bail!("cancelled before desktop dispatch"),_=stop_all.cancelled()=>bail!("cancelled before desktop dispatch")},
+            )
+        } else {
+            None
+        };
         // Waiting for the per-backend lock is cancellable, but never drops somebody else's client.
         let mut guard = tokio::select! {v=tokio::time::timeout(timeout,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
         if let Some(expected) = a["session"].as_str() {

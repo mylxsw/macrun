@@ -28,7 +28,7 @@ export function SettingsPage({
   act: Act;
   refresh: () => Promise<void>;
   setError: (s: string) => void;
-  onPair: () => void;
+  onPair: (add?: boolean) => void;
   manualOpen?: boolean;
   actionError?: string;
 }) {
@@ -225,7 +225,7 @@ export function SettingsPage({
             </small>
             <button
               disabled={connectionBusy || app?.worker_running}
-              onClick={onPair}
+              onClick={() => onPair()}
             >
               {app?.settings.server ? "重新配对" : "配对服务器"}
             </button>
@@ -253,6 +253,84 @@ export function SettingsPage({
               </button>
             )}
           </div>
+        </div>
+        <div className="server-connections" aria-label="服务器连接列表">
+          <div className="row between">
+            <h3>服务器连接</h3>
+            <button
+              disabled={
+                connectionBusy ||
+                app?.worker_running ||
+                (app?.settings.connections?.length || 0) >= 15
+              }
+              onClick={() => onPair(true)}
+            >
+              添加服务器
+            </button>
+          </div>
+          <p className="muted">
+            保存的服务器会同时连接。添加或移除前，请等待任务结束并断开连接；已有记录会保留。
+          </p>
+          {[
+            ...(app?.settings.server
+              ? [
+                  {
+                    id: "primary",
+                    name: app.settings.server,
+                    server: app.settings.server,
+                  },
+                ]
+              : []),
+            ...(app?.settings.connections || []),
+          ].map((c) => {
+            const live =
+              available && app?.worker_running
+                ? snapshot?.connections?.find((v) => v.id === c.id)
+                    ?.connection ||
+                  (c.id === "primary" ? snapshot?.connection : undefined)
+                : undefined;
+            return (
+              <div className="feature-line" key={c.id}>
+                <span
+                  className={`dot ${live?.state === "connected" ? "succeeded" : "cancelled"}`}
+                />
+                <div className="grow">
+                  <b>{c.name}</b>
+                  <small className="mono wrap">
+                    {c.id === "primary" ? "主连接 · " : ""}
+                    {c.server}
+                  </small>
+                  {live?.error && (
+                    <small className="error-text">{live.error}</small>
+                  )}
+                </div>
+                <span
+                  className={`tag ${live?.state === "connected" ? "succeeded" : ""}`}
+                >
+                  {live?.state === "connected"
+                    ? "已连接"
+                    : app?.worker_running
+                      ? "连接中"
+                      : "未连接"}
+                </span>
+                {c.id !== "primary" && (
+                  <button
+                    className="ghost"
+                    disabled={connectionBusy || app?.worker_running}
+                    onClick={() =>
+                      act(
+                        "remove_connection",
+                        { id: c.id },
+                        "连接已移除，历史数据仍保留",
+                      )
+                    }
+                  >
+                    移除
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
         {app?.worker_starting && (
           <p className="muted" role="status">

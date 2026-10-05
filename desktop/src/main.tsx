@@ -210,6 +210,8 @@ function App() {
   const trayContent = useRef<HTMLDivElement>(null);
   const [page, updatePage] = useState("live"),
     [pairing, setPairing] = useState(false),
+    [addingServer, setAddingServer] = useState(false),
+    [connectionFilter, setConnectionFilter] = useState(""),
     [manualOpen, setManualOpen] = useState(false),
     [app, setApp] = useState<AppState | null>(null),
     [snapshot, setSnapshot] = useState<Snapshot | null>(null),
@@ -233,6 +235,10 @@ function App() {
     running = tasks.filter(active),
     connected = available && snapshot?.connection.state === "connected",
     paused = snapshot?.policy.paused || false;
+  const connectionSummary =
+    (snapshot?.connections?.length || 0) > 1
+      ? `${available ? snapshot!.connections!.filter((c) => c.connection.state === "connected").length : 0}/${snapshot!.connections!.length} 台服务器在线`
+      : "";
   const refresh = async () => {
     if (!isTauri) return;
     const a = await invoke<AppState>("app_state");
@@ -472,6 +478,7 @@ function App() {
     kind,
     query,
     selected,
+    connectionId: connectionFilter,
   });
   const replayHistory = useReplayHistory(
     page === "desktop" && !tray,
@@ -748,17 +755,28 @@ function App() {
         <div className="pairing-feedback">{feedback}</div>
         {exitDialog}
         <Pairing
-          act={act}
+          act={(command, args = {}, success) =>
+            act(
+              command,
+              command === "pair" ? { ...args, add: addingServer } : args,
+              success,
+            )
+          }
           running={!!app?.worker_running}
+          adding={addingServer}
           onClose={() => {
             setPairing(false);
             setPage("settings");
           }}
-          onManual={() => {
-            setPairing(false);
-            setManualOpen(true);
-            setPage("settings");
-          }}
+          onManual={
+            addingServer
+              ? undefined
+              : () => {
+                  setPairing(false);
+                  setManualOpen(true);
+                  setPage("settings");
+                }
+          }
           onComplete={(route) => {
             setPairing(false);
             setPage(route === "desktop" ? "desktop" : "live");
@@ -800,9 +818,12 @@ function App() {
         <div className="sidebar-status">
           <div className="row">
             <span className={`dot ${connected ? "succeeded" : "failed"}`} />
-            <b>{connected ? "已连接" : "尚未连接"}</b>
+            <b>
+              {connectionSummary.replace(" 台服务器在线", " 在线") ||
+                (connected ? "已连接" : "尚未连接")}
+            </b>
             <span className="mono muted push">
-              {snapshot?.connection.rtt_ms != null
+              {connected && snapshot?.connection.rtt_ms != null
                 ? `${snapshot.connection.rtt_ms} ms`
                 : ""}
             </span>
@@ -877,7 +898,10 @@ function App() {
               <StatusCard
                 title="连接"
                 status={connected ? "succeeded" : "failed"}
-                value={connected ? "已连接服务器" : "尚未连接服务器"}
+                value={
+                  connectionSummary ||
+                  (connected ? "已连接服务器" : "尚未连接服务器")
+                }
                 detail={
                   snapshot?.connection.error ||
                   (connected
@@ -914,7 +938,7 @@ function App() {
                 }
                 value={
                   snapshot?.policy.desktop_enabled
-                    ? `${snapshot?.backends[0]?.name || "桌面控制"} · 已允许`
+                    ? `${snapshot?.backends[0]?.display_name || snapshot?.backends[0]?.name || "桌面控制"} · 已允许`
                     : "桌面控制已关闭"
                 }
                 detail={
@@ -1032,6 +1056,26 @@ function App() {
                 />
               </label>
             </header>
+            {(snapshot?.connections?.length || 0) > 1 && (
+              <label className="connection-filter">
+                服务器{" "}
+                <select
+                  aria-label="按服务器筛选"
+                  value={connectionFilter}
+                  onChange={(e) => {
+                    setConnectionFilter(e.target.value);
+                    setSelected("");
+                  }}
+                >
+                  <option value="">全部服务器</option>
+                  {snapshot?.connections?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="filters v3-filters">
               <div className="seg" role="group" aria-label="按状态筛选">
                 {(
@@ -1192,6 +1236,12 @@ function App() {
                       <span className={`dot ${t.status}`} />
                       <div className="grow">
                         <div className="mono ellipsis">{title(t)}</div>
+                        {t.connection_name &&
+                          (snapshot?.connections?.length || 0) > 1 && (
+                            <small className="task-source">
+                              {t.connection_name}
+                            </small>
+                          )}
                         <small>
                           {kindLabel(t)} · {time(t)}
                         </small>
@@ -1267,6 +1317,12 @@ function App() {
                       <small>{time(sel)}</small>
                     </div>
                     <h3 className="mono command">{title(sel)}</h3>
+                    {sel.connection_name &&
+                      (snapshot?.connections?.length || 0) > 1 && (
+                        <small className="task-source">
+                          来源：{sel.connection_name}
+                        </small>
+                      )}
                     {sel.status === "unknown" && (
                       <div className="alert task-explanation">
                         <Info size={16} />
@@ -1407,7 +1463,7 @@ function App() {
                   <article className="card backend" key={b.name}>
                     <div className="row">
                       <Monitor size={22} />
-                      <h3>{b.name}</h3>
+                      <h3>{b.display_name || b.name}</h3>
                       <span className="tag push">
                         {{
                           ready: "已启动",
@@ -1436,7 +1492,10 @@ function App() {
                             tasks.filter(
                               (t) =>
                                 t.kind === "mcp.call" &&
-                                t.arguments.server === b.name,
+                                t.arguments.server ===
+                                  (b.backend_name || b.name) &&
+                                (!b.connection_id ||
+                                  t.connection_id === b.connection_id),
                             ).length
                           }
                         </div>
@@ -1576,7 +1635,10 @@ function App() {
               act={act}
               refresh={refresh}
               setError={setError}
-              onPair={() => setPairing(true)}
+              onPair={(add = false) => {
+                setAddingServer(add);
+                setPairing(true);
+              }}
               manualOpen={manualOpen}
             />
           </RetainedPage>
@@ -1779,6 +1841,9 @@ function TaskCard({
         )}
       </div>
       <h3 className="mono command">
+        {t.connection_name && (
+          <small className="task-source">来源：{t.connection_name}</small>
+        )}
         {sync ? (
           <button
             className="sync-title-button"

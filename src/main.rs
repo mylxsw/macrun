@@ -17,6 +17,9 @@ struct Cli {
         default_value = "/tmp/macrun.sock"
     )]
     socket: PathBuf,
+    /// Target a stable client ID from status; mandatory when more than one client is online.
+    #[arg(long, global = true, env = "MACRUN_CLIENT")]
+    client: Option<String>,
     #[arg(long, global = true, default_value = ".")]
     workspace: PathBuf,
     #[command(subcommand)]
@@ -42,12 +45,15 @@ enum Cmd {
         data: PathBuf,
     },
     Worker {
-        #[arg(long)]
-        server: std::net::SocketAddr,
-        #[arg(long)]
-        cert: PathBuf,
-        #[arg(long)]
-        token_file: PathBuf,
+        #[arg(long, required_unless_present = "connections")]
+        server: Option<std::net::SocketAddr>,
+        #[arg(long, required_unless_present = "connections")]
+        cert: Option<PathBuf>,
+        #[arg(long, required_unless_present = "connections")]
+        token_file: Option<PathBuf>,
+        /// JSON array of named server profiles. Credentials stay in files or the inherited pipe.
+        #[arg(long, conflicts_with_all=["server","cert","token_file","config"])]
+        connections: Option<PathBuf>,
         /// Read credentials from the inherited pipe, never from process arguments.
         #[arg(long)]
         token_stdin: bool,
@@ -131,6 +137,7 @@ async fn entry() -> anyhow::Result<()> {
             server,
             cert,
             token_file,
+            connections,
             token_stdin,
             data,
             config,
@@ -142,18 +149,34 @@ async fn entry() -> anyhow::Result<()> {
                 let mut header = [0u8; 4];
                 std::io::stdin().read_exact(&mut header)?;
                 let n = u32::from_be_bytes(header) as usize;
-                anyhow::ensure!(n <= 4096, "credential frame too large");
+                anyhow::ensure!(n <= 65536, "credential frame too large");
                 let mut b = vec![0; n];
                 std::io::stdin().read_exact(&mut b)?;
                 Some(String::from_utf8(b)?)
             } else {
                 None
             };
+            if let Some(path) = connections {
+                let profiles: Vec<macrun::worker::Profile> =
+                    serde_json::from_slice(&std::fs::read(path)?)?;
+                let tokens = if let Some(frame) = injected {
+                    serde_json::from_str(&frame)?
+                } else {
+                    Default::default()
+                };
+                return macrun::worker::worker_profiles(
+                    profiles,
+                    control_socket,
+                    tokens,
+                    parent_pipe,
+                )
+                .await;
+            }
             return macrun::worker::worker_managed(
                 macrun::worker::Options {
-                    server,
-                    cert,
-                    token_file,
+                    server: server.expect("server required").to_string(),
+                    cert: cert.expect("cert required"),
+                    token_file: token_file.expect("token file required"),
                     data,
                     config,
                 },
@@ -163,7 +186,7 @@ async fn entry() -> anyhow::Result<()> {
             )
             .await;
         }
-        Cmd::Mcp => return frontend::mcp(cli.socket, root).await,
+        Cmd::Mcp => return frontend::mcp_for(cli.socket, root, cli.client).await,
         Cmd::Status => ("status".into(), json!({})),
         Cmd::Call { operation, args } => (operation, serde_json::from_str(&args)?),
         Cmd::Exec {
@@ -186,16 +209,22 @@ async fn entry() -> anyhow::Result<()> {
             }
             loop {
                 let operation = async {
-                    let accepted =
-                        frontend::request(&cli.socket, &root, "sync", json!({"detach":true}))
-                            .await?;
+                    let accepted = frontend::request_for(
+                        &cli.socket,
+                        &root,
+                        "sync",
+                        json!({"detach":true}),
+                        cli.client.as_deref(),
+                    )
+                    .await?;
                     let jid = accepted["job_id"].clone();
                     loop {
-                        let v = frontend::request(
+                        let v = frontend::request_for(
                             &cli.socket,
                             &root,
                             "sync.get",
                             json!({"job_id":jid}),
+                            cli.client.as_deref(),
                         )
                         .await?;
                         if v.get("ended_at").is_some() {
@@ -224,11 +253,12 @@ async fn entry() -> anyhow::Result<()> {
             let mut offset = 0;
             let mut version = None;
             loop {
-                let v = frontend::request(
+                let v = frontend::request_for(
                     &cli.socket,
                     &root,
                     "file.read",
                     json!({"path":remote,"offset":offset}),
+                    cli.client.as_deref(),
                 )
                 .await?;
                 if version.as_ref().is_some_and(|old| old != &v["version"]) {
@@ -258,24 +288,26 @@ async fn entry() -> anyhow::Result<()> {
             let mut b = vec![0; macrun::files::CHUNK];
             loop {
                 let n = f.read(&mut b).await?;
-                frontend::request(&cli.socket,&root,"file.write",json!({"path":temp,"offset":offset,"truncate":offset==0,"data":STANDARD.encode(&b[..n])})).await?;
+                frontend::request_for(&cli.socket,&root,"file.write",json!({"path":temp,"offset":offset,"truncate":offset==0,"data":STANDARD.encode(&b[..n])}),cli.client.as_deref()).await?;
                 offset += n as u64;
                 if n == 0 {
                     break;
                 }
             }
-            frontend::request(
+            frontend::request_for(
                 &cli.socket,
                 &root,
                 "file.move",
                 json!({"path":temp,"destination":remote}),
+                cli.client.as_deref(),
             )
             .await?;
             println!("{remote}");
             return Ok(());
         }
     };
-    let result = frontend::request(&cli.socket, &root, &kind, args).await?;
+    let result =
+        frontend::request_for(&cli.socket, &root, &kind, args, cli.client.as_deref()).await?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

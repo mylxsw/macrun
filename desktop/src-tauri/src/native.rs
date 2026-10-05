@@ -170,9 +170,25 @@ pub async fn connection_check(rt: tauri::State<'_, Runtime>) -> std::result::Res
     let state = local::request(&rt.socket, "snapshot", json!({}))
         .await
         .map_err(|e| e.to_string())?;
-    let checks = &state["connection"]["checks"];
+    let connections: Vec<&Value> = state["connections"]
+        .as_array()
+        .map(|rows| rows.iter().map(|row| &row["connection"]).collect())
+        .unwrap_or_else(|| vec![&state["connection"]]);
+    let checks: Vec<Value> = [
+        ("UDP / QUIC 可达", "transport"),
+        ("证书校验", "certificate"),
+        ("凭据认证", "authentication"),
+        ("协议一致", "protocol"),
+    ]
+    .into_iter()
+    .map(|(name, key)| json!({"name":name,"ok":connections.iter().all(|c|c["checks"][key]==true)}))
+    .collect();
+    let errors: Vec<_> = connections
+        .iter()
+        .filter_map(|c| c["error"].as_str().map(str::to_owned))
+        .collect();
     Ok(
-        json!({"checks":[{"name":"UDP / QUIC 可达","ok":checks["transport"]},{"name":"证书校验","ok":checks["certificate"]},{"name":"凭据认证","ok":checks["authentication"]},{"name":"协议一致","ok":checks["protocol"]}],"error":state["connection"]["error"],"note":"连接成功代表握手校验通过；未连接时请查看具体错误。"}),
+        json!({"checks":checks,"error":errors.join("；"),"note":"检查覆盖全部已保存连接；各服务器的状态可在连接列表查看。"}),
     )
 }
 fn legacy_argument(value: &Value, key: &str) -> Result<String> {
@@ -322,6 +338,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
     )
     .map_err(|_| anyhow::anyhow!("无法将旧连接凭据保存到钥匙串；旧服务未停止"))?;
     let settings = Settings {
+        connections: rt.settings.lock().unwrap().connections.clone(),
         server,
         cert: copied_cert.to_string_lossy().into(),
         token_file: "/dev/null".into(),
