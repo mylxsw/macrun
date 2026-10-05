@@ -1,4 +1,13 @@
 use super::*;
+
+pub fn set_application_icon() {
+    // Embed the same multi-resolution image shipped in Contents/Resources so
+    // startup does not depend on LaunchServices retaining the newest icon.
+    let icon = include_bytes!("../icons/icon.icns");
+    if !unsafe { macrun_set_application_icon(icon.as_ptr(), icon.len()) } {
+        eprintln!("Unable to load the Macrun Dock icon");
+    }
+}
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
@@ -396,6 +405,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
 
 unsafe extern "C" {
     pub fn macrun_monitor_start();
+    fn macrun_set_application_icon(bytes: *const u8, length: usize) -> bool;
     pub fn macrun_graphical_session() -> bool;
     pub fn macrun_awake_active() -> bool;
     pub fn macrun_input_sequence() -> u64;

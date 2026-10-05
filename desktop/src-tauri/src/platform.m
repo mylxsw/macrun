@@ -1,7 +1,26 @@
 #import <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
 #import <IOKit/pwr_mgt/IOPMLib.h>
 #include <pthread.h>
 #include <stdatomic.h>
+
+// Finder's bundle icon and the running application's Dock tile have separate
+// lifetimes. Set the latter explicitly after launch, including after an update.
+bool macrun_set_application_icon(const unsigned char *bytes, size_t length) {
+    if (![NSThread isMainThread] || !NSApp || !bytes || !length) return false;
+    @autoreleasepool {
+        NSData *data = [NSData dataWithBytes:bytes length:length];
+        NSImage *image = [[NSImage alloc] initWithData:data];
+        if (!image || ![image isValid]) {
+            [image release];
+            return false;
+        }
+        [NSApp setApplicationIconImage:image];
+        [image release];
+        return true;
+    }
+}
+
 static _Atomic unsigned long input_sequence=0;
 static _Atomic bool input_available=false;
 static CFMachPortRef input_tap=NULL;

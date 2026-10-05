@@ -1178,6 +1178,9 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("cannot build Macrun Desktop")
         .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Ready) {
+                native::set_application_icon();
+            }
             if let tauri::RunEvent::ExitRequested { api, .. } = event
                 && !app.state::<Runtime>().exiting.load(Ordering::SeqCst)
             {
