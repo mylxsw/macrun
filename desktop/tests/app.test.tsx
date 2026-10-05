@@ -676,6 +676,26 @@ test("native navigation loads an old task by id even outside the current page an
   expect(taskList().queryByText("archive command 1498")).toBeNull();
 });
 
+test("command preview copies the complete multiline command", async () => {
+  const command = "LONG_VALUE=" + "x".repeat(600) + "\nprintf 'finished'";
+  app.snapshot.tasks.find(
+    (task) => task.task_id === "task-running",
+  )!.arguments.command = command;
+  const user = userEvent.setup();
+  const clipboard = vi.spyOn(navigator.clipboard, "writeText");
+  try {
+    await mount();
+    await emit("navigate", "tasks:task-running");
+    await waitFor(() =>
+      expect(detail().getByLabelText("完整命令").textContent).toBe(command),
+    );
+    await user.click(detail().getByRole("button", { name: "复制命令" }));
+    expect(clipboard).toHaveBeenCalledWith(command);
+  } finally {
+    clipboard.mockRestore();
+  }
+});
+
 test("offline cached history remains pageable and cannot send live task controls", async () => {
   largeHistory();
   const user = userEvent.setup();

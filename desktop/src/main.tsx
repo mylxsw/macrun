@@ -8,6 +8,7 @@ import {
 import { Overview, StepMark } from "./Overview";
 import { Access } from "./Access";
 import { ThisMac } from "./ThisMac";
+import { CommandPreview } from "./CommandPreview";
 import { health as readHealth } from "./health";
 import { clock, dayLabel, lastLine, serverViews, taskDuration } from "./format";
 import { SettingsPage } from "./SettingsPage";
@@ -1432,12 +1433,15 @@ function App() {
                             {taskDuration(sel)}
                           </small>
                         </div>
-                        <h3 className="mono command">
-                          {command ||
-                            (sel.kind === "mcp.call"
+                        {command ? (
+                          <CommandPreview key={sel.task_id} command={command} />
+                        ) : (
+                          <h3 className="mono command">
+                            {sel.kind === "mcp.call"
                               ? `${sel.arguments.server} · ${sel.arguments.tool}`
-                              : title(sel))}
-                        </h3>
+                              : title(sel)}
+                          </h3>
+                        )}
                         <dl>
                           <dt>项目</dt>
                           <dd>
