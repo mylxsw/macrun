@@ -266,6 +266,9 @@ async function emit(name: string, payload?: any) {
 function navigation() {
   return within(screen.getByRole("navigation", { name: "主导航" }));
 }
+function settingsButton() {
+  return screen.getByRole("button", { name: "设置", exact: true });
+}
 function taskList() {
   return within(screen.getByRole("region", { name: "任务列表" }));
 }
@@ -277,23 +280,16 @@ async function chooseStatus(
   user: ReturnType<typeof userEvent.setup>,
   status: string,
 ) {
-  if (status === "failed" || status === "succeeded")
-    await user.click(
-      screen.getByRole("button", {
-        name: new RegExp(`^${statuses[status]}\\s*1$`),
-      }),
-    );
-  else
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "更多状态" }),
-      status,
-    );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "更多筛选" }),
+    status,
+  );
 }
 
 test("navigation keeps all nine task states independently usable", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   for (const status of Object.keys(statuses)) {
     await chooseStatus(user, status);
     await waitFor(() =>
@@ -301,12 +297,8 @@ test("navigation keeps all nine task states independently usable", async () => {
     );
     expect(taskList().getAllByRole("button")).toHaveLength(1);
   }
-  // Groups: in progress and needs attention sum their statuses.
-  await user.click(screen.getByRole("button", { name: /^进行中\s*3$/ }));
-  await waitFor(() =>
-    expect(taskList().getAllByRole("button")).toHaveLength(3),
-  );
-  await user.click(screen.getByRole("button", { name: /^需关注\s*4$/ }));
+  // "Needs attention" sums the Macrun-level problem states.
+  await user.click(screen.getByRole("button", { name: /^需要关注\s*4$/ }));
   await waitFor(() =>
     expect(taskList().getAllByRole("button")).toHaveLength(4),
   );
@@ -325,20 +317,16 @@ test("navigation keeps all nine task states independently usable", async () => {
         args.args.kind === "mcp.call",
     ),
   ).toBe(true);
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
-  expect(
-    screen.getByRole("heading", { level: 1, name: "桌面控制" }),
-  ).toBeTruthy();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
-  expect(
-    screen.getByRole("heading", { level: 1, name: "设置与安全" }),
-  ).toBeTruthy();
+  await user.click(navigation().getByRole("button", { name: "本机" }));
+  expect(screen.getByRole("heading", { level: 1, name: "本机" })).toBeTruthy();
+  await user.click(settingsButton());
+  expect(screen.getByRole("heading", { level: 1, name: "设置" })).toBeTruthy();
 });
 
 test("task search finds command, cwd, sync root, file path and exact task id", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   const input = screen.getByRole("textbox", { name: "搜索任务" });
   for (const [query, status] of [
     ["command-running", "running"],
@@ -365,18 +353,22 @@ test("task search finds command, cwd, sync root, file path and exact task id", a
 test("pause, resume and emergency stop dispatch distinct worker controls", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(screen.getByRole("button", { name: "暂停接收新任务" }));
+  const receive = screen.getByRole("checkbox", { name: "接收新任务" });
+  expect((receive as HTMLInputElement).checked).toBe(true);
+  await user.click(receive);
   expect(bridge.invoke).toHaveBeenCalledWith("control", {
     action: "pause",
     args: { paused: true },
   });
   expect(screen.getByRole("heading", { name: "command-running" })).toBeTruthy();
+  // Paused shows up under "需要你" with a one-click resume.
+  expect((receive as HTMLInputElement).checked).toBe(false);
   await user.click(screen.getByRole("button", { name: "恢复接收" }));
   expect(bridge.invoke).toHaveBeenCalledWith("control", {
     action: "pause",
     args: { paused: false },
   });
-  await user.click(screen.getByRole("button", { name: /^全部停止/ }));
+  await user.click(screen.getByRole("button", { name: /^停止全部/ }));
   expect(bridge.invoke).toHaveBeenCalledWith("control", {
     action: "stop_all",
     args: {},
@@ -390,7 +382,7 @@ test("pause, resume and emergency stop dispatch distinct worker controls", async
 
 test("worker disconnect disables controls despite a cached snapshot until worker events resume", async () => {
   await mount();
-  const pause = screen.getByRole("button", { name: "暂停接收新任务" });
+  const pause = screen.getByRole("checkbox", { name: "接收新任务" });
   expect(pause.hasAttribute("disabled")).toBe(false);
   app.worker_running = false;
   await emit("worker-unavailable");
@@ -402,17 +394,15 @@ test("worker disconnect disables controls despite a cached snapshot until worker
 test("unknown results explain possible effects and offer observation without replay", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   await chooseStatus(user, "unknown");
   await waitFor(() => expect(detail().getByText(/不会自动重放/)).toBeTruthy());
   expect(
     detail().queryByRole("button", { name: /取消任务|重试|重新执行|重放/ }),
   ).toBeNull();
   bridge.invoke.mockClear();
-  await user.click(detail().getByRole("button", { name: "前往桌面控制核对" }));
-  expect(
-    screen.getByRole("heading", { level: 1, name: "桌面控制" }),
-  ).toBeTruthy();
+  await user.click(detail().getByRole("button", { name: "前往本机核对" }));
+  expect(screen.getByRole("heading", { level: 1, name: "本机" })).toBeTruthy();
   expect(
     bridge.invoke.mock.calls.some(
       ([command, args]) =>
@@ -425,7 +415,7 @@ test("unknown results explain possible effects and offer observation without rep
 test("quit dialog traps Tab, closes with Escape and never exits implicitly", async () => {
   const user = userEvent.setup();
   await mount();
-  navigation().getByRole("button", { name: "任务" }).focus();
+  navigation().getByRole("button", { name: "活动" }).focus();
   await emit("exit-requested");
   const dialog = within(screen.getByRole("dialog", { name: "退出 Macrun？" }));
   const cancel = dialog.getByRole("button", { name: "继续运行" });
@@ -439,7 +429,7 @@ test("quit dialog traps Tab, closes with Escape and never exits implicitly", asy
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(document.activeElement).toBe(
-    navigation().getByRole("button", { name: "任务" }),
+    navigation().getByRole("button", { name: "活动" }),
   );
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "exit_app"),
@@ -451,7 +441,7 @@ test("a successful migration stays successful when the following state refresh f
   app.legacy_running = true;
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   const original = bridge.invoke.getMockImplementation()!;
   let failRefresh = false;
   bridge.invoke.mockImplementation(async (command, args) => {
@@ -487,7 +477,7 @@ test("native quit above a migration dialog keeps keyboard focus in the top dialo
   app.legacy_running = true;
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   await user.click(screen.getByRole("button", { name: "迁移", exact: true }));
   const migration = within(
     screen.getByRole("dialog", { name: "迁移旧执行器" }),
@@ -526,7 +516,7 @@ test("closing quit restores an underlying tools dialog before its original trigg
   });
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   const trigger = screen.getByRole("button", { name: "查看工具列表" });
   await user.click(trigger);
   const tools = screen.getByRole("dialog", { name: "后端工具列表" });
@@ -562,9 +552,12 @@ test("a tray task opens its own detail and clears stale task filters in the main
   vi.resetModules();
   document.body.innerHTML = '<div id="root"></div>';
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   await chooseStatus(user, "unknown");
-  await user.click(screen.getByRole("button", { name: "命令" }));
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "更多筛选" }),
+    "kind:exec.start",
+  );
   await user.type(
     screen.getByRole("textbox", { name: "搜索任务" }),
     "no match",
@@ -585,9 +578,7 @@ test("first launch pairing yields to a native settings navigation", async () => 
   await mount();
   expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy();
   await emit("navigate", "settings");
-  expect(
-    screen.getByRole("heading", { level: 1, name: "设置与安全" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 1, name: "设置" })).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "配对服务器" }));
   expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy();
@@ -603,7 +594,7 @@ test.each([true, false])(
     const user = userEvent.setup();
     await mount();
     expect(
-      screen.getByRole("heading", { level: 1, name: "设置与安全" }),
+      screen.getByRole("heading", { level: 1, name: "设置" }),
     ).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
     const migrate = screen.getByRole("button", { name: "迁移", exact: true });
@@ -631,7 +622,7 @@ test.each([true, false])(
 test("an existing desktop connection opens the live page even with legacy files present", async () => {
   app.legacy_detected = true;
   await mount();
-  expect(screen.getByRole("heading", { level: 1, name: "现场" })).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 1, name: "概览" })).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(
@@ -645,17 +636,17 @@ test("large task history pages without mounting every row and searches beyond th
   largeHistory();
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   await waitFor(() => expect(detail().getByText("history-0000")).toBeTruthy());
   expect(taskList().getAllByRole("button")).toHaveLength(50);
-  expect(screen.getByRole("button", { name: /^失败\s*500$/ })).toBeTruthy();
+  expect(screen.getByRole("option", { name: /^失败\s*500$/ })).toBeTruthy();
   const pages = within(screen.getByRole("navigation", { name: "任务分页" }));
   expect(pages.getByText("共 1500 条 · 第 1 页")).toBeTruthy();
-  await user.click(pages.getByRole("button", { name: "下一页" }));
+  await user.click(pages.getByRole("button", { name: "更早" }));
   await waitFor(() => expect(detail().getByText("history-0050")).toBeTruthy());
   expect(taskList().getAllByRole("button")).toHaveLength(50);
   expect(taskList().queryByText("archive command 0")).toBeNull();
-  await user.click(pages.getByRole("button", { name: "上一页" }));
+  await user.click(pages.getByRole("button", { name: "较新" }));
   await waitFor(() => expect(detail().getByText("history-0000")).toBeTruthy());
   await user.type(
     screen.getByRole("textbox", { name: "搜索任务" }),
@@ -664,7 +655,7 @@ test("large task history pages without mounting every row and searches beyond th
   await waitFor(() => expect(detail().getByText("history-1499")).toBeTruthy());
   expect(taskList().getAllByRole("button")).toHaveLength(1);
   expect(screen.getByRole("button", { name: /^全部\s*1$/ })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /^失败\s*0$/ })).toBeTruthy();
+  expect(screen.getByRole("option", { name: /^失败\s*0$/ })).toBeTruthy();
   expect(detail().getByText("tail-1499")).toBeTruthy();
   expect(bridge.invoke).toHaveBeenCalledWith("control", {
     action: "task_detail",
@@ -688,17 +679,17 @@ test("offline cached history remains pageable and cannot send live task controls
   await mount();
   await emit("worker-unavailable");
   bridge.invoke.mockClear();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   const pages = within(screen.getByRole("navigation", { name: "任务分页" }));
   expect(pages.getByText("共 200 条 · 第 1 页")).toBeTruthy();
   for (let i = 1; i <= 3; i++) {
-    await user.click(pages.getByRole("button", { name: "下一页" }));
+    await user.click(pages.getByRole("button", { name: "更早" }));
     expect(
       detail().getByText(`history-${String(i * 50).padStart(4, "0")}`),
     ).toBeTruthy();
   }
   expect(
-    pages.getByRole("button", { name: "下一页" }).hasAttribute("disabled"),
+    pages.getByRole("button", { name: "更早" }).hasAttribute("disabled"),
   ).toBe(true);
   expect(detail().queryByRole("button", { name: "取消任务" })).toBeNull();
   expect(
@@ -713,10 +704,8 @@ test("startup feedback leaves navigation usable until the starting event clears"
   expect(
     screen.getByText(/正在启动执行器。如 macOS 弹出钥匙串授权/),
   ).toBeTruthy();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
-  expect(
-    screen.getByRole("heading", { level: 1, name: "设置与安全" }),
-  ).toBeTruthy();
+  await user.click(settingsButton());
+  expect(screen.getByRole("heading", { level: 1, name: "设置" })).toBeTruthy();
   await emit("worker-starting", false);
   expect(
     screen.queryByText(/正在启动执行器。如 macOS 弹出钥匙串授权/),
@@ -754,8 +743,8 @@ test("pending actions only disable their own controls and keep emergency stop av
       });
     return original(command, args);
   });
-  const pause = screen.getByRole("button", { name: "暂停接收新任务" });
-  const stop = screen.getByRole("button", { name: /^全部停止/ });
+  const pause = screen.getByRole("checkbox", { name: "接收新任务" });
+  const stop = screen.getByRole("button", { name: /^停止全部/ });
   act(() => {
     fireEvent.click(pause);
     fireEvent.click(stop);
@@ -793,7 +782,7 @@ test("main tools dialog merges paginated tools by name and stops at the last pag
   });
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   await user.click(screen.getByRole("button", { name: "查看工具列表" }));
   const dialog = within(screen.getByRole("dialog", { name: "后端工具列表" }));
   expect(dialog.getByText("已读取 1 个工具")).toBeTruthy();
@@ -831,7 +820,7 @@ test("closing the tools dialog while a page loads prevents a late response reope
   });
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   await user.click(screen.getByRole("button", { name: "查看工具列表" }));
   await user.click(screen.getByRole("button", { name: "读取更多工具" }));
   await user.keyboard("{Escape}");
@@ -862,10 +851,10 @@ test("leaving the desktop page invalidates an initial tool request even after re
   });
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   await user.click(screen.getByRole("button", { name: "查看工具列表" }));
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(settingsButton());
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   await act(async () =>
     finish({
       session: "old-session",
@@ -913,7 +902,7 @@ test.each([
     );
     const user = userEvent.setup();
     await mount();
-    await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+    await user.click(navigation().getByRole("button", { name: "本机" }));
     await user.click(screen.getByRole("button", { name: "查看工具列表" }));
     expect(screen.queryByRole("dialog", { name: "后端工具列表" })).toBeNull();
     expect(screen.getByRole("alert").textContent).toContain(
@@ -943,7 +932,7 @@ test("menu bar puts stop first, hides the server address and uses real switches"
   await user.click(
     screen.getByRole("checkbox", { name: "允许 Agent 操作桌面" }),
   );
-  await user.click(screen.getByRole("button", { name: "全部停止" }));
+  await user.click(screen.getByRole("button", { name: "停止" }));
   expect(
     bridge.invoke.mock.calls
       .filter(([command]) => command === "control")
@@ -963,11 +952,16 @@ test("idle menu bar collapses to status and switches", async () => {
   app.snapshot.active_count = 0;
   await mount("?tray=1");
   expect(
-    screen.getByRole("heading", { name: "空闲 · 等待 Agent" }),
+    screen.getByRole("heading", { name: "就绪，等待 Agent" }),
   ).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "全部停止" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
   expect(screen.queryByRole("region", { name: "正在进行" })).toBeNull();
-  expect(screen.getByText(/今天 9 个任务，1 个失败/)).toBeTruthy();
+  // Failed (no exit code) and unknown are Macrun problems.
+  expect(screen.getByText(/今天 9 个任务 · 2 个问题/)).toBeTruthy();
+  // The last finished projects confirm earlier work really ended.
+  expect(
+    within(screen.getByRole("region", { name: "最近" })).getAllByRole("button"),
+  ).toHaveLength(2);
 });
 
 test("live page shows a waiting request once and desktop calls without a terminal", async () => {
@@ -986,10 +980,12 @@ test("live page shows a waiting request once and desktop calls without a termina
   await mount();
   expect(screen.getAllByText("command-awaiting_approval")).toHaveLength(1);
   const card = screen
-    .getByRole("heading", { name: "computer · get_window_state" })
+    .getByRole("heading", { name: "get_window_state" })
     .closest("article")!;
-  expect(within(card as HTMLElement).getByText("观察")).toBeTruthy();
-  expect(within(card as HTMLElement).getByText('{"pid":1}')).toBeTruthy();
+  expect(within(card as HTMLElement).getByText("操作中")).toBeTruthy();
+  expect(
+    within(card as HTMLElement).getByText('computer · {"pid":1}'),
+  ).toBeTruthy();
   expect(card.querySelector(".term")).toBeNull();
   expect(screen.queryByText("127.0.0.1:7443")).toBeNull();
 });
@@ -1026,7 +1022,7 @@ test("expired approvals explain that nothing ran", async () => {
     },
   );
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   await chooseStatus(user, "denied");
   await waitFor(() =>
     expect(detail().getByText(/60 秒内没有人处理这个确认请求/)).toBeTruthy(),
@@ -1036,23 +1032,26 @@ test("expired approvals explain that nothing ran", async () => {
 test("visited pages preserve DOM and their own scroll position", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   const main = document.querySelector<HTMLElement>("main.content")!;
   const list = screen.getByRole("region", { name: "任务列表" });
   main.scrollTop = 170;
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   expect(main.scrollTop).toBe(0);
   main.scrollTop = 80;
-  await user.click(navigation().getByRole("button", { name: "任务" }));
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   expect(screen.getByRole("region", { name: "任务列表" })).toBe(list);
   expect(main.scrollTop).toBe(170);
-  await user.click(navigation().getByRole("button", { name: "桌面控制" }));
+  await user.click(navigation().getByRole("button", { name: "本机" }));
   expect(main.scrollTop).toBe(80);
 });
 
 test("Cmd+A in a log selects only that log, while page controls remain outside the range", async () => {
+  const user = userEvent.setup();
   await mount();
-  const log = document.querySelector<HTMLPreElement>("pre.term")!;
+  await user.click(navigation().getByRole("button", { name: "活动" }));
+  await waitFor(() => expect(detail().getByText(/^output-/)).toBeTruthy());
+  const log = document.querySelector<HTMLPreElement>(".v4-detail pre.term")!;
   log.focus();
   fireEvent.keyDown(log, { key: "a", metaKey: true });
   const selection = window.getSelection()!;
@@ -1086,10 +1085,12 @@ test("server filter routes the history query and labels each server independentl
     },
   ];
   await mount();
-  await user.click(navigation().getByRole("button", { name: "任务" }));
-  await user.selectOptions(
-    screen.getByRole("combobox", { name: "按服务器筛选" }),
-    saved.id,
+  await user.click(navigation().getByRole("button", { name: "活动" }));
+  await user.click(
+    within(screen.getByRole("group", { name: "按服务器筛选" })).getByRole(
+      "button",
+      { name: saved.name },
+    ),
   );
   await waitFor(() =>
     expect(
@@ -1101,7 +1102,7 @@ test("server filter routes the history query and labels each server independentl
       ),
     ).toBe(true),
   );
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   expect(
     within(
       document.querySelector<HTMLElement>(".server-connections")!,
@@ -1115,7 +1116,7 @@ test("server filter routes the history query and labels each server independentl
 test("adding a server explains active tasks and restores keyboard focus on cancel", async () => {
   const user = userEvent.setup();
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   const trigger = screen.getByRole("button", { name: "添加服务器" });
   await user.click(trigger);
   const dialog = screen.getByRole("dialog", { name: "添加服务器" });
@@ -1149,7 +1150,7 @@ test("idle add waits for shutdown, prevents repeat clicks and opens the add pair
       : original(command, args),
   );
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   await user.click(screen.getByRole("button", { name: "添加服务器" }));
   const dialog = screen.getByRole("dialog", { name: "添加服务器" });
   await user.click(within(dialog).getByRole("button", { name: "断开并添加" }));
@@ -1184,7 +1185,7 @@ test("failed idle check leaves the connection and dialog intact, then permits re
       : original(command, args),
   );
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   await user.click(screen.getByRole("button", { name: "添加服务器" }));
   const dialog = screen.getByRole("dialog", { name: "添加服务器" });
   await user.click(within(dialog).getByRole("button", { name: "断开并添加" }));
@@ -1203,7 +1204,7 @@ test("stopped add goes straight to pairing without trying to disconnect", async 
   const user = userEvent.setup();
   app.worker_running = false;
   await mount();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(settingsButton());
   await user.click(screen.getByRole("button", { name: "添加服务器" }));
   expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy();
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -1231,8 +1232,10 @@ test("stopped worker does not show saved multi-server snapshots as online", asyn
     },
   ];
   await mount();
-  expect(screen.getByText("0/2 在线")).toBeTruthy();
-  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  const sidebar = within(screen.getByLabelText("服务器状态"));
+  expect(sidebar.getAllByText("未连接")).toHaveLength(2);
+  expect(sidebar.queryByText(/ms$/)).toBeNull();
+  await user.click(settingsButton());
   const list = within(
     document.querySelector<HTMLElement>(".server-connections")!,
   );

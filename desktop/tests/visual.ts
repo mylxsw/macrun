@@ -153,10 +153,201 @@ if (overlay) {
     started_at: now - 1000,
   });
 }
-function summarize(task: Task): Task {
-  const { output_tail: _output, result: _result, ...summary } = task;
-  return structuredClone(summary);
+// Mirrors the worker: summaries drop output and keep only the exit code.
+// ?scenario=v4: a realistic day for design review — two servers, two
+// projects running, a desktop operation, a waiting approval, finished
+// sessions, commands that exited non-zero and an older sync timeout.
+if (query.get("scenario") === "v4") {
+  const min = 60_000;
+  const t = (
+    id: string,
+    ago: number,
+    length: number,
+    over: Partial<Task> & { command?: string; cwd?: string },
+  ): Task => {
+    const { command, cwd, ...rest } = over;
+    const task: Task = {
+      task_id: `00000000-0000-4000-8000-v4${id.padStart(10, "0")}`,
+      kind: "exec.start",
+      status: "succeeded",
+      arguments: { command, cwd },
+      started_at: now - ago,
+      ended_at: now - ago + length,
+      connection_id: "primary",
+      connection_name: "203.0.113.10:7443",
+      result: { exit_code: 0 },
+      output_tail: "fixture output — no command was executed\n",
+      ...rest,
+    };
+    if (isActive(task)) delete task.ended_at;
+    return task;
+  };
+  const gul207 = "/tmp/typeflux-gul207/typeflux";
+  const gul210 = "/tmp/typeflux-gul210/typeflux";
+  history.splice(
+    0,
+    history.length,
+    t("1", 356_000, 0, {
+      status: "running",
+      result: undefined,
+      command: `swift build 2>&1 | grep -E "error:|Build complete"; swift build --build-tests 2>&1 | grep -E "error:|Build complete"; swift test --skip-build > /tmp/gul207-final.log 2>&1; echo TEST_EXIT $?; grep -E "Executed [0-9]+ tests" /tmp/gul207-final.log | tail -1`,
+      cwd: gul207,
+      output_tail: "Compiling TypeFlux\nBuild complete! (70.48 secs)\nBuild complete! (35.54 secs)\n",
+    }),
+    t("2", 9 * min, 1000, {
+      kind: "sync",
+      command: undefined,
+      arguments: { remote_root: gul207 },
+      progress: { received: 142, total: 142, bytes: 3_400_000 },
+    }),
+    t("3", 13 * min, 36_000, {
+      command: "swift test --enable-code-coverage",
+      cwd: gul207,
+      output_tail:
+        "Test Suite 'All tests' started\nExecuted 214 tests, with 0 failures (0 unexpected) in 12.408 seconds\n",
+    }),
+    t("4", 14 * min, 300, {
+      status: "failed",
+      result: { exit_code: 1 },
+      command: "ls .build/out/Products/Debug | head",
+      cwd: gul207,
+      output_tail: "ls: .build/out/Products/Debug: No such file or directory\n",
+    }),
+    t("5", 15 * min, 400, {
+      command: `P=$PWD; TB="$P/.build/out/Products/Debug"; cp -R "$TB/TypeFlux.app" /tmp/tf.app; codesign --force -s - /tmp/tf.app`,
+      cwd: gul207,
+    }),
+    t("6", 18 * min, 2000, {
+      status: "failed",
+      result: { exit_code: 1 },
+      command: "grep -rn 'legacyHotkey' Sources | head",
+      cwd: gul207,
+    }),
+    t("7", 147_000, 0, {
+      status: "running",
+      result: undefined,
+      command: `ls -d /tmp/typeflux-gul207/typeflux/.build 2>/dev/null && cp -cR /tmp/typeflux-gul207/typeflux/.build ./.build 2>/dev/null; swift build --build-tests 2>&1 | tail -15`,
+      cwd: gul210,
+      output_tail: "[812/1043] Compiling TypeFluxCore Hotkeys.swift\n",
+    }),
+    t("8", 2000, 0, {
+      kind: "mcp.call",
+      status: "running",
+      result: undefined,
+      connection_id: "dev-box",
+      connection_name: "dev-box",
+      desktop_tier: "control",
+      command: undefined,
+      arguments: {
+        server: "computer",
+        tool: "click",
+        arguments: { label: "Run", window: "Xcode — TypeFlux.xcodeproj" },
+      },
+    }),
+    t("9", 19_000, 0, {
+      status: "awaiting_approval",
+      result: undefined,
+      approval_deadline: now + 41_000,
+      command:
+        "ps aux | grep -i macrun | grep -v grep | head; system_profiler SPDisplaysDataType | grep -i resolution",
+      cwd: gul207,
+    }),
+    ...Array.from({ length: 11 }, (_, i) =>
+      t(`a${i}`, 115 * min - i * min, 20_000, {
+        command: i === 4 ? "go test ./... 2>&1 | tail -20" : "make lint",
+        cwd: "/tmp/typeflux-gul206/typeflux-api",
+        ...(i === 2 ? { status: "failed" as const, result: { exit_code: 2 } } : {}),
+      }),
+    ),
+    ...Array.from({ length: 9 }, (_, i) =>
+      t(`b${i}`, 145 * min - i * 2 * min, 30_000, {
+        command: "swift test --filter Baseline",
+        cwd: "/tmp/typeflux-gul206/typeflux-baseline",
+      }),
+    ),
+    ...Array.from({ length: 6 }, (_, i) =>
+      t(`d${i}`, 30 * min - i * 3 * min, 1500, {
+        kind: "mcp.call",
+        connection_id: "dev-box",
+        connection_name: "dev-box",
+        desktop_tier: i % 2 ? "observe" : "control",
+        command: undefined,
+        arguments: {
+          server: "computer",
+          tool: i % 2 ? "get_window_state" : "click",
+          arguments: i % 2 ? { pid: 812 } : { x: 812, y: 64 },
+        },
+      }),
+    ),
+    t("y1", 26 * 60 * min, 120_000, {
+      kind: "sync",
+      status: "timed_out",
+      result: undefined,
+      command: undefined,
+      arguments: { remote_root: "/Users/me/Workspace/codes/gul-199-ios-v4" },
+      error: { message: "timed_out: sync timeout" },
+    }),
+  );
+  snapshot.workspaces = [
+    { root: gul207, time: now - 9 * min, status: "succeeded", connection_id: "primary" },
+    { root: gul210, time: now - 20 * min, status: "succeeded", connection_id: "primary" },
+    {
+      root: "/Users/me/Workspace/codes/gul-199-ios-v4",
+      time: now - 26 * 60 * min,
+      status: "timed_out",
+      connection_id: "primary",
+      error: { message: "timed_out: sync timeout" },
+    },
+  ];
+  snapshot.backends = [
+    {
+      name: "computer",
+      state: "ready",
+      session: "fixture-session",
+      command: "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+      tool_count: 34,
+      tiers: { get_window_state: "observe", screenshot: "observe", click: "control", type_text: "control", kill_app: "high" },
+    },
+  ];
+  snapshot.policy.desktop_enabled = true;
+  snapshot.safety = {
+    restrict_paths: false,
+    roots: [],
+    approval: "direct",
+    retention_days: 30,
+    yield_until: 0,
+    desktop: { observe: "allow", control: "allow", high: "allow" },
+  };
+  snapshot.allow_rules = [
+    {
+      id: "fixture-rule",
+      kind: "exec.start",
+      scope: "similar",
+      program: "system_profiler",
+      cwd: "/tmp/typeflux-gul207",
+      created_at: now - 3 * min,
+      expires_at: now + 12 * min,
+    },
+  ];
+  snapshot.connections = [
+    { id: "primary", name: "203.0.113.10:7443", connection: { ...snapshot.connection, since: now - 16 * min, rtt_ms: 232 }, policy: snapshot.policy },
+    { id: "dev-box", name: "dev-box", connection: { state: "connected", server: "198.51.100.7:7443", since: now - 130 * min, rtt_ms: 41 }, policy: snapshot.policy },
+  ];
+  snapshot.connection = snapshot.connections[0].connection;
 }
+function summarize(task: Task): Task {
+  const { output_tail: _output, result, ...summary } = task;
+  return structuredClone(
+    result?.exit_code === undefined
+      ? summary
+      : { ...summary, result: { exit_code: result.exit_code } },
+  );
+}
+const exitedNonZero = (task: Task) =>
+  task.status === "failed" &&
+  !task.error &&
+  typeof task.result?.exit_code === "number" &&
+  task.result.exit_code !== 0;
 function syncHistory() {
   history.sort(
     (a, b) => b.started_at - a.started_at || b.task_id.localeCompare(a.task_id),
@@ -167,12 +358,20 @@ function syncHistory() {
   );
   snapshot.total_tasks = history.length;
   snapshot.active_count = history.filter(isActive).length;
-  snapshot.today_summary = { total: history.length };
   const counts: Record<string, number> = {};
   for (const task of history)
     counts[task.status] = (counts[task.status] || 0) + 1;
   Object.assign(snapshot, { task_counts: counts });
-  Object.assign(snapshot.today_summary, counts);
+  const today = new Date().toDateString();
+  const todays = history.filter(
+    (task) => new Date(task.started_at).toDateString() === today,
+  );
+  const summary: Record<string, number> = { total: todays.length };
+  for (const task of todays) {
+    summary[task.status] = (summary[task.status] || 0) + 1;
+    if (exitedNonZero(task)) summary.exited = (summary.exited || 0) + 1;
+  }
+  snapshot.today_summary = summary;
 }
 syncHistory();
 const app: AppState & { legacy_detected: boolean } = {
@@ -203,6 +402,16 @@ const app: AppState & { legacy_detected: boolean } = {
   autostart: false,
   platform: "macos",
 };
+if (query.get("scenario") === "v4")
+  app.settings.connections = [
+    {
+      id: "dev-box",
+      name: "dev-box",
+      server: "198.51.100.7:7443",
+      cert: "/tmp/macrun-visual-fixture/dev-box.der",
+      token_file: "/dev/null",
+    },
+  ];
 const calls: { command: string; args: Record<string, any> }[] = [];
 let appReads = 0;
 function emit(event: string, payload?: unknown) {
@@ -370,8 +579,10 @@ async function invoke(command: string, args: Record<string, any> = {}) {
             .includes(text),
       );
       const counts: Record<string, number> = {};
-      for (const task of matches)
+      for (const task of matches) {
         counts[task.status] = (counts[task.status] || 0) + 1;
+        if (exitedNonZero(task)) counts.exited = (counts.exited || 0) + 1;
+      }
       const groups: Record<string, string[]> = {
         active: ["accepted", "running", "awaiting_approval"],
         attention: ["failed", "timed_out", "unknown", "denied"],
@@ -381,7 +592,8 @@ async function invoke(command: string, args: Record<string, any> = {}) {
           !payload.status ||
           payload.status === "all" ||
           (groups[payload.status]
-            ? groups[payload.status].includes(task.status)
+            ? groups[payload.status].includes(task.status) &&
+              !(payload.status === "attention" && exitedNonZero(task))
             : task.status === payload.status),
       );
       const cursor = payload.cursor;

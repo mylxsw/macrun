@@ -61,7 +61,7 @@ test("approval prompt explains the risk, counts down and offers scoped approvals
   const prompt = within(screen.getByRole("region", { name: "等待你确认" }));
   expect(prompt.getByText("管道")).toBeTruthy();
   expect(prompt.getByText("未知程序 ps")).toBeTruthy();
-  expect(prompt.getByRole("timer").textContent).toMatch(/^4[01] 秒后过期/);
+  expect(prompt.getByRole("timer").textContent).toMatch(/^4[01] 秒后自动拒绝/);
   await user.click(prompt.getByRole("button", { name: "15 分钟内允许同类" }));
   expect(act.mock.calls.at(-1)?.[1]).toEqual({
     action: "approve",
@@ -112,8 +112,8 @@ test("desktop approvals name the tier and the compact prompt pages through reque
   expect(screen.getByText("1 / 2")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "下一条待确认" }));
   expect(screen.getByText("computer · kill_app")).toBeTruthy();
-  expect(screen.getByText("高风险类桌面操作")).toBeTruthy();
-  expect(screen.getByText("桌面操作需要你确认")).toBeTruthy();
+  expect(screen.getByText("桌面 · 不可撤回的操作")).toBeTruthy();
+  expect(screen.getByText("Agent 想操作桌面")).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "上一条待确认" }));
   expect(screen.getByText("ps aux | grep macrun")).toBeTruthy();
 });
@@ -133,11 +133,11 @@ test("desktop tiers list discovered tools and save one tier at a time", async ()
   const act = vi.fn().mockResolvedValue(true),
     user = userEvent.setup();
   render(<DesktopTiers snapshot={snapshot} act={act} disabled={false} />);
-  const high = within(screen.getByRole("group", { name: "高风险类桌面工具" }));
-  expect(high.getByRole("button", { name: "允许并提示" }).getAttribute("aria-pressed")).toBe("true");
+  const high = within(screen.getByRole("group", { name: "桌面工具：不可撤回的操作" }));
+  expect(high.getByRole("button", { name: "允许" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByText("get_window_state · zoom")).toBeTruthy();
   expect(screen.getByText("kill_app")).toBeTruthy();
-  await user.click(high.getByRole("button", { name: "先确认" }));
+  await user.click(high.getByRole("button", { name: "先问" }));
   expect(act).toHaveBeenCalledWith(
     "control",
     {
@@ -147,7 +147,7 @@ test("desktop tiers list discovered tools and save one tier at a time", async ()
         desktop: { observe: "allow", control: "allow", high: "confirm" },
       },
     },
-    "高风险类桌面工具已设为“先确认”",
+    "桌面“不可撤回的操作”已设为“先问”",
   );
 });
 
@@ -198,7 +198,7 @@ test("temporary approvals describe their scope and can be revoked", async () => 
     />,
   );
   expect(screen.getByText("git · /work/app 及子目录")).toBeTruthy();
-  expect(screen.getByText("computer · 全部操作类工具")).toBeTruthy();
+  expect(screen.getByText("computer · 所有“点击和输入”工具")).toBeTruthy();
   expect(screen.getByText("直到执行器重启")).toBeTruthy();
   await user.click(screen.getAllByRole("button", { name: "撤销" })[0]);
   expect(act).toHaveBeenCalledWith(
@@ -207,5 +207,5 @@ test("temporary approvals describe their scope and can be revoked", async () => 
     "已撤销临时允许",
   );
   rerender(<AllowRules rules={[]} act={act} disabled={false} />);
-  expect(screen.getByText("暂无临时允许")).toBeTruthy();
+  expect(screen.getByText(/^暂无临时允许/)).toBeTruthy();
 });

@@ -20,7 +20,7 @@ With one online client, omission preserves the original behavior. With multiple 
 
 ## Desktop: connect several servers
 
-In 设置与安全 → 连接 → 服务器连接, wait for tasks to finish and disconnect before adding or removing a server. “添加服务器” redeems another server's invitation without replacing the primary connection. Connect again to start all saved connections. Removal preserves history and credentials for recovery.
+In 本机 → 服务器 (or 设置 → 连接 → 服务器连接), wait for tasks to finish and disconnect before adding or removing a server. “添加服务器” redeems another server's invitation without replacing the primary connection. Connect again to start all saved connections. Removal preserves history and credentials for recovery.
 
 Each server has its own status and reconnect loop. Tasks, details and approval prompts show their origin. The task page filters all retained history by server, with the same 50-row pagination. Workspace and backend entries retain their source even when names match. The sidebar and native menu panel show the number of online servers.
 

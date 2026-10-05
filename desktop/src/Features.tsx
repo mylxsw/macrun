@@ -3,9 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Check,
   CircleAlert,
+  Eye,
   Info,
   Folder,
   Monitor,
+  MousePointer2,
   Plus,
   Terminal,
   X,
@@ -23,6 +25,7 @@ import {
   riskReasons,
   tierLabels,
   tierPolicyLabels,
+  projectOf,
 } from "./model.mjs";
 import "./features.css";
 import appIcon from "./assets/macrun-icon.png";
@@ -61,12 +64,17 @@ export function Approvals({
   disabled,
   compact = false,
   pending = () => false,
+  workspaces = [],
+  serverLabel = (t) => t.connection_name || "",
 }: {
   tasks: Task[];
   act: Act;
   disabled: boolean;
   compact?: boolean;
   pending?: (id: string) => boolean;
+  /** Synced roots, used to name the project a command belongs to. */
+  workspaces?: Snapshot["workspaces"];
+  serverLabel?: (t: Task) => string;
 }) {
   const waiting = tasks.filter((t) => t.status === "awaiting_approval");
   const [index, setIndex] = useState(0);
@@ -94,8 +102,9 @@ export function Approvals({
         const deadline = t.approval_deadline || t.started_at + APPROVAL_MS;
         const left = Math.max(0, Math.ceil((deadline - now) / 1000));
         const reasons = desktop
-          ? [`${tierLabels[t.desktop_tier || "control"]}类桌面操作`]
+          ? [`桌面 · ${tierLabels[t.desktop_tier || "control"]}`]
           : riskReasons(t.arguments.command);
+        const server = serverLabel(t);
         return (
           <section
             className={`card approval ${compact ? "compact" : ""}`}
@@ -111,11 +120,17 @@ export function Approvals({
                 aria-hidden
               />
               <strong>
-                {t.connection_name ? `${t.connection_name} · ` : ""}
-                {desktop ? "桌面操作需要你确认" : "命令需要你确认"}
+                {desktop
+                  ? "Agent 想操作桌面"
+                  : `${projectOf(t, workspaces).name} 想运行一条命令`}
               </strong>
-              <small className="approval-left" role="timer">
-                {left} 秒后过期，Agent 会收到 approval_expired
+              <small
+                className="approval-left"
+                role="timer"
+                title="到时没有处理，Agent 会收到 approval_expired"
+              >
+                {server ? `${server} · ` : ""}
+                {left} 秒后自动拒绝
               </small>
               {compact && waiting.length > 1 && (
                 <span className="approval-pager push">
@@ -182,7 +197,7 @@ export function Approvals({
                   onClick={() => decide(t, true, "session")}
                 >
                   {desktop
-                    ? `本次运行允许${tierLabels[t.desktop_tier || "control"]}类`
+                    ? `本次运行允许${tierLabels[t.desktop_tier || "control"]}`
                     : "本次运行允许此目录"}
                 </button>
               )}
@@ -522,22 +537,23 @@ export function Pairing({
   );
 }
 
-const tierCopy: Record<DesktopTier, { title: string; detail: string }> = {
-  observe: {
-    title: "观察 · 看屏幕和窗口",
-    detail: "截图、读取窗口和可访问性树。可能看到其他应用里的内容。",
-  },
-  control: {
-    title: "操作 · 点击和输入",
-    detail: "点击、输入、按键、滚动、拖动和切换窗口。操作时显示屏幕提示。",
-  },
-  high: {
-    title: "高风险 · 不可撤回",
-    detail: "结束进程、下载文件、回放录制等后端标为最高风险的工具。",
-  },
-};
+const tierCopy: Record<DesktopTier, { detail: string; icon: typeof Monitor }> =
+  {
+    observe: {
+      detail: "截图、读取窗口和界面结构，可能看到其他应用里的内容",
+      icon: Eye,
+    },
+    control: {
+      detail: "点击、输入、按键、滚动、拖动和切换窗口；操作时显示屏幕提示",
+      icon: MousePointer2,
+    },
+    high: {
+      detail: "结束进程、下载文件、回放录制等后端标为最高风险的工具",
+      icon: CircleAlert,
+    },
+  };
 const tierOrder: DesktopTier[] = ["observe", "control", "high"];
-const policyOrder: TierPolicy[] = ["deny", "confirm", "allow"];
+const policyOrder: TierPolicy[] = ["allow", "confirm", "deny"];
 /** Desktop tool tiers. Defaults allow everything; each tier can be tightened. */
 export function DesktopTiers({
   snapshot,
@@ -567,26 +583,36 @@ export function DesktopTiers({
         action: "safety",
         args: { ...snapshot.safety, desktop: { ...policy, [tier]: value } },
       },
-      `${tierLabels[tier]}类桌面工具已设为“${tierPolicyLabels[value]}”`,
+      `桌面“${tierLabels[tier]}”已设为“${tierPolicyLabels[value]}”`,
     );
   return (
     <section className="desktop-tiers" aria-label="桌面工具分级">
-      <div className="row between section-heading">
-        <h2>Agent 能对这台 Mac 做什么</h2>
-        <small className="muted">
-          按后端声明的只读与风险等级归类
-          {known ? "" : "；读取工具列表后显示每类包含的工具"}
-        </small>
-      </div>
-      <div className="tier-grid">
-        {tierOrder.map((tier) => (
-          <article className={`card tier-card tier-${tier}`} key={tier}>
-            <b>{tierCopy[tier].title}</b>
-            <small>{tierCopy[tier].detail}</small>
+      {tierOrder.map((tier) => {
+        const Icon = tierCopy[tier].icon;
+        return (
+          <div className={`v4-perm tier-${tier}`} key={tier}>
+            <span className={`v4-ico ${tier === "high" ? "warn" : ""}`}>
+              <Icon size={15} />
+            </span>
+            <div className="grow">
+              <b>{tierLabels[tier]}</b>
+              <p>{tierCopy[tier].detail}</p>
+              {tools[tier].length > 0 && (
+                <small
+                  className="mono tier-tools"
+                  title={tools[tier].join(" · ")}
+                >
+                  {tools[tier].slice(0, 5).join(" · ")}
+                  {tools[tier].length > 5
+                    ? ` · 共 ${tools[tier].length} 个`
+                    : ""}
+                </small>
+              )}
+            </div>
             <div
-              className="feature-seg tier-seg"
+              className="v4-seg"
               role="group"
-              aria-label={`${tierLabels[tier]}类桌面工具`}
+              aria-label={`桌面工具：${tierLabels[tier]}`}
             >
               {policyOrder.map((value) => (
                 <button
@@ -600,18 +626,15 @@ export function DesktopTiers({
                 </button>
               ))}
             </div>
-            {tools[tier].length > 0 && (
-              <small
-                className="mono tier-tools"
-                title={tools[tier].join(" · ")}
-              >
-                {tools[tier].slice(0, 5).join(" · ")}
-                {tools[tier].length > 5 ? ` · 共 ${tools[tier].length} 个` : ""}
-              </small>
-            )}
-          </article>
-        ))}
-      </div>
+          </div>
+        );
+      })}
+      <p className="v4-perm-foot">
+        按后端对每个工具的声明归类
+        {known
+          ? `：看屏幕 ${tools.observe.length} · 点击和输入 ${tools.control.length} · 不可撤回 ${tools.high.length}`
+          : "；读取工具列表后显示每类包含的工具"}
+      </p>
     </section>
   );
 }
@@ -619,7 +642,7 @@ function ruleText(rule: AllowRule) {
   if (rule.kind === "mcp.call")
     return rule.scope === "similar"
       ? `${rule.server} · ${rule.tool}`
-      : `${rule.server} · 全部${tierLabels[rule.tier || "control"]}类工具`;
+      : `${rule.server} · 所有“${tierLabels[rule.tier || "control"]}”工具`;
   return rule.scope === "similar"
     ? `${rule.program} · ${rule.cwd} 及子目录`
     : `所有命令 · ${rule.cwd} 及子目录`;
@@ -635,41 +658,49 @@ export function AllowRules({
   disabled: boolean;
 }) {
   return (
-    <div className="feature-line settings-split allow-rules">
-      <div className="feature-copy">
-        <b>临时允许</b>
-        <small>
-          在确认弹窗中选择“15
-          分钟内允许同类”或“本次运行允许”后生成；执行器重启后全部失效。
-        </small>
-      </div>
-      <div className="allow-rule-list">
-        {rules.map((rule) => (
-          <div className="allow-rule" key={rule.id}>
-            <span className="mono ellipsis" title={ruleText(rule)}>
+    <div className="allow-rules">
+      {rules.map((rule) => (
+        <div className="v4-rule" key={rule.id}>
+          <span className="v4-ico small">
+            {rule.kind === "mcp.call" ? (
+              <MousePointer2 size={12} />
+            ) : rule.scope === "similar" ? (
+              <Terminal size={12} />
+            ) : (
+              <Folder size={12} />
+            )}
+          </span>
+          <div className="grow">
+            <div className="mono ellipsis" title={ruleText(rule)}>
               {ruleText(rule)}
-            </span>
+            </div>
             <small>
               {rule.expires_at
-                ? `${new Date(rule.expires_at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })} 前`
+                ? `${new Date(rule.expires_at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })} 前有效`
                 : "直到执行器重启"}
             </small>
-            <button
-              disabled={disabled}
-              onClick={() =>
-                act(
-                  "control",
-                  { action: "revoke_rule", args: { rule_id: rule.id } },
-                  "已撤销临时允许",
-                )
-              }
-            >
-              撤销
-            </button>
           </div>
-        ))}
-        {!rules.length && <small className="muted">暂无临时允许</small>}
-      </div>
+          <button
+            className="v4-link"
+            disabled={disabled}
+            onClick={() =>
+              act(
+                "control",
+                { action: "revoke_rule", args: { rule_id: rule.id } },
+                "已撤销临时允许",
+              )
+            }
+          >
+            撤销
+          </button>
+        </div>
+      ))}
+      {!rules.length && (
+        <p className="v4-note">
+          暂无临时允许。在确认请求中选择“15
+          分钟内允许同类”或“本次运行允许”后出现在这里，执行器重启后全部失效。
+        </p>
+      )}
     </div>
   );
 }
@@ -681,13 +712,13 @@ const approvalModes = [
   },
   {
     key: "risk",
-    label: "风险命令先确认",
+    label: "风险命令先问",
     hint: "已知只读命令直接执行，其余命令先请你确认。",
   },
   {
     key: "all",
-    label: "每条都确认",
-    hint: "每条命令都需要你点“允许”；桌面调用按桌面控制页的分级管理。",
+    label: "每条都问",
+    hint: "每条命令都需要你点“允许”。",
   },
 ];
 export function SafetyPanel({
@@ -695,11 +726,14 @@ export function SafetyPanel({
   act,
   disabled,
   includeRetention = true,
+  includeExtras = true,
 }: {
   snapshot: Snapshot | null;
   act: Act;
   disabled: boolean;
   includeRetention?: boolean;
+  /** Temporary rules, env protection and record cleanup; shown elsewhere in v4. */
+  includeExtras?: boolean;
 }) {
   const [draft, setDraft] = useState<Snapshot["safety"] | null>(
       snapshot?.safety || null,
@@ -724,96 +758,19 @@ export function SafetyPanel({
     setAdding(false);
   };
   return (
-    <div className="card safety-card">
-      <div className="feature-line settings-split">
-        <div className="feature-copy">
-          <div className="path-policy-title">
-            <b>允许的工作目录</b>
-            <label className="path-policy-toggle">
-              <small>{draft?.restrict_paths ? "已限制" : "未限制"}</small>
-              <input
-                className="switch"
-                type="checkbox"
-                aria-label="限制工作目录"
-                checked={draft?.restrict_paths || false}
-                disabled={disabled || !draft}
-                onChange={(e) => update("restrict_paths", e.target.checked)}
-              />
-            </label>
-          </div>
-          <small>
-            {!draft
-              ? "连接执行器后可设置目录限制。"
-              : draft.restrict_paths
-                ? "命令的工作目录、文件读写和同步目标必须位于这些目录之内。"
-                : "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。"}
-          </small>
-        </div>
-        <div className="path-controls">
-          {draft?.roots.map((root) => (
-            <span className="pathchip mono" key={root}>
-              {root}
-              <button
-                aria-label={`移除 ${root}`}
-                className="icon-button"
-                disabled={disabled}
-                onClick={() =>
-                  update(
-                    "roots",
-                    draft.roots.filter((p) => p !== root),
-                  )
-                }
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-          {adding ? (
-            <form
-              className="path-entry"
-              onSubmit={(e) => {
-                e.preventDefault();
-                addPath();
-              }}
-            >
-              <input
-                autoFocus
-                aria-label="允许的绝对目录"
-                placeholder="/absolute/path"
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setAdding(false);
-                }}
-              />
-              <button type="submit" disabled={!path.trim() || disabled}>
-                添加
-              </button>
-              <button type="button" onClick={() => setAdding(false)}>
-                取消
-              </button>
-            </form>
-          ) : (
-            <button
-              className="ghost"
-              disabled={disabled || !draft}
-              onClick={() => setAdding(true)}
-            >
-              <Plus size={13} />
-              添加目录
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="feature-line settings-split">
-        <div className="feature-copy">
-          <b>执行命令前</b>
-          <small>
+    <div className="safety-card">
+      <div className="v4-perm">
+        <span className="v4-ico">
+          <Terminal size={15} />
+        </span>
+        <div className="grow">
+          <b>运行命令</b>
+          <p>
             {approvalModes.find((m) => m.key === draft?.approval)?.hint ||
               "连接执行器后可设置工作目录和命令确认。"}
-          </small>
+          </p>
         </div>
-        <div className="feature-seg" role="group" aria-label="命令确认方式">
+        <div className="v4-seg" role="group" aria-label="命令确认方式">
           {approvalModes.map((mode) => (
             <button
               key={mode.key}
@@ -828,76 +785,138 @@ export function SafetyPanel({
         </div>
       </div>
       {draft?.approval === "risk" && (
-        <div className="feature-line settings-split feature-shaded">
-          <div className="feature-copy">
-            <b>风险命令规则</b>
-            <small>60 秒未处理自动拒绝。规则不能识别所有脚本行为。</small>
-          </div>
-          <div className="risk-rules">
-            <span className="tag">未知程序或脚本</span>
-            <span className="tag">重定向和管道</span>
-            <span className="tag">组合命令</span>
-            <small>执行器内置规则；需要逐条控制时请选择“每条都确认”。</small>
+        <div className="v4-perm sub">
+          <span className="v4-ico small" />
+          <div className="grow">
+            <p>
+              未知程序或脚本、重定向和管道、组合命令会先问你；60
+              秒未处理自动拒绝。规则不能识别所有脚本行为。
+            </p>
           </div>
         </div>
       )}
-      <AllowRules
-        rules={snapshot?.allow_rules || []}
-        act={act}
-        disabled={disabled}
-      />
-      <label className="feature-line">
+      <div className="v4-perm">
+        <span className="v4-ico">
+          <Folder size={15} />
+        </span>
         <div className="grow">
-          <b>环境变量值不写入记录</b>
-          <small>
-            任务详情只显示变量名；命令自身输出的秘密仍可能出现在日志。
-          </small>
-        </div>
-        <input
-          type="checkbox"
-          className="switch fixed-switch"
-          checked
-          disabled
-          aria-label="环境变量保护始终开启"
-        />
-      </label>
-      <details className="feature-disclosure safety-options">
-        <summary>记录管理</summary>
-        <div className="feature-disclosure-body">
-          {includeRetention && (
-            <label className="field">
-              <span>任务记录保留</span>
-              <select
-                value={draft?.retention_days || 30}
-                disabled={disabled || !draft}
-                onChange={(e) =>
-                  update("retention_days", Number(e.target.value))
-                }
+          <b>可以使用的目录</b>
+          <p>
+            {!draft
+              ? "连接执行器后可设置目录限制。"
+              : draft.restrict_paths
+                ? "命令的工作目录、文件读写和同步目标必须位于这些目录之内。"
+                : "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。"}
+          </p>
+          <div className="path-controls">
+            {draft?.roots.map((root) => (
+              <span className="pathchip mono" key={root}>
+                {root}
+                <button
+                  aria-label={`移除 ${root}`}
+                  className="icon-button"
+                  disabled={disabled}
+                  onClick={() =>
+                    update(
+                      "roots",
+                      draft.roots.filter((p) => p !== root),
+                    )
+                  }
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            {adding ? (
+              <form
+                className="path-entry"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addPath();
+                }}
               >
-                {[7, 30, 90].map((n) => (
-                  <option key={n} value={n}>
-                    {n} 天
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button
-            disabled={disabled}
-            onClick={() =>
-              act(
-                "control",
-                { action: "prune", args: {} },
-                "过期记录已清理，去重编号已保留",
-              )
-            }
-          >
-            清理过期记录
-          </button>
+                <input
+                  autoFocus
+                  aria-label="允许的绝对目录"
+                  placeholder="/absolute/path"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setAdding(false);
+                  }}
+                />
+                <button type="submit" disabled={!path.trim() || disabled}>
+                  添加
+                </button>
+                <button type="button" onClick={() => setAdding(false)}>
+                  取消
+                </button>
+              </form>
+            ) : (
+              <button
+                className="v4-link"
+                disabled={disabled || !draft}
+                onClick={() => setAdding(true)}
+              >
+                <Plus size={13} />
+                添加目录
+              </button>
+            )}
+          </div>
         </div>
-      </details>
+        <label className="path-policy-toggle">
+          <small>{draft?.restrict_paths ? "仅限这些目录" : "任意目录"}</small>
+          <input
+            className="switch"
+            type="checkbox"
+            aria-label="限制工作目录"
+            checked={draft?.restrict_paths || false}
+            disabled={disabled || !draft}
+            onChange={(e) => update("restrict_paths", e.target.checked)}
+          />
+        </label>
+      </div>
+      {includeExtras && (
+        <>
+          <div className="v4-perm">
+            <div className="grow">
+              <b>临时允许</b>
+              <AllowRules
+                rules={snapshot?.allow_rules || []}
+                act={act}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+          <EnvProtection />
+          <details className="feature-disclosure safety-options">
+            <summary>记录管理</summary>
+            <div className="feature-disclosure-body">
+              {includeRetention && (
+                <label className="field">
+                  <span>任务记录保留</span>
+                  <select
+                    value={draft?.retention_days || 30}
+                    disabled={disabled || !draft}
+                    onChange={(e) =>
+                      update("retention_days", Number(e.target.value))
+                    }
+                  >
+                    {[7, 30, 90].map((n) => (
+                      <option key={n} value={n}>
+                        {n} 天
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <PruneButton act={act} disabled={disabled} />
+            </div>
+          </details>
+        </>
+      )}
       {dirty && (
-        <div className="feature-line feature-shaded">
+        <div className="v4-savebar">
           <small className="grow">更改尚未保存</small>
           <button
             disabled={disabled}
@@ -934,6 +953,46 @@ export function SafetyPanel({
         </div>
       )}
     </div>
+  );
+}
+/** Environment values are never written to records; this is not optional. */
+export function EnvProtection() {
+  return (
+    <label className="v4-perm">
+      <div className="grow">
+        <b>记录中隐藏环境变量的值</b>
+        <p>任务详情只显示变量名；命令自己打印的秘密仍可能出现在输出中。</p>
+      </div>
+      <input
+        type="checkbox"
+        className="switch fixed-switch"
+        checked
+        disabled
+        aria-label="环境变量保护始终开启"
+      />
+    </label>
+  );
+}
+export function PruneButton({
+  act,
+  disabled,
+}: {
+  act: Act;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={() =>
+        act(
+          "control",
+          { action: "prune", args: {} },
+          "过期记录已清理，去重编号已保留",
+        )
+      }
+    >
+      清理过期记录
+    </button>
   );
 }
 
@@ -1030,46 +1089,23 @@ export function WorkspaceList({
   );
 }
 
-export function BackendPanel({
-  snapshot,
-  act,
-  app,
-  mode = "all",
-  active = true,
-  read = readNative,
-}: {
-  snapshot: Snapshot | null;
-  act: Act;
-  app: AppState | null;
-  mode?: "permissions" | "advanced" | "all";
-  active?: boolean;
-  read?: Act;
-}) {
+export type PermissionChecks = ReturnType<typeof usePermissionChecks>;
+/**
+ * Reads Macrun's own macOS permissions and input monitoring. Polls while
+ * `enabled`, and again when the window regains focus (for example after the
+ * person returns from System Settings).
+ */
+export function usePermissionChecks(read: Act = readNative, enabled = true) {
   const [permissions, setPermissions] = useState<any>(null),
     [input, setInput] = useState<any>(null),
-    [text, setText] = useState<string | null>(null),
-    [server, setServer] = useState(""),
-    [tools, setTools] = useState<any>(null),
-    [tool, setTool] = useState(""),
-    [args, setArgs] = useState("{}"),
-    [observation, setObservation] = useState<any>(null),
-    [parseError, setParseError] = useState(""),
-    [pending, setPending] = useState(""),
-    [permissionPending, setPermissionPending] = useState(false),
-    [permissionError, setPermissionError] = useState(""),
-    [operationError, setOperationError] = useState(""),
-    [configError, setConfigError] = useState(""),
-    [configDirty, setConfigDirty] = useState(false),
-    [configNotice, setConfigNotice] = useState(""),
-    [observationError, setObservationError] = useState(""),
-    [observationRetry, setObservationRetry] = useState(0);
-  const operationLock = useRef(false),
-    permissionLock = useRef(false);
+    [pending, setPending] = useState(false),
+    [error, setError] = useState("");
+  const lock = useRef(false);
   const check = useCallback(async () => {
-    if (permissionLock.current) return;
-    permissionLock.current = true;
-    setPermissionPending(true);
-    setPermissionError("");
+    if (lock.current) return;
+    lock.current = true;
+    setPending(true);
+    setError("");
     try {
       const results = await Promise.allSettled([
         read("permissions"),
@@ -1096,14 +1132,14 @@ export function BackendPanel({
             : "未收到输入检测结果",
         );
       }
-      setPermissionError(errors.join("；"));
+      setError(errors.join("；"));
     } finally {
-      permissionLock.current = false;
-      setPermissionPending(false);
+      lock.current = false;
+      setPending(false);
     }
   }, [read]);
   useEffect(() => {
-    if (!app || !active || mode === "advanced") return;
+    if (!enabled) return;
     const refreshPermissions = () => {
       if (document.visibilityState !== "hidden") void check();
     };
@@ -1116,7 +1152,55 @@ export function BackendPanel({
       document.removeEventListener("visibilitychange", refreshPermissions);
       window.clearInterval(timer);
     };
-  }, [!!app, mode, check, active]);
+  }, [enabled, check]);
+  return { permissions, input, pending, error, setError, check };
+}
+
+export function BackendPanel({
+  snapshot,
+  act,
+  app,
+  mode = "all",
+  active = true,
+  read = readNative,
+  shared,
+}: {
+  snapshot: Snapshot | null;
+  act: Act;
+  app: AppState | null;
+  mode?: "permissions" | "advanced" | "all";
+  active?: boolean;
+  read?: Act;
+  /** Permission state owned by a parent that also shows it elsewhere. */
+  shared?: PermissionChecks;
+}) {
+  const own = usePermissionChecks(
+    read,
+    !!app && active && mode !== "advanced" && !shared,
+  );
+  const {
+    permissions,
+    input,
+    pending: permissionPending,
+    error: permissionError,
+    setError: setPermissionError,
+    check,
+  } = shared || own;
+  const [text, setText] = useState<string | null>(null),
+    [server, setServer] = useState(""),
+    [tools, setTools] = useState<any>(null),
+    [tool, setTool] = useState(""),
+    [args, setArgs] = useState("{}"),
+    [observation, setObservation] = useState<any>(null),
+    [parseError, setParseError] = useState(""),
+    [pending, setPending] = useState(""),
+    [operationError, setOperationError] = useState(""),
+    [configError, setConfigError] = useState(""),
+    [configDirty, setConfigDirty] = useState(false),
+    [configNotice, setConfigNotice] = useState(""),
+    [observationError, setObservationError] = useState(""),
+    [observationRetry, setObservationRetry] = useState(0);
+  const operationLock = useRef(false);
   const perform = async (
     name: string,
     action: () => Promise<void>,

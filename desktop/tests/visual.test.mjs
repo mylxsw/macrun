@@ -66,7 +66,11 @@ test("visual history pages all 1500 records without duplicate ids or full detail
     for (const task of page.tasks) {
       assert.equal(seen.has(task.task_id), false);
       seen.add(task.task_id);
-      assert.equal(task.result, undefined);
+      // Like the worker, rows keep only the exit code, never tool results.
+      assert.ok(
+        task.result === undefined ||
+          Object.keys(task.result).join() === "exit_code",
+      );
       assert.equal(task.output_tail, undefined);
     }
     cursor = page.next_cursor;
@@ -144,4 +148,23 @@ test("visual snapshot retains active tasks beyond its recent history window", ()
   assert.equal(fixture.app.snapshot.tasks.length, 250);
   assert.equal(fixture.app.snapshot.active_count, 250);
   assert.equal(fixture.app.snapshot.total_tasks, 1500);
+});
+
+test("visual v4 scenario separates non-zero exits from Macrun problems", async () => {
+  const fixture = load("?scenario=v4");
+  const summary = fixture.app.snapshot.today_summary;
+  assert.ok(summary.exited >= 2);
+  const attention = await control(fixture, "task_list", {
+    status: "attention",
+    limit: 100,
+  });
+  assert.ok(
+    attention.tasks.every(
+      (task) => !(task.status === "failed" && task.result?.exit_code),
+    ),
+  );
+  const all = await control(fixture, "task_list", { limit: 100 });
+  assert.equal(all.counts.exited, summary.exited);
+  assert.equal(fixture.app.settings.connections.length, 1);
+  assert.equal(fixture.app.snapshot.connections.length, 2);
 });

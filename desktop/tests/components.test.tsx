@@ -139,7 +139,7 @@ test("safety saving keeps a retention change received while editing paths", asyn
       includeRetention={false}
     />,
   );
-  await user.click(screen.getByRole("button", { name: "风险命令先确认" }));
+  await user.click(screen.getByRole("button", { name: "风险命令先问" }));
   rerender(
     <SafetyPanel
       snapshot={{ ...snapshot, safety: { ...safety, retention_days: 90 } }}
@@ -641,11 +641,12 @@ test("a stopped legacy configuration has a prominent migration entry and survive
   expect(
     within(banner).getByText("已找到旧版配置，旧执行器当前未运行。"),
   ).toBeTruthy();
-  const safetySection = screen
-    .getByRole("heading", { name: "安全边界", exact: true })
+  // The banner leads the page, above the first settings section.
+  const connectionSection = screen
+    .getByRole("heading", { name: "连接", exact: true })
     .closest("section")!;
   expect(
-    banner.compareDocumentPosition(safetySection) &
+    banner.compareDocumentPosition(connectionSection) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
   expect(props.act).not.toHaveBeenCalled();

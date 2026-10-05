@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sources = ["src/style.css", "src/features.css", "src/task-history.css", "src/v3.css"];
+const sources = ["src/style.css", "src/features.css", "src/task-history.css", "src/v3.css", "src/v4.css"];
 const output = "src/dark.css";
 // The terminal and the screen overlay are dark in both themes.
 const keepSelector = /\bterm\b|overlay|\.border-window/;
