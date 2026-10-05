@@ -1088,9 +1088,425 @@
     }
   ],
   "real_capture": {
-    "status": "blocked",
-    "reason": "macOS interactive session is locked; real screenshot capture cannot be verified",
-    "screen_is_locked": true
+    "status": "passed",
+    "backend": "CuaDriver 0.26.0 via persistent MCP, Macrun QUIC loopback",
+    "fixture": "owned 1000x700 Cocoa window, 81 text elements and one action button",
+    "swift_compile_first_repeat_ms": [
+      1769.8535420931876,
+      355.13495886698365
+    ],
+    "modes": {
+      "full": {
+        "latency": {
+          "n": 10,
+          "p50_ms": 939.427,
+          "p95_ms": 1341.59,
+          "p99_ms": 1341.59
+        },
+        "samples": [
+          {
+            "wall_ms": 1341.590458061546,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 721.7164998874068,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1092.7328751422465,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1042.5761668011546,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 939.4267909228802,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1492.25745908916,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1037.8027921542525,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 789.0921663492918,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 539.4422919489443,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 644.6931669488549,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2340489,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 70,
+            "ax_complete": false
+          }
+        ]
+      },
+      "capture_only": {
+        "latency": {
+          "n": 10,
+          "p50_ms": 775.722,
+          "p95_ms": 1053.165,
+          "p99_ms": 1053.165
+        },
+        "samples": [
+          {
+            "wall_ms": 548.2129589654505,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 775.7217497564852,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 852.6469999924302,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1196.4883329346776,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 674.8335827142,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 611.8266670964658,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 555.2737079560757,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1041.113874875009,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 1053.1648327596486,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 896.1738338693976,
+            "image_bytes": 1719876,
+            "result_json_bytes": 2294376,
+            "width": 1568,
+            "height": 1148,
+            "ax_elements": 0,
+            "ax_complete": false
+          }
+        ]
+      },
+      "thumbnail_640": {
+        "latency": {
+          "n": 10,
+          "p50_ms": 668.954,
+          "p95_ms": 848.063,
+          "p99_ms": 848.063
+        },
+        "samples": [
+          {
+            "wall_ms": 848.0632090941072,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 668.9539169892669,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 402.7135409414768,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 800.595042295754,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 796.03650001809,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 910.6687908060849,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 785.6195410713553,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 335.95625031739473,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 301.60400038585067,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 578.2051673159003,
+            "image_bytes": 466034,
+            "result_json_bytes": 622584,
+            "width": 639,
+            "height": 468,
+            "ax_elements": 0,
+            "ax_complete": false
+          }
+        ]
+      },
+      "tree_only": {
+        "latency": {
+          "n": 10,
+          "p50_ms": 308.284,
+          "p95_ms": 674.566,
+          "p99_ms": 674.566
+        },
+        "samples": [
+          {
+            "wall_ms": 722.3719167523086,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 674.5663331821561,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 441.19974970817566,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 200.21695783361793,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 308.2841248251498,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 298.352750018239,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 192.33820773661137,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 265.21324971690774,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 599.6528747491539,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          },
+          {
+            "wall_ms": 497.9486670345068,
+            "image_bytes": 0,
+            "result_json_bytes": 47028,
+            "width": null,
+            "height": null,
+            "ax_elements": 70,
+            "ax_complete": false
+          }
+        ]
+      }
+    },
+    "interaction": {
+      "status": "passed",
+      "steps": 2,
+      "route": "background AX token click then fresh window observation",
+      "postcondition": "Macrun fixture action confirmed",
+      "wall_ms": 3473.1531250290573
+    },
+    "date": "2026-10-05",
+    "runtime_commit": "eb46b9e84fb86aeb4d749ae6f11dfa73ab2005f5",
+    "measurement_notes": "Sequential modes, 10 samples each; nearest-lower sample quantiles. Wall time includes submit/poll/reference lookup/hydrated retrieval/assertions. AX tree reports incomplete; no claim of full-tree coverage or production tail latency."
   },
   "coverage": {
     "totals": {

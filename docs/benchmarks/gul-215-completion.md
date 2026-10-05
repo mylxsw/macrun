@@ -56,11 +56,24 @@ One thousand compressible 4 KiB files plus config use 8 packs / 19,012 payload b
 
 Cold index construction / restart reconciliation at 100k were 70.29 / 26.79 seconds in that run. Startup still reconciles task files. The index eliminates repeated filesystem scans between reconciliations; it does not make startup or filtering constant-time.
 
-## Explicit boundaries and the remaining environment gate
+## Real CuaDriver validation
+
+The unlocked-desktop retry passed on 2026-10-05 using CuaDriver 0.26.0 through persistent MCP and Macrun QUIC loopback. Each observation mode completed ten calls against an owned Cocoa fixture with 81 text fields and one test button. The probe checks the exact process/window, PNG header dimensions against backend metadata, valid screenshot frames, thumbnail size, and presence/absence of AX elements and images. It also runs a two-step `desktop.sequence`: background AX-token click, then a fresh image/tree observation that confirms the fixture label changed. The sequence passed in 3473.15 ms. No unrelated window is observed and no daemon policy is changed.
+
+| Mode | Sample p50 / p95 | PNG bytes | Actual image dimensions | Hydrated result JSON bytes |
+|---|---:|---:|---|---:|
+| Image + AX | 939.43 / 1341.59 ms | 1,719,876 | 1568 × 1148 | 2,340,489 |
+| Image only | 775.72 / 1053.17 ms | 1,719,876 | 1568 × 1148 | 2,294,376 |
+| Image only, max dimension 640 | 668.95 / 848.06 ms | 466,034 | 639 × 468 | 622,584 |
+| AX only | 308.28 / 674.57 ms | 0 | — | 47,028 |
+
+The thumbnail reduces PNG bytes by **72.9%** in this fixture. Timings include task submission, completion polling, artifact-reference lookup, hydrated-result retrieval and assertions, not just backend capture. Modes run sequentially; ten samples and nearest-lower sample quantiles do not establish production tail latency or a consistent speed advantage. An initial retry without the added button measured image-only p50 slower than image + AX, illustrating host variability. The JSON records every final sample.
+
+The fixture requests a 1000 × 700 point content area; observed pixels are reported separately rather than assuming logical size equals captured size. The backend returns 70 AX elements and marks `elements_complete=false`; the probe verifies expected fixture text and the button, not completeness of the entire tree. The Swift fixture compiled in 1769.85 / 355.13 ms on its first/repeat invocation; this is not a production Xcode cold/warm-cache benchmark. The earlier `px_capture_unavailable`/locked-desktop blocker is resolved for this run; the probe still fails early if the desktop is locked.
+
+## Explicit boundaries
 
 The watcher triggers/coalesces work, and hash caches avoid reading unchanged content. **Directory metadata is still checked across the complete tree before and after sync.** The proposed dirty-path-only metadata scan is not implemented: relying solely on delayed/lost notifications would weaken source-change validation. Strict periodic reconciliation remains. A single-file edit therefore does not yet have constant metadata cost on a 100k-file tree. Sync still has no directory-wide rollback; snapshot execution isolates committed input instead.
-
-Real CuaDriver 0.26.0 integration was attempted against an owned 1000×700 Cocoa fixture. The backend returned `px_capture_unavailable` and no usable image. A read-only OS check confirmed **`CGSSessionScreenIsLocked=true`**. Permissions alone do not make capture available while locked. Real screenshot latency/size, AX-versus-capture-only comparisons and GUI interaction acceptance are therefore **blocked, not passed**. The reproducible probe preflights the lock and exits with status 2; it must be rerun on an unlocked interactive desktop. It never records unrelated windows or changes the user's daemon policy. The fixture compiled, but no production Xcode project's cold/warm-cache claim is made.
 
 Continuous video is a deliberate non-addition, not an implemented/tested feature: CuaDriver already has capture-only, tree-only and resized-window observations, while its optional 30-fps H.264 recorder captures the whole main display. Recording is distinct from standard MCP image observation. No new always-on recorder, codec or WebRTC stack is introduced. The existing generic MCP path can invoke backend recording tools when explicitly needed.
 

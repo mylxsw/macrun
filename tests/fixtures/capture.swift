@@ -10,6 +10,17 @@ let label = NSTextField(labelWithString: "Macrun GUL-215 — disposable capture 
 label.frame = NSRect(x: 40, y: 600, width: 900, height: 40)
 label.font = NSFont.systemFont(ofSize: 25)
 window.contentView!.addSubview(label)
+final class FixtureAction: NSObject {
+    let label: NSTextField
+    init(label: NSTextField) { self.label = label }
+    @objc func press(_ sender: NSButton) {
+        label.stringValue = "Macrun fixture action confirmed"
+    }
+}
+let action = FixtureAction(label: label)
+let button = NSButton(title: "Validate fixture action", target: action, action: #selector(FixtureAction.press(_:)))
+button.frame = NSRect(x: 40, y: 650, width: 250, height: 32)
+window.contentView!.addSubview(button)
 for i in 0..<80 {
     let field = NSTextField(labelWithString: "Fixture row \(i) — abcdefghijklmnopqrstuvwxyz 0123456789")
     field.frame = NSRect(x: 30 + (i % 2) * 490, y: 580 - (i / 2) * 13, width: 475, height: 13)
