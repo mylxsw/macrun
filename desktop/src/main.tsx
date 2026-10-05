@@ -206,11 +206,16 @@ function App() {
   const toolsReturnFocus = useRef<HTMLElement | null>(null);
   const quitDialog = useRef<HTMLElement | null>(null);
   const toolsDialog = useRef<HTMLElement | null>(null);
+  const pairDialog = useRef<HTMLElement | null>(null);
+  const pairReturnFocus = useRef<HTMLElement | null>(null);
+  const pairPending = useRef(false);
   const toolsRequest = useRef(0);
   const trayContent = useRef<HTMLDivElement>(null);
   const [page, updatePage] = useState("live"),
     [pairing, setPairing] = useState(false),
     [addingServer, setAddingServer] = useState(false),
+    [pairRequest, setPairRequest] = useState<boolean | null>(null),
+    [disconnectingForPair, setDisconnectingForPair] = useState(false),
     [connectionFilter, setConnectionFilter] = useState(""),
     [manualOpen, setManualOpen] = useState(false),
     [app, setApp] = useState<AppState | null>(null),
@@ -411,6 +416,34 @@ function App() {
     sessionStorage.setItem(key, JSON.stringify(current.map((t) => t.task_id)));
   }, [snapshot]);
   useAppDialog(quit, quitDialog, quitReturnFocus, () => setQuit(false));
+  useAppDialog(pairRequest !== null, pairDialog, pairReturnFocus, () => {
+    if (!pairPending.current) setPairRequest(null);
+  });
+  const beginPairing = (add = false) => {
+    setError("");
+    if (app?.worker_running) {
+      pairReturnFocus.current = document.activeElement as HTMLElement;
+      setPairRequest(add);
+    } else {
+      setAddingServer(add);
+      setPairing(true);
+    }
+  };
+  const disconnectAndPair = async () => {
+    if (pairPending.current || pairRequest === null) return;
+    pairPending.current = true;
+    setDisconnectingForPair(true);
+    try {
+      const stopped = await act("stop_worker", { onlyIfIdle: true });
+      if (!stopped) return;
+      setAddingServer(pairRequest);
+      setPairRequest(null);
+      setPairing(true);
+    } finally {
+      pairPending.current = false;
+      setDisconnectingForPair(false);
+    }
+  };
   const closeTools = () => {
     toolsRequest.current += 1;
     setTools(null);
@@ -1635,10 +1668,7 @@ function App() {
               act={act}
               refresh={refresh}
               setError={setError}
-              onPair={(add = false) => {
-                setAddingServer(add);
-                setPairing(true);
-              }}
+              onPair={beginPairing}
               manualOpen={manualOpen}
             />
           </RetainedPage>
@@ -1705,6 +1735,60 @@ function App() {
                   关闭
                 </button>
               </div>
+            </div>
+            {error && (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
+            )}
+          </section>
+        </div>
+      )}
+      {pairRequest !== null && (
+        <div className="scrim">
+          <section
+            className="dialog"
+            ref={pairDialog}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pair-request-title"
+          >
+            <h2 id="pair-request-title">
+              {pairRequest ? "添加服务器" : "重新配对"}
+            </h2>
+            <p>
+              需要先断开当前所有服务器，才能修改连接配置。已有连接和任务记录会保留。
+            </p>
+            <p className="muted" role="status">
+              {snapshot?.active_count
+                ? `还有 ${snapshot.active_count} 个任务正在运行，请等待任务结束后继续。`
+                : available
+                  ? "当前没有任务运行，断开后会进入配对页面。配对完成后可重新连接全部服务器。"
+                  : "正在确认任务状态，请稍候；暂时无法确认时请取消并检查连接。"}
+            </p>
+            <div className="actions">
+              <button
+                disabled={disconnectingForPair}
+                onClick={() => setPairRequest(null)}
+              >
+                取消
+              </button>
+              <button
+                disabled={
+                  busy ||
+                  disconnectingForPair ||
+                  !available ||
+                  !!snapshot?.active_count
+                }
+                onClick={disconnectAndPair}
+              >
+                {disconnectingForPair
+                  ? "正在断开…"
+                  : pairRequest
+                    ? "断开并添加"
+                    : "断开并配对"}
+              </button>
             </div>
             {error && (
               <p className="error-text" role="alert">

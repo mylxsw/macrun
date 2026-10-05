@@ -1109,7 +1109,107 @@ test("server filter routes the history query and labels each server independentl
   ).toBeTruthy();
   expect(
     screen.getByRole("button", { name: "添加服务器" }).hasAttribute("disabled"),
+  ).toBe(false);
+});
+
+test("adding a server explains active tasks and restores keyboard focus on cancel", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  const trigger = screen.getByRole("button", { name: "添加服务器" });
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog", { name: "添加服务器" });
+  expect(within(dialog).getByRole("status").textContent).toContain("3 个任务");
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "断开并添加" })
+      .hasAttribute("disabled"),
   ).toBe(true);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "stop_worker"),
+  ).toBe(false);
+});
+
+test("idle add waits for shutdown, prevents repeat clicks and opens the add pairing flow", async () => {
+  const user = userEvent.setup();
+  app.snapshot.active_count = 0;
+  const original = bridge.invoke.getMockImplementation()!;
+  let finish: () => void = () => {};
+  bridge.invoke.mockImplementation((command, args) =>
+    command === "stop_worker"
+      ? new Promise<void>((resolve) => {
+          finish = () => {
+            app.worker_running = false;
+            resolve();
+          };
+        })
+      : original(command, args),
+  );
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(screen.getByRole("button", { name: "添加服务器" }));
+  const dialog = screen.getByRole("dialog", { name: "添加服务器" });
+  await user.click(within(dialog).getByRole("button", { name: "断开并添加" }));
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "正在断开…" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  expect(screen.queryByRole("heading", { name: "粘贴配对码" })).toBeNull();
+  await act(async () => finish());
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy(),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "stop_worker"),
+  ).toEqual([["stop_worker", { onlyIfIdle: true }]]);
+  expect(
+    screen.queryByRole("button", { name: "手动填写地址和证书" }),
+  ).toBeNull();
+});
+
+test("failed idle check leaves the connection and dialog intact, then permits retry", async () => {
+  const user = userEvent.setup();
+  app.snapshot.active_count = 0;
+  const original = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation((command, args) =>
+    command === "stop_worker"
+      ? Promise.reject(new Error("仍有任务运行，请等待任务结束后再添加服务器"))
+      : original(command, args),
+  );
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(screen.getByRole("button", { name: "添加服务器" }));
+  const dialog = screen.getByRole("dialog", { name: "添加服务器" });
+  await user.click(within(dialog).getByRole("button", { name: "断开并添加" }));
+  expect(within(dialog).getByRole("alert").textContent).toContain(
+    "仍有任务运行",
+  );
+  expect(app.worker_running).toBe(true);
+  expect(
+    within(dialog)
+      .getByRole("button", { name: "断开并添加" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+});
+
+test("stopped add goes straight to pairing without trying to disconnect", async () => {
+  const user = userEvent.setup();
+  app.worker_running = false;
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "设置与安全" }));
+  await user.click(screen.getByRole("button", { name: "添加服务器" }));
+  expect(screen.getByRole("heading", { name: "粘贴配对码" })).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "stop_worker"),
+  ).toBe(false);
 });
 
 test("stopped worker does not show saved multi-server snapshots as online", async () => {

@@ -939,12 +939,38 @@ async fn control(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-async fn stop_worker(rt: tauri::State<'_, Runtime>) -> std::result::Result<(), String> {
-    rt.desired_running.store(false, Ordering::SeqCst);
-    local::request(&rt.socket, "shutdown", json!({}))
-        .await
-        .map_err(|e| e.to_string())?;
+async fn stop_worker(
+    only_if_idle: Option<bool>,
+    rt: tauri::State<'_, Runtime>,
+) -> std::result::Result<(), String> {
+    let was_desired = rt.desired_running.swap(false, Ordering::SeqCst);
+    if let Err(error) = local::request(
+        &rt.socket,
+        "shutdown",
+        json!({"only_if_idle": only_if_idle.unwrap_or(false)}),
+    )
+    .await
+    {
+        rt.desired_running.store(was_desired, Ordering::SeqCst);
+        return Err(error.to_string());
+    }
     // Retain the child until it is reaped; a new start checks try_wait.
+    // Pairing must wait for the actual process exit, rather than a shutdown acknowledgement.
+    if only_if_idle == Some(true) {
+        for _ in 0..100 {
+            let running = rt
+                .child
+                .lock()
+                .unwrap()
+                .as_mut()
+                .is_some_and(|c| c.try_wait().ok().flatten().is_none());
+            if !running {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        return Err("执行器仍在退出，请稍候重试；已有连接配置已保留".into());
+    }
     Ok(())
 }
 #[tauri::command]

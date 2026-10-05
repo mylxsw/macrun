@@ -36,6 +36,17 @@ pub struct Engine {
     changes: watch::Sender<u64>,
     fingerprint_key: [u8; 32],
 }
+/// Holds admission closed while all profiles are checked before an idle-only shutdown.
+pub(crate) struct IdleShutdownGuard<'a> {
+    engine: &'a Engine,
+    _admission: tokio::sync::MutexGuard<'a, ()>,
+}
+impl IdleShutdownGuard<'_> {
+    pub(crate) async fn pause(&self) {
+        self.engine.policy.lock().await.paused = true;
+        self.engine.changed();
+    }
+}
 #[derive(Default)]
 struct DiscoveredTools {
     session: String,
@@ -429,6 +440,17 @@ impl Engine {
     }
     pub async fn active_count(&self) -> usize {
         self.tasks.lock().await.len()
+    }
+    pub(crate) async fn reserve_idle_shutdown(&self) -> Result<IdleShutdownGuard<'_>> {
+        let admission = self.submissions.lock().await;
+        anyhow::ensure!(
+            self.tasks.lock().await.is_empty(),
+            "仍有任务运行，请等待任务结束后再添加服务器"
+        );
+        Ok(IdleShutdownGuard {
+            engine: self,
+            _admission: admission,
+        })
     }
     pub async fn shutdown(&self) -> Result<()> {
         self.backend_stop.lock().await.cancel();

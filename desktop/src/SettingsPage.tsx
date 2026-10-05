@@ -259,9 +259,7 @@ export function SettingsPage({
             <h3>服务器连接</h3>
             <button
               disabled={
-                connectionBusy ||
-                app?.worker_running ||
-                (app?.settings.connections?.length || 0) >= 15
+                connectionBusy || (app?.settings.connections?.length || 0) >= 15
               }
               onClick={() => onPair(true)}
             >
@@ -269,7 +267,7 @@ export function SettingsPage({
             </button>
           </div>
           <p className="muted">
-            保存的服务器会同时连接。添加或移除前，请等待任务结束并断开连接；已有记录会保留。
+            保存的服务器会同时连接。点击添加后会引导你安全断开；已有连接和任务记录会保留。
           </p>
           {[
             ...(app?.settings.server

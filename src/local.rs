@@ -344,6 +344,18 @@ async fn dispatch(
         })
         .collect();
     anyhow::ensure!(!targets.is_empty(), "unknown connection");
+    if action == "shutdown" && args["only_if_idle"] == true {
+        // Reserve every profile before changing any policy. A busy profile releases
+        // the earlier reservations without stopping tasks or changing their settings.
+        let mut guards = Vec::new();
+        for c in &targets {
+            guards.push(c.engine.reserve_idle_shutdown().await?);
+        }
+        for guard in &guards {
+            guard.pause().await;
+        }
+        drop(guards);
+    }
     let mut result = json!({});
     let mut errors = Vec::new();
     for c in targets {
@@ -434,6 +446,66 @@ async fn dispatch_one(
 #[cfg(test)]
 mod multi_tests {
     use super::*;
+    #[tokio::test]
+    async fn idle_shutdown_checks_every_profile_and_does_not_interrupt_busy_tasks() {
+        let root = tempfile::tempdir().unwrap();
+        let mut connections = Vec::new();
+        for id in ["primary", "secondary"] {
+            let engine =
+                Engine::open(root.path().join(id), crate::config::WorkerConfig::default()).unwrap();
+            let (_, rx) = watch::channel(ConnectionState::initial(id.into()));
+            connections.push(LocalConnection {
+                id: id.into(),
+                name: id.into(),
+                engine,
+                connection: rx,
+            });
+        }
+        let (task, cancel) = connections[1]
+            .engine
+            .begin_external("sync", json!({"remote_root":root.path().join("workspace")}))
+            .await
+            .unwrap();
+        let stop = CancellationToken::new();
+        assert!(
+            dispatch(
+                &connections,
+                "shutdown",
+                json!({"only_if_idle":true}),
+                &stop
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("仍有任务运行")
+        );
+        assert!(!cancel.is_cancelled());
+        assert!(!stop.is_cancelled());
+        assert!(!connections[0].engine.policy().await.paused);
+        assert!(!connections[1].engine.policy().await.paused);
+        connections[1]
+            .engine
+            .finish_external(&task, None, None)
+            .await
+            .unwrap();
+        dispatch(
+            &connections,
+            "shutdown",
+            json!({"only_if_idle":true}),
+            &stop,
+        )
+        .await
+        .unwrap();
+        assert!(stop.is_cancelled());
+        for c in connections {
+            assert!(
+                c.engine
+                    .begin_external("sync", json!({"remote_root":root.path().join("workspace")}))
+                    .await
+                    .is_err()
+            );
+        }
+    }
     #[tokio::test]
     async fn merged_history_paginates_equal_timestamps_without_gaps_and_filters_sources() {
         let root = tempfile::tempdir().unwrap();
