@@ -74,6 +74,13 @@ const task = (id: string, status = "succeeded"): Task => ({
   arguments: { tool: id },
   started_at: 1,
 });
+// Installation detection is independent of the tool/paging fixtures below.
+const backendRead = (read: (...args: any[]) => Promise<any>) =>
+  (command: string, args?: Record<string, unknown>) =>
+    command === "cua_status"
+      ? Promise.resolve({ state: "missing" })
+      : read(command, args);
+
 test("workspace cards show six initially and expose all rows through the more action", async () => {
   const user = userEvent.setup();
   const workspaces = Array.from({ length: 24 }, (_, i) => ({
@@ -154,7 +161,7 @@ test("reading tools locks the backend selection and exposes failure locally", as
       snapshot={snapshot}
       app={null}
       act={act}
-      read={read}
+      read={backendRead(read)}
       mode="advanced"
     />,
   );
@@ -198,7 +205,7 @@ test("tool discovery can read the next page without losing the chosen tool and i
         ],
       },
     });
-  const props = { app: null, act, read, mode: "advanced" as const };
+  const props = { app: null, act, read: backendRead(read), mode: "advanced" as const };
   const { rerender } = render(<BackendPanel snapshot={snapshot} {...props} />);
   await chooseTool(user);
   await user.click(screen.getByRole("button", { name: "读取更多工具" }));
@@ -228,7 +235,7 @@ test("observation rejects JSON scalars and a failed backend restart preserves di
       snapshot={snapshot}
       app={null}
       act={act}
-      read={read}
+      read={backendRead(read)}
       mode="advanced"
     />,
   );
@@ -269,7 +276,7 @@ test("an observation read failure stops polling and retry only reads the origina
       snapshot={snapshot}
       app={null}
       act={act}
-      read={read}
+      read={backendRead(read)}
       mode="advanced"
     />,
   );
@@ -319,7 +326,7 @@ test("backend config draft survives save failure and cannot be replaced while di
       snapshot={snapshot}
       app={app}
       act={act}
-      read={read}
+      read={backendRead(read)}
       mode="advanced"
     />,
   );

@@ -503,6 +503,8 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       note: "模拟迁移完成；路径仅用于界面展示，不会创建文件。",
     };
   }
+  if (command === "cua_status") return { state: "ready", version: "Cua Driver · UI fixture", configured: true };
+  if (command === "grant_cua_permissions") return "fixture permission verification";
   if (command === "pair") {
     if (
       failure === "pair" ||
@@ -523,6 +525,7 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       fingerprint: app.settings.certificate_fingerprint,
       protocol: 2,
       credentials: "keychain",
+      connection_id: "primary",
     };
   }
   if (command === "start_worker") {

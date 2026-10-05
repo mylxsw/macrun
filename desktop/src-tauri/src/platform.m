@@ -62,3 +62,17 @@ bool macrun_graphical_session(void){
     CFRelease(session);return active;
 }
 bool macrun_awake_active(void){pthread_mutex_lock(&sleep_assertion_lock);bool active=sleep_assertion!=0;pthread_mutex_unlock(&sleep_assertion_lock);return active;}
+
+// Called on the application's main thread only, in response to a user action.
+// A preflight or opening System Settings alone does not register the app in TCC.
+void macrun_request_permission(int kind) {
+    if (![NSThread isMainThread]) return;
+    if (kind == 1 && !CGPreflightScreenCaptureAccess()) {
+        CGRequestScreenCaptureAccess();
+    } else if (kind == 2 && !AXIsProcessTrusted()) {
+        NSDictionary *options = @{(id)kAXTrustedCheckOptionPrompt: @YES};
+        AXIsProcessTrustedWithOptions((CFDictionaryRef)options);
+    } else if (kind == 3 && !CGPreflightListenEventAccess()) {
+        CGRequestListenEventAccess();
+    }
+}

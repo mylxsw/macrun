@@ -29,9 +29,26 @@ fn permission_url(kind: &str) -> std::result::Result<String, String> {
     ))
 }
 #[tauri::command]
-pub async fn open_permission(kind: String) -> std::result::Result<(), String> {
+pub async fn open_permission(
+    kind: String,
+    app: tauri::AppHandle,
+) -> std::result::Result<(), String> {
+    let url = permission_url(&kind)?;
+    let (send, receive) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        unsafe {
+            macrun_request_permission(match kind.as_str() {
+                "screen" => 1,
+                "accessibility" => 2,
+                _ => 3,
+            });
+        }
+        let _ = send.send(());
+    })
+    .map_err(|e| e.to_string())?;
+    receive.await.map_err(|e| e.to_string())?;
     let status = tokio::process::Command::new("open")
-        .arg(permission_url(&kind)?)
+        .arg(url)
         .status()
         .await
         .map_err(|e| e.to_string())?;
@@ -110,6 +127,9 @@ pub fn backend_config(rt: tauri::State<Runtime>) -> std::result::Result<String, 
 }
 #[tauri::command]
 pub fn save_backends(text: String, rt: tauri::State<Runtime>) -> std::result::Result<(), String> {
+    save_backend_text(&text, &rt)
+}
+pub(crate) fn save_backend_text(text: &str, rt: &Runtime) -> std::result::Result<(), String> {
     let result: Result<()> = (|| {
         let mut child = rt.child.lock().unwrap();
         anyhow::ensure!(
@@ -126,7 +146,7 @@ pub fn save_backends(text: String, rt: tauri::State<Runtime>) -> std::result::Re
                 .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
             "请先断开连接，再修改后端配置"
         );
-        let config: macrun::config::WorkerConfig = toml::from_str(&text)?;
+        let config: macrun::config::WorkerConfig = toml::from_str(text)?;
         for backend in config.mcp.values() {
             anyhow::ensure!(!backend.command.trim().is_empty(), "后端命令不能为空");
         }
@@ -166,31 +186,19 @@ pub async fn diagnostics(rt: tauri::State<'_, Runtime>) -> std::result::Result<S
     Ok(path.to_string_lossy().into())
 }
 #[tauri::command]
-pub async fn connection_check(rt: tauri::State<'_, Runtime>) -> std::result::Result<Value, String> {
-    let state = local::request(&rt.socket, "snapshot", json!({}))
-        .await
-        .map_err(|e| e.to_string())?;
-    let connections: Vec<&Value> = state["connections"]
-        .as_array()
-        .map(|rows| rows.iter().map(|row| &row["connection"]).collect())
-        .unwrap_or_else(|| vec![&state["connection"]]);
-    let checks: Vec<Value> = [
-        ("UDP / QUIC 可达", "transport"),
-        ("证书校验", "certificate"),
-        ("凭据认证", "authentication"),
-        ("协议一致", "protocol"),
-    ]
-    .into_iter()
-    .map(|(name, key)| json!({"name":name,"ok":connections.iter().all(|c|c["checks"][key]==true)}))
-    .collect();
-    let errors: Vec<_> = connections
-        .iter()
-        .filter_map(|c| c["error"].as_str().map(str::to_owned))
-        .collect();
-    Ok(
-        json!({"checks":checks,"error":errors.join("；"),"note":"检查覆盖全部已保存连接；各服务器的状态可在连接列表查看。"}),
+pub async fn connection_check(
+    connection_id: Option<String>,
+    rt: tauri::State<'_, Runtime>,
+) -> std::result::Result<Value, String> {
+    Ok(crate::connection_check::wait_for_connection(
+        || local::request(&rt.socket, "snapshot", json!({})),
+        connection_id.as_deref(),
+        Duration::from_secs(20),
+        Duration::from_millis(250),
     )
+    .await)
 }
+
 fn legacy_argument(value: &Value, key: &str) -> Result<String> {
     let args = value["ProgramArguments"]
         .as_array()
@@ -424,6 +432,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
 
 unsafe extern "C" {
     pub fn macrun_monitor_start();
+    fn macrun_request_permission(kind: i32);
     fn macrun_set_application_icon(bytes: *const u8, length: usize) -> bool;
     pub fn macrun_graphical_session() -> bool;
     pub fn macrun_awake_active() -> bool;
