@@ -2,6 +2,7 @@
 import React from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  act as reactAct,
   cleanup,
   fireEvent,
   render,
@@ -11,7 +12,11 @@ import {
 import userEvent from "@testing-library/user-event";
 import { CuaSetup } from "../src/CuaSetup";
 import { Pairing } from "../src/Features";
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 const ready = {
   state: "ready",
   version: "cua-driver fixture",
@@ -88,13 +93,11 @@ test.each([true, false])(
       return true;
     });
     render(<CuaSetup act={act} read={read} />);
-    await userEvent
-      .setup()
-      .click(
-        await screen.findByRole("button", {
-          name: "接入 Macrun（空闲时重连）",
-        }),
-      );
+    await userEvent.setup().click(
+      await screen.findByRole("button", {
+        name: "接入 Macrun（空闲时重连）",
+      }),
+    );
     expect(calls).toEqual(
       running
         ? ["stop_worker", "configure_cua_driver", "start_worker"]
@@ -146,9 +149,156 @@ test("grant failure stays retryable and returning from System Settings refreshes
   await user.click(
     screen.getByRole("button", { name: "授权 CuaDriver 截图与控制" }),
   );
-  expect(screen.getByRole("status").textContent).toContain("检查已完成");
+  expect(screen.getByText(/授权流程已结束/)).toBeTruthy();
   fireEvent.focus(window);
-  await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+});
+
+test("grant waiting does not block detection or configuration, and restart status can recover", async () => {
+  let finish!: () => void;
+  const read = vi.fn(async (command) =>
+    command === "app_state" ? { worker_running: false } : ready,
+  );
+  const act = vi.fn(async (command) => {
+    if (command === "grant_cua_permissions")
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    return true;
+  });
+  render(<CuaSetup act={act} read={read} />);
+  const grant = await screen.findByRole("button", {
+    name: "授权 CuaDriver 截图与控制",
+  });
+  fireEvent.click(grant);
+  fireEvent.click(grant);
+  expect(act).toHaveBeenCalledTimes(1);
+  expect(grant.hasAttribute("disabled")).toBe(true);
+  const detect = screen.getByRole("button", { name: "重新检测" });
+  expect(detect.hasAttribute("disabled")).toBe(false);
+  expect(screen.getByText(/可继续其他操作/)).toBeTruthy();
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: null },
+  });
+  fireEvent.focus(window);
+  await screen.findByText(/辅助功能已授权；屏幕录制暂无法确认/);
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: true },
+  });
+  await userEvent.setup().click(detect);
+  await screen.findByText(/辅助功能已授权；屏幕录制已授权/);
+  expect(screen.queryByText(/等待 CuaDriver 授权与重启/)).toBeNull();
+  expect(screen.getByText(/两项权限已授权/)).toBeTruthy();
+  expect(grant.hasAttribute("disabled")).toBe(true);
+  read.mockImplementation(async (command) =>
+    command === "app_state" ? { worker_running: false } : ready,
+  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "接入 Macrun（空闲时重连）" }));
+  expect(act).toHaveBeenCalledWith("configure_cua_driver", undefined);
+  await reactAct(async () => {
+    finish();
+  });
+  expect(grant.hasAttribute("disabled")).toBe(false);
+});
+
+test("visible polling refreshes after a restart without overlapping reads and cleans up", async () => {
+  vi.useFakeTimers();
+  let finish!: (value: unknown) => void;
+  const read = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const visibility = vi
+    .spyOn(document, "visibilityState", "get")
+    .mockReturnValue("visible");
+  const view = render(<CuaSetup act={vi.fn()} read={read} />);
+  await reactAct(async () => {});
+  await reactAct(async () => {
+    fireEvent.focus(window);
+    await vi.advanceTimersByTimeAsync(10000);
+  });
+  expect(read).toHaveBeenCalledTimes(1);
+  await reactAct(async () => {
+    finish(ready);
+  });
+  visibility.mockReturnValue("hidden");
+  await reactAct(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(read).toHaveBeenCalledTimes(1);
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: false, screen_recording: true },
+  });
+  visibility.mockReturnValue("visible");
+  await reactAct(async () => {
+    fireEvent(document, new Event("visibilitychange"));
+  });
+  expect(screen.getByText(/辅助功能未授权；屏幕录制已授权/)).toBeTruthy();
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: true },
+  });
+  await reactAct(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(screen.getByText(/辅助功能已授权；屏幕录制已授权/)).toBeTruthy();
+  view.unmount();
+  const calls = read.mock.calls.length;
+  fireEvent.focus(window);
+  fireEvent(document, new Event("visibilitychange"));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(read).toHaveBeenCalledTimes(calls);
+});
+
+test("failed detection clears stale permission claims and recovers on focus", async () => {
+  const read = vi.fn().mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: true },
+  });
+  render(<CuaSetup act={vi.fn()} read={read} />);
+  await screen.findByText(/辅助功能已授权；屏幕录制已授权/);
+  read.mockRejectedValue(new Error("driver restarting"));
+  fireEvent.focus(window);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "driver restarting",
+  );
+  expect(
+    screen.getByText(/辅助功能暂无法确认；屏幕录制暂无法确认/),
+  ).toBeTruthy();
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: true },
+  });
+  fireEvent.focus(window);
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(screen.getByText(/辅助功能已授权；屏幕录制已授权/)).toBeTruthy();
+});
+
+test("unmounting during a grant stops detection and safely accepts a late result", async () => {
+  let finish!: () => void;
+  const read = vi.fn().mockResolvedValue(ready);
+  const act = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = render(<CuaSetup act={act} read={read} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "授权 CuaDriver 截图与控制" }),
+  );
+  view.unmount();
+  await reactAct(async () => {
+    finish();
+  });
+  expect(read).toHaveBeenCalledTimes(1);
 });
 
 test("failed or unknown executor state cannot configure and false actions are errors", async () => {

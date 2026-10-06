@@ -5,6 +5,7 @@ use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::process::Command as AsyncCommand;
 
 static SETUP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static GRANT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const INSTALLER: &str = "https://cua.ai/driver/install.sh";
 
 fn driver_command(command: &str) -> bool {
@@ -170,13 +171,43 @@ async fn inspect_candidates(
 }
 #[tauri::command]
 pub async fn cua_status(rt: tauri::State<'_, Runtime>) -> std::result::Result<Value, String> {
-    let _guard = match SETUP.try_lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return Ok(json!({"state":"busy","detail":"正在处理 Cua Driver，请稍后重新检测"}));
-        }
+    let mut status = {
+        let _guard = match SETUP.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Ok(json!({"state":"busy","detail":"正在处理 Cua Driver，请稍后重新检测"}));
+            }
+        };
+        inspect(&rt).await.map_err(|e| e.to_string())?
     };
-    inspect(&rt).await.map_err(|e| e.to_string())
+    if let Some(path) = status["path"].as_str() {
+        status["permissions"] = permission_status(Path::new(path), Duration::from_secs(5)).await;
+    }
+    Ok(status)
+}
+async fn permission_status(path: &Path, timeout: Duration) -> Value {
+    // Query the app-owned daemon without prompting or capturing the screen.
+    // A restarting/unavailable daemon must never be reported as authorized.
+    let result: Result<Value> = async {
+        let text = output(
+            AsyncCommand::new(path).args(["permissions", "status", "--json"]),
+            timeout,
+        )
+        .await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+    .await;
+    match result {
+        Ok(value) => json!({
+            "accessibility": value["accessibility"].as_bool(),
+            "screen_recording": value["screen_recording"].as_bool(),
+        }),
+        Err(_) => json!({
+            "accessibility": null,
+            "screen_recording": null,
+            "detail": "暂无法读取 CuaDriver 权限，重启后将自动重新检测。",
+        }),
+    }
 }
 #[tauri::command]
 pub async fn install_cua_driver(
@@ -292,14 +323,26 @@ pub async fn configure_cua_driver(
 pub async fn grant_cua_permissions(
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<String, String> {
-    let _guard = SETUP.try_lock().map_err(|_| "Cua Driver 操作正在进行")?;
-    let status = inspect(&rt).await.map_err(|e| e.to_string())?;
-    let path = status["path"].as_str().ok_or("请先安装可用的 Cua Driver")?;
+    grant_permissions(&rt, Duration::from_secs(120)).await
+}
+async fn grant_permissions(rt: &Runtime, timeout: Duration) -> std::result::Result<String, String> {
+    let _grant = GRANT.try_lock().map_err(|_| "CuaDriver 授权操作正在进行")?;
+    // Human approval and the driver's restart can outlive this inspection.
+    // Keep duplicate grants serialized, but release setup so status can refresh.
+    let path = {
+        // A periodic status read may be in flight when the user clicks grant.
+        let _guard = SETUP.lock().await;
+        let status = inspect(rt).await.map_err(|e| e.to_string())?;
+        status["path"]
+            .as_str()
+            .ok_or("请先安装可用的 Cua Driver")?
+            .to_owned()
+    };
     // Official grant command uses LaunchServices for the app's TCC identity and
     // verifies capture. A denied grant is an error; opening Settings isn't success.
     output(
         AsyncCommand::new(path).args(["permissions", "grant"]),
-        Duration::from_secs(120),
+        timeout,
     )
     .await
     .map_err(|e| e.to_string())
@@ -384,6 +427,133 @@ mod tests {
             inspect_candidates(&cfg, vec![driver]).await.unwrap()["state"],
             "broken"
         );
+    }
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn grant_keeps_status_available_rejects_duplicates_and_releases_on_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        let driver = temp.path().join("cua-driver");
+        let started = temp.path().join("started");
+        let finished = temp.path().join("finished");
+        std::fs::write(
+            &driver,
+            r#"#!/bin/sh
+case "$*" in
+  --version) echo 'cua-driver fixture';;
+  'permissions grant')
+    touch "$(dirname "$0")/started"
+    while [ ! -f "$(dirname "$0")/finished" ]; do sleep 0.01; done
+    echo verified;;
+  'permissions status --json') echo '{"accessibility":true,"screen_recording":true}';;
+  *) exit 2;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&driver, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let backend_config = temp.path().join("worker.toml");
+        std::fs::write(
+            &backend_config,
+            with_driver(Default::default(), driver.to_str().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let rt = Runtime {
+            data: temp.path().to_path_buf(),
+            socket: temp.path().join("control.sock"),
+            child: Mutex::new(None),
+            snapshot: Mutex::new(Value::Null),
+            settings: Mutex::new(Settings {
+                backend_config: backend_config.to_str().unwrap().to_owned(),
+                ..Default::default()
+            }),
+            preferences: Mutex::new(Preferences::default()),
+            exiting: AtomicBool::new(false),
+            starting: AtomicBool::new(false),
+            desired_running: AtomicBool::new(false),
+            migrating: AtomicBool::new(false),
+            window_layout: Mutex::new(WindowLayout::default()),
+            system_state: Mutex::new(None),
+        };
+        let inspection = SETUP.lock().await;
+        let grant = grant_permissions(&rt, Duration::from_secs(30));
+        let check = async {
+            drop(inspection);
+            tokio::time::timeout(Duration::from_secs(15), async {
+                while !started.exists() {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            let status = {
+                let _guard = SETUP
+                    .try_lock()
+                    .expect("grant must not hold the setup lock");
+                inspect(&rt).await.unwrap()
+            };
+            assert_eq!(status["state"], "ready");
+            assert_eq!(
+                permission_status(&driver, Duration::from_secs(1)).await["screen_recording"],
+                true
+            );
+            assert!(
+                grant_permissions(&rt, Duration::from_millis(10))
+                    .await
+                    .unwrap_err()
+                    .contains("授权操作正在进行")
+            );
+            std::fs::write(&finished, "").unwrap();
+            Ok::<_, String>(())
+        };
+        let (result, check) = tokio::join!(grant, check);
+        assert!(check.is_ok(), "check: {check:?}, grant: {result:?}");
+        assert_eq!(result.unwrap(), "verified");
+        assert!(GRANT.try_lock().is_ok());
+        std::fs::remove_file(&finished).unwrap();
+        assert!(
+            grant_permissions(&rt, Duration::from_millis(10))
+                .await
+                .unwrap_err()
+                .contains("超时")
+        );
+        assert!(GRANT.try_lock().is_ok());
+        assert!(SETUP.try_lock().is_ok());
+    }
+    #[tokio::test]
+    async fn reads_driver_permissions_and_recovers_after_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let driver = temp.path().join("cua-driver");
+        std::fs::write(&driver, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&driver, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let timeout = Duration::from_secs(1);
+        let unknown = permission_status(&driver, timeout).await;
+        assert!(unknown["accessibility"].is_null());
+        assert!(unknown["screen_recording"].is_null());
+        assert!(unknown["detail"].is_string());
+        for (accessibility, recording) in
+            [(false, false), (true, false), (false, true), (true, true)]
+        {
+            std::fs::write(&driver, format!(
+                "#!/bin/sh\n[ \"$*\" = 'permissions status --json' ] || exit 2\necho '{{\"accessibility\":{accessibility},\"screen_recording\":{recording}}}'\n"
+            )).unwrap();
+            let value = permission_status(&driver, timeout).await;
+            assert_eq!(value["accessibility"], accessibility);
+            assert_eq!(value["screen_recording"], recording);
+        }
+        for payload in [
+            "not-json",
+            "{}",
+            r#"{"accessibility":"unknown","screen_recording":null}"#,
+        ] {
+            std::fs::write(&driver, format!("#!/bin/sh\necho '{payload}'\n")).unwrap();
+            let value = permission_status(&driver, timeout).await;
+            assert!(value["accessibility"].is_null());
+            assert!(value["screen_recording"].is_null());
+        }
+        std::fs::write(&driver, "#!/bin/sh\nsleep 10\n").unwrap();
+        let value = permission_status(&driver, Duration::from_millis(10)).await;
+        assert!(value["accessibility"].is_null());
+        assert!(value["screen_recording"].is_null());
     }
     #[tokio::test]
     async fn command_failure_timeout_and_bounded_output() {
