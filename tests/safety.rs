@@ -1,5 +1,21 @@
 use macrun::{config::WorkerConfig, engine::Engine, safety::Safety};
 use serde_json::json;
+
+async fn wait_for_status(e: &std::sync::Arc<Engine>, id: &str, expected: &str) {
+    let mut changes = e.subscribe();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let task = e.handle("task.get", json!({"task_id":id})).await.unwrap();
+            if task["status"] == expected {
+                return;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("task {id} did not reach {expected}"));
+}
+
 #[test]
 fn allowlist_checks_nonexistent_paths_symlinks_and_parent_traversal() {
     let d = tempfile::tempdir().unwrap();
@@ -29,18 +45,10 @@ async fn approvals_block_execution_and_rejection_is_durable() {
     let a = json!({"request_id":macrun::model::id(),"cwd":d.path(),"command":"touch ran"});
     let v = e.handle("exec.start", a.clone()).await.unwrap();
     let id = v["task_id"].as_str().unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_status(&e, id, "awaiting_approval").await;
     assert!(!d.path().join("ran").exists());
-    assert_eq!(
-        e.handle("task.get", json!({"task_id":id})).await.unwrap()["status"],
-        "awaiting_approval"
-    );
     e.approve(id, false).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert_eq!(
-        e.handle("task.get", json!({"task_id":id})).await.unwrap()["status"],
-        "denied"
-    );
+    wait_for_status(&e, id, "denied").await;
     assert!(e.approve(id, true).await.is_err());
     assert_eq!(e.handle("exec.start", a).await.unwrap()["duplicate"], true);
     assert!(!d.path().join("ran").exists());
