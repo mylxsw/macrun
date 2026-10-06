@@ -149,8 +149,20 @@ pub async fn run_command_until(
     .map_err(|e| Fault::new("recovery_required", e))?;
     let out = child.stdout.take().unwrap();
     let err = child.stderr.take().unwrap();
-    let a = tokio::spawn(pump(out, events.clone(), log.into()));
-    let b = tokio::spawn(pump(err, events.clone(), log.into()));
+    let a = tokio::spawn(pump(
+        out,
+        events.clone(),
+        log.into(),
+        "stdout",
+        crate::metrics::current(),
+    ));
+    let b = tokio::spawn(pump(
+        err,
+        events.clone(),
+        log.into(),
+        "stderr",
+        crate::metrics::current(),
+    ));
     let result = tokio::select! {
         status=child.wait()=>status.map_err(|e|Fault::new("recovery_required",e)).map(|s| s.code().unwrap_or(128)),
         _=cancel.cancelled()=>Err(Fault::new("cancelled","task cancelled")),
@@ -179,11 +191,20 @@ pub async fn run_command_until(
     std::fs::remove_file(journal).map_err(|e| Fault::new("recovery_required", e))?;
     result
 }
-async fn pump<R: tokio::io::AsyncRead + Unpin>(mut r: R, tx: mpsc::Sender<Event>, name: String) {
+async fn pump<R: tokio::io::AsyncRead + Unpin>(
+    mut r: R,
+    tx: mpsc::Sender<Event>,
+    name: String,
+    counter: &str,
+    capture: Option<crate::metrics::Capture>,
+) {
     let mut b = [0; 8192];
     let mut pending = Vec::new();
     loop {
         let n = r.read(&mut b).await.unwrap_or(0);
+        if let Some(c) = &capture {
+            c.add("bytes", counter, n as u64);
+        }
         pending.extend_from_slice(&b[..n]);
         let mut text = String::new();
         loop {

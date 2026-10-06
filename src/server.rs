@@ -211,6 +211,22 @@ async fn register_connection(
         );
     }
     crate::logging::event("server", "worker_connected", json!({"instance":instance}));
+    let mut metrics_sender = tokio::task::JoinSet::new();
+    if state.lock().await.peers.get(&client_id).is_some_and(|p| {
+        p.status["capabilities"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|v| v == "performance_metrics_v1"))
+    }) {
+        let conn = conn.clone();
+        let data = data.clone();
+        let client = client_id.clone();
+        metrics_sender.spawn(async move {
+            loop {
+                drain_metrics(&conn, &data, &client).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+    }
     let mut control_rx = wire::read_channel::<_, Control>(recv);
     let result:Result<()>=async {
         let mut heartbeat=tokio::time::interval(Duration::from_secs(5));
@@ -224,6 +240,8 @@ async fn register_connection(
         }}Ok(())
     }.await;
     conn.close(1u32.into(), b"control disconnected");
+    metrics_sender.abort_all();
+    while metrics_sender.join_next().await.is_some() {}
     let mut s = state.lock().await;
     if s.peers
         .get(&client_id)
@@ -520,18 +538,48 @@ async fn execute(
     mut result: Value,
 ) {
     let timeout = Duration::from_secs(task.project.sync_timeout_seconds);
-    let r = tokio::time::timeout(
-        timeout,
-        execute_inner(&mut task, &peer, &active, &mut result),
-    )
-    .await
-    .unwrap_or_else(|_| Err(Fault::new("timed_out", "sync overall deadline exceeded").into()));
+    let capture = crate::metrics::Capture::new("server");
+    let r = capture
+        .scope(tokio::time::timeout(
+            timeout,
+            execute_inner(&mut task, &peer, &active, &mut result),
+        ))
+        .await
+        .unwrap_or_else(|_| Err(Fault::new("timed_out", "sync overall deadline exceeded").into()));
     let error = r.err().map(|e| {
         e.downcast_ref::<Fault>()
             .cloned()
             .unwrap_or_else(|| Fault::new("worker_disconnected", e))
     });
     finish(&mut result, error);
+    result["metrics"] = json!(capture.snapshot(true));
+    if peer.status["capabilities"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "performance_metrics_v1"))
+    {
+        let dir = data.join("metrics-outbox").join(&client_id);
+        let report = json!({"job_id":task.job_id,"metrics":result["metrics"]});
+        if !crate::wire::blocking(move || -> Result<()> {
+            std::fs::create_dir_all(&dir)?;
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+            let entries = std::fs::read_dir(&dir)?
+                .take(1001)
+                .collect::<std::io::Result<Vec<_>>>()?;
+            if entries.len() >= 1000 {
+                anyhow::bail!("performance outbox full");
+            }
+            crate::wire::atomic_json(
+                &dir.join(format!("{}.json", report["job_id"].as_str().unwrap())),
+                &report,
+            )
+        })
+        .await
+        .is_ok_and(|r| r.is_ok())
+        {
+            crate::logging::event("server", "metrics_outbox_failed", json!({}));
+        }
+    }
     crate::logging::event(
         "server",
         "task_finished",
@@ -579,6 +627,7 @@ async fn execute_inner(
     active: &Active,
     result: &mut Value,
 ) -> Result<()> {
+    let _execution = crate::metrics::phase("sync_total");
     let sync_needed = task.request.kind == "sync";
     if sync_needed {
         let root = task.request.workspace.clone();
@@ -690,12 +739,67 @@ async fn execute_inner(
         }
     }
 }
+/// Reports are retryable observations, never business actions. Keep control heartbeats independent.
+async fn drain_metrics(conn: &crate::transport::Connection, data: &std::path::Path, client: &str) {
+    let dir = data.join("metrics-outbox").join(client);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.take(1000).flatten() {
+        let path = e.path();
+        if e.metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .is_some_and(|t| {
+                t.elapsed()
+                    .is_ok_and(|a| a > Duration::from_secs(7 * 86400))
+            })
+        {
+            let _ = tokio::fs::remove_file(path).await;
+            continue;
+        }
+        let send_report = async {
+            let args: Value = serde_json::from_slice(&tokio::fs::read(&path).await?)?;
+            let (send, recv) = conn.open_bi().await?;
+            let mut streams = SyncStreams { send, recv };
+            streams.send.set_priority(-1)?;
+            wire::send(
+                &mut streams.send,
+                &Task {
+                    job_id: id(),
+                    request: Request {
+                        kind: "performance.report".into(),
+                        workspace: PathBuf::new(),
+                        args,
+                    },
+                    project: Project::default(),
+                    manifest: None,
+                },
+            )
+            .await?;
+            streams.send.finish()?;
+            let reply: Reply = wire::recv(&mut streams.recv).await?;
+            anyhow::ensure!(
+                matches!(reply,Reply::Status {value} if value["recorded"]==true),
+                "performance report not acknowledged"
+            );
+            Ok::<_, anyhow::Error>(())
+        };
+        if tokio::time::timeout(Duration::from_secs(2), send_report)
+            .await
+            .is_ok_and(|r| r.is_ok())
+        {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+}
 async fn send_files(
     task: &Task,
     conn: &crate::transport::Connection,
     paths: &[String],
     send: &mut crate::transport::SendStream,
 ) -> Result<()> {
+    let _phase = crate::metrics::phase("send_payload");
     let manifest = task
         .manifest
         .as_ref()
@@ -713,11 +817,19 @@ async fn send_files(
             tokio::fs::File::open(task.request.workspace.join(sync::relative(path)?)).await?;
         let copied = if task.request.args["stream_sync"] == true {
             wire::send(send, &header).await?;
-            tokio::io::copy(&mut file.take(*size), send).await?
+            tokio::io::copy(
+                &mut file.take(*size),
+                &mut crate::metrics::Metered::new(&mut *send, "payload"),
+            )
+            .await?
         } else {
             let mut stream = conn.open_uni().await?;
             wire::send(&mut stream, &header).await?;
-            let copied = tokio::io::copy(&mut file.take(*size), &mut stream).await?;
+            let copied = tokio::io::copy(
+                &mut file.take(*size),
+                &mut crate::metrics::Metered::new(&mut stream, "payload"),
+            )
+            .await?;
             stream.finish()?;
             copied
         };
@@ -728,6 +840,7 @@ async fn send_files(
     confirm_files(task, send).await
 }
 async fn confirm_files(task: &Task, send: &mut crate::transport::SendStream) -> Result<()> {
+    let _phase = crate::metrics::phase("confirm_source");
     let manifest = task
         .manifest
         .as_ref()

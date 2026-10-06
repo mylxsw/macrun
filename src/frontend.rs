@@ -78,7 +78,7 @@ pub fn tools() -> Vec<Value> {
         tool(
             "exec_start",
             "Start a worker-owned shell command. Optional wait_ms (up to 1000) returns a completed result when ready. Save task_id; poll task_get. Reuse the same UUID request_id after uncertain delivery, never a new ID. No implicit synchronization.",
-            json!({"command":string,"cwd":string,"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string,"snapshot":{"type":"boolean"}}),
+            json!({"command":string,"cwd":string,"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string,"snapshot":{"type":"boolean"},"outputs":{"type":"array","items":{"type":"string"},"maxItems":32}}),
             &["command", "cwd", "request_id"],
         ),
         tool(

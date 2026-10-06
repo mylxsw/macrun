@@ -137,9 +137,18 @@ fn summary(task: &Value) -> Value {
         "approval_deadline",
         "desktop_tier",
         "approved_by_rule",
+        "metrics_version",
     ] {
         if let Some(value) = task.get(field) {
             row[field] = value.clone();
+        }
+    }
+    for field in ["metrics", "server_metrics"] {
+        if let Some(value) = task.get(field) {
+            let mut summary = value.clone();
+            summary["samples"] = json!([]);
+            summary["outputs"] = json!([]);
+            row[field] = crate::metrics::for_web(summary);
         }
     }
     if !row["arguments"].is_object() {

@@ -39,6 +39,7 @@ pub fn relative(path: &str) -> Outcome<PathBuf> {
     Ok(p.into())
 }
 pub fn hash(path: &Path) -> Outcome<String> {
+    let _phase = crate::metrics::phase("hash");
     let mut r = fs::File::open(path).map_err(err)?;
     let mut h = blake3::Hasher::new();
     let mut b = [0; 65536];
@@ -48,6 +49,7 @@ pub fn hash(path: &Path) -> Outcome<String> {
             break;
         }
         h.update(&b[..n]);
+        crate::metrics::add("bytes", "hashed", n as u64);
     }
     Ok(h.finalize().to_hex().to_string())
 }
@@ -89,8 +91,10 @@ pub fn cached_hash(path: &Path, strict: bool) -> Outcome<String> {
         && old == &key
         && sampled.elapsed() < std::time::Duration::from_secs(600)
     {
+        crate::metrics::add("files", "hash_cache_hits", 1);
         return Ok(hash.clone());
     }
+    crate::metrics::add("files", "hash_cache_misses", 1);
     let value = hash(path)?;
     if Fingerprint::from(&fs::metadata(path).map_err(err)?) != key {
         return Err(Fault::new("source_changed", path.display()));
@@ -106,6 +110,9 @@ pub fn scan(root: &Path, excludes: &[String]) -> Outcome<Manifest> {
     scan_with(root, excludes, true)
 }
 pub fn scan_with(root: &Path, excludes: &[String], strict: bool) -> Outcome<Manifest> {
+    let _phase = crate::metrics::phase("scan");
+    crate::metrics::add("files", "scanned", 0);
+    crate::metrics::add("bytes", "scanned_logical", 0);
     let root = fs::canonicalize(root).map_err(err)?;
     let mut patterns = globset::GlobSetBuilder::new();
     for p in excludes {
@@ -145,6 +152,7 @@ pub fn scan_with(root: &Path, excludes: &[String], strict: bool) -> Outcome<Mani
         }
         let meta = fs::symlink_metadata(path).map_err(err)?;
         let entry = if meta.is_dir() {
+            crate::metrics::add("files", "scanned_dirs", 1);
             Entry::Directory
         } else if meta.file_type().is_symlink() {
             let resolved = match fs::canonicalize(path) {
@@ -155,6 +163,7 @@ pub fn scan_with(root: &Path, excludes: &[String], strict: bool) -> Outcome<Mani
                 }
             };
             if !resolved.starts_with(&root) {
+                crate::metrics::add("files", "skipped_links", 1);
                 out.skipped.push(rel);
                 continue;
             }
@@ -168,6 +177,8 @@ pub fn scan_with(root: &Path, excludes: &[String], strict: bool) -> Outcome<Mani
                 target: target.to_str().ok_or_else(|| err("non-UTF8 link"))?.into(),
             }
         } else if meta.is_file() {
+            crate::metrics::add("files", "scanned", 1);
+            crate::metrics::add("bytes", "scanned_logical", meta.len());
             let h = cached_hash(path, strict)?;
             let after = fs::metadata(path).map_err(err)?;
             if meta.len() != after.len() || meta.modified().ok() != after.modified().ok() {
@@ -253,8 +264,12 @@ impl Receiver {
                             format!("preserving unmanaged content at {p}: {e}"),
                         )
                     })?;
+                    crate::metrics::add("files", "deleted", 1);
                 }
-                Ok(_) => fs::remove_file(dest).map_err(err)?,
+                Ok(_) => {
+                    fs::remove_file(dest).map_err(err)?;
+                    crate::metrics::add("files", "deleted", 1);
+                }
             }
         }
         let mut needed = vec![];
@@ -311,6 +326,7 @@ impl Receiver {
         })
     }
     pub fn install(&self, path: &str, temp: &Path) -> Outcome<()> {
+        let _phase = crate::metrics::phase("install");
         let Some(Entry::File {
             size,
             hash: expected,
@@ -331,9 +347,12 @@ impl Receiver {
         .map_err(err)?;
         // Temporary files live in the mirror directory so rename stays on one filesystem.
         fs::rename(temp, dest).map_err(err)?;
+        crate::metrics::add("files", "completed", 1);
+        crate::metrics::add("bytes", "confirmed_logical", *size);
         Ok(())
     }
     pub fn commit(&self, confirmed: &Manifest) -> Outcome<()> {
+        let _phase = crate::metrics::phase("commit");
         if confirmed != &self.manifest {
             return Err(Fault::new(
                 "source_changed",

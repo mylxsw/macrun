@@ -192,7 +192,8 @@ if (query.get("scenario") === "v4") {
       result: undefined,
       command: `swift build 2>&1 | grep -E "error:|Build complete"; swift build --build-tests 2>&1 | grep -E "error:|Build complete"; swift test --skip-build > /tmp/gul207-final.log 2>&1; echo TEST_EXIT $?; grep -E "Executed [0-9]+ tests" /tmp/gul207-final.log | tail -1`,
       cwd: gul207,
-      output_tail: "Compiling TypeFlux\nBuild complete! (70.48 secs)\nBuild complete! (35.54 secs)\n",
+      output_tail:
+        "Compiling TypeFlux\nBuild complete! (70.48 secs)\nBuild complete! (35.54 secs)\n",
     }),
     t("2", 9 * min, 1000, {
       kind: "sync",
@@ -256,7 +257,9 @@ if (query.get("scenario") === "v4") {
       t(`a${i}`, 115 * min - i * min, 20_000, {
         command: i === 4 ? "go test ./... 2>&1 | tail -20" : "make lint",
         cwd: "/tmp/typeflux-gul206/typeflux-api",
-        ...(i === 2 ? { status: "failed" as const, result: { exit_code: 2 } } : {}),
+        ...(i === 2
+          ? { status: "failed" as const, result: { exit_code: 2 } }
+          : {}),
       }),
     ),
     ...Array.from({ length: 9 }, (_, i) =>
@@ -289,8 +292,18 @@ if (query.get("scenario") === "v4") {
     }),
   );
   snapshot.workspaces = [
-    { root: gul207, time: now - 9 * min, status: "succeeded", connection_id: "primary" },
-    { root: gul210, time: now - 20 * min, status: "succeeded", connection_id: "primary" },
+    {
+      root: gul207,
+      time: now - 9 * min,
+      status: "succeeded",
+      connection_id: "primary",
+    },
+    {
+      root: gul210,
+      time: now - 20 * min,
+      status: "succeeded",
+      connection_id: "primary",
+    },
     {
       root: "/Users/me/Workspace/codes/gul-199-ios-v4",
       time: now - 26 * 60 * min,
@@ -306,7 +319,13 @@ if (query.get("scenario") === "v4") {
       session: "fixture-session",
       command: "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
       tool_count: 34,
-      tiers: { get_window_state: "observe", screenshot: "observe", click: "control", type_text: "control", kill_app: "high" },
+      tiers: {
+        get_window_state: "observe",
+        screenshot: "observe",
+        click: "control",
+        type_text: "control",
+        kill_app: "high",
+      },
     },
   ];
   snapshot.policy.desktop_enabled = true;
@@ -330,8 +349,27 @@ if (query.get("scenario") === "v4") {
     },
   ];
   snapshot.connections = [
-    { id: "primary", name: "203.0.113.10:7443", connection: { ...snapshot.connection, since: now - 16 * min, rtt_ms: 232 }, policy: snapshot.policy },
-    { id: "dev-box", name: "dev-box", connection: { state: "connected", server: "198.51.100.7:7443", since: now - 130 * min, rtt_ms: 41 }, policy: snapshot.policy },
+    {
+      id: "primary",
+      name: "203.0.113.10:7443",
+      connection: {
+        ...snapshot.connection,
+        since: now - 16 * min,
+        rtt_ms: 232,
+      },
+      policy: snapshot.policy,
+    },
+    {
+      id: "dev-box",
+      name: "dev-box",
+      connection: {
+        state: "connected",
+        server: "198.51.100.7:7443",
+        since: now - 130 * min,
+        rtt_ms: 41,
+      },
+      policy: snapshot.policy,
+    },
   ];
   snapshot.connection = snapshot.connections[0].connection;
 }
@@ -503,8 +541,14 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       note: "模拟迁移完成；路径仅用于界面展示，不会创建文件。",
     };
   }
-  if (command === "cua_status") return { state: "ready", version: "Cua Driver · UI fixture", configured: true };
-  if (command === "grant_cua_permissions") return "fixture permission verification";
+  if (command === "cua_status")
+    return {
+      state: "ready",
+      version: "Cua Driver · UI fixture",
+      configured: true,
+    };
+  if (command === "grant_cua_permissions")
+    return "fixture permission verification";
   if (command === "pair") {
     if (
       failure === "pair" ||
@@ -560,6 +604,97 @@ async function invoke(command: string, args: Record<string, any> = {}) {
   }
   if (command === "control") {
     const payload = args.args || {};
+    if (args.action.startsWith("metrics_")) {
+      const metrics = (task: Task, index: number) => ({
+        schema_version: 1,
+        origin: "worker",
+        wall_ms: 200 + index * 31,
+        complete: !isActive(task),
+        phases: [
+          {
+            name: task.kind === "sync" ? "receive_install" : "process_run",
+            wall_ms: 120 + index * 20,
+            count: 1,
+            max_ms: 120 + index * 20,
+          },
+          { name: "hash", wall_ms: 20, count: 3, max_ms: 10 },
+        ],
+        bytes: {
+          payload: task.kind === "sync" ? 1048576 + index * 4096 : 0,
+          declared_outputs: 1000000,
+          artifacts: 4096,
+          stored_log: 320,
+        },
+        files: { changed: 42, completed: 42 },
+        outputs: [
+          { name: "build/MyApp.zip", bytes: 1000000, status: "complete" },
+        ],
+        samples: [
+          { offset_ms: 10, payload_bytes: 0 },
+          { offset_ms: 1010, payload_bytes: 500000 },
+          { offset_ms: 2010, payload_bytes: 1000000 },
+        ],
+        project_id: "fixture-project",
+        project_name: "Macrun 测试项目",
+        first_payload_offset_ms: 10,
+        last_payload_offset_ms: 2010,
+        transport: "quic",
+        rtt_ms: 12,
+      });
+      const rows = history
+        .filter(
+          (t) =>
+            (!payload.kind || payload.kind === t.kind) &&
+            (!payload.status || payload.status === t.status),
+        )
+        .map((t, i) => ({
+          ...t,
+          connection_id: "primary",
+          connection_name: "测试服务器",
+          metrics: metrics(t, i),
+        }));
+      if (args.action === "metrics_detail")
+        return rows.find((t) => t.task_id === payload.task_id);
+      const counts: Record<string, number> = {};
+      rows.forEach((t) => (counts[t.status] = (counts[t.status] || 0) + 1));
+      const filtered = rows
+        .filter(
+          (t) => !payload.cursor || t.started_at < payload.cursor.started_at,
+        )
+        .slice(0, (payload.limit || 50) + 1);
+      const more = filtered.length > (payload.limit || 50);
+      filtered.splice(payload.limit || 50);
+      const last = filtered.at(-1);
+      return {
+        as_of: Date.now(),
+        total: rows.length,
+        measured: rows.length,
+        counts,
+        success_denominator:
+          rows.length - (counts.cancelled || 0) - (counts.denied || 0),
+        latency: { n: rows.length, p50_ms: 300, p95_ms: 1800, p99_ms: 2200 },
+        bytes: { payload: 23000000, artifacts: 4096 },
+        phases_ms: {},
+        operations: filtered,
+        next_cursor:
+          more && last
+            ? {
+                started_at: last.started_at,
+                task_id: last.task_id,
+                connection_id: "primary",
+              }
+            : null,
+        series: Array.from({ length: 24 }, (_, i) => ({
+          time: Date.now() - i * 3600000,
+          count: i,
+          p50_ms: 200 + i * 5,
+          p95_ms: i % 7 === 0 ? null : 500 + i * 17,
+          payload_bytes: i * 15000,
+        })),
+        projects: { "fixture-project": "Macrun 测试项目 · 测试服务器" },
+        errors: [],
+      };
+    }
     if (args.action === "task_list") {
       const text = String(payload.query || "")
         .trim()
@@ -680,7 +815,11 @@ async function invoke(command: string, args: Record<string, any> = {}) {
     } else if (["cancel", "approve"].includes(args.action)) {
       const task = history.find((task) => task.task_id === payload.task_id);
       if (!task) throw new Error("测试任务不存在");
-      if (args.action === "approve" && payload.allow && payload.scope !== "once")
+      if (
+        args.action === "approve" &&
+        payload.allow &&
+        payload.scope !== "once"
+      )
         snapshot.allow_rules = [
           ...(snapshot.allow_rules || []),
           {

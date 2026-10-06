@@ -289,6 +289,7 @@ Desktop client planning and interactive prototype (not shipped): [design documen
 | --- | --- |
 | An agent to install and configure Macrun | [Agent installation guide](docs/agent-install.md) |
 | Background services, logs, restarts, troubleshooting and upgrades | [Operations](docs/operations.md) |
+| Local performance history, output sizes and metrics export | [Performance metrics (Chinese)](docs/performance-metrics.md) |
 | Guidance for an agent using the tools | [Macrun Skill](skills/macrun/SKILL.md) |
 | Implementation details | [Design notes (Chinese)](docs/design.md) |
 | What has actually been tested | [Validation record](docs/validation.md) |

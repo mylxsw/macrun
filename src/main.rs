@@ -89,6 +89,9 @@ enum Cmd {
         generation: Option<String>,
         #[arg(long)]
         snapshot: bool,
+        /// Measure these relative files/directories after execution (repeatable).
+        #[arg(long = "output")]
+        outputs: Vec<String>,
         #[arg(long, default_value_t = 0)]
         wait_ms: u64,
         #[arg(long)]
@@ -218,13 +221,14 @@ async fn entry() -> anyhow::Result<()> {
             workspace_root,
             generation,
             snapshot,
+            outputs,
             wait_ms,
             request_id,
             timeout,
             command,
         } => (
             "exec.start".into(),
-            json!({"cwd":cwd,"workspace_root":workspace_root,"generation":generation,"snapshot":snapshot,"wait_ms":wait_ms,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
+            json!({"cwd":cwd,"workspace_root":workspace_root,"generation":generation,"snapshot":snapshot,"outputs":outputs,"wait_ms":wait_ms,"command":command,"timeout_seconds":timeout,"request_id":request_id.unwrap_or_else(id)}),
         ),
         Cmd::Task { task_id, offset } => (
             "task.get".into(),

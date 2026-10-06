@@ -252,7 +252,7 @@ async fn session(conn: crate::transport::Connection, state: &Session) -> Result<
     } = state;
     let (mut out, mut input) = conn.open_bi().await?;
     out.set_priority(10)?;
-    let status = json!({"ready":true,"transport":conn.name(),"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1", "sync_delta_pack_v1","binary_transfer_v1","artifact_refs_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
+    let status = json!({"ready":true,"transport":conn.name(),"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1", "sync_delta_pack_v1","binary_transfer_v1","artifact_refs_v1","performance_metrics_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
     wire::send(
         &mut out,
         &Control::Hello {
@@ -329,12 +329,14 @@ async fn handle(
     let mut log = crate::logging::Operation::new("worker", &task.request.kind, &task.job_id);
     log.context(&task.request.args);
     if crate::transfer::supported(&task.request.kind) {
-        let transfer = crate::transfer::serve(
+        let transfer = crate::transfer::serve_observed(
             &task.request.kind,
             &task.request.args,
             &mut input,
             &mut out,
             &engine,
+            Some(conn.name()),
+            conn.rtt(),
         )
         .await;
         match transfer {
@@ -367,31 +369,65 @@ async fn handle(
         out.finish()?;
         return Ok(());
     }
-    if task.request.args["stream_sync"] == true {
-        let root = task.project.root();
-        let state = opts
-            .data
-            .join("mirrors")
-            .join(
-                blake3::hash(root.to_string_lossy().as_bytes())
-                    .to_hex()
-                    .as_str(),
+    let capture = engine.metrics_capture(&json!({"remote_root":task.project.remote_root}));
+    capture.update(|m| {
+        m.remote_job_id = Some(task.job_id.clone());
+        m.transport = Some(conn.name().into());
+        m.rtt_ms = conn.rtt().map(|r| r.as_secs_f64() * 1000.0);
+        m.strict = Some(task.request.args["strict"] == true);
+        m.optimized_sync = Some(task.request.args["optimized_sync"] == true);
+    });
+    let negotiation = capture
+        .scope(async {
+            let _phase = crate::metrics::phase("manifest_receive");
+            if task.request.args["stream_sync"] == true {
+                let root = task.project.root();
+                let state = opts
+                    .data
+                    .join("mirrors")
+                    .join(
+                        blake3::hash(root.to_string_lossy().as_bytes())
+                            .to_hex()
+                            .as_str(),
+                    )
+                    .join("manifest.json");
+                let cached = crate::wire::blocking(move || sync::read_manifest(&state)).await?;
+                let matched = cached.as_ref().ok().is_some_and(|m| {
+                    sync::digest(m).ok().as_deref() == task.request.args["manifest_digest"].as_str()
+                });
+                crate::metrics::set("files", "manifest_match", u64::from(matched));
+                wire::send(&mut out, &Event::ManifestMatch { matched }).await?;
+                task.manifest = Some(if matched {
+                    cached?
+                } else {
+                    tokio::time::timeout(
+                        Duration::from_secs(task.project.sync_timeout_seconds),
+                        sync::recv_manifest(&mut input),
+                    )
+                    .await??
+                });
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await;
+    if let Err(error) = negotiation {
+        if let Ok((ident, _)) = engine
+            .begin_external(
+                "sync",
+                json!({"remote_root":task.project.remote_root,"job_id":task.job_id}),
             )
-            .join("manifest.json");
-        let cached = crate::wire::blocking(move || sync::read_manifest(&state)).await?;
-        let matched = cached.as_ref().ok().is_some_and(|m| {
-            sync::digest(m).ok().as_deref() == task.request.args["manifest_digest"].as_str()
-        });
-        wire::send(&mut out, &Event::ManifestMatch { matched }).await?;
-        task.manifest = Some(if matched {
-            cached?
-        } else {
-            tokio::time::timeout(
-                Duration::from_secs(task.project.sync_timeout_seconds),
-                sync::recv_manifest(&mut input),
-            )
-            .await??
-        });
+            .await
+        {
+            let _ = engine
+                .finish_external_metrics(
+                    &ident,
+                    Some(error.to_string()),
+                    Some("sync_failed"),
+                    Some(capture.snapshot(true)),
+                )
+                .await;
+        }
+        return Err(error);
     }
     let legacy_guard = if task.request.args["stream_sync"] == true {
         Ok(None)
@@ -429,23 +465,30 @@ async fn handle(
         }
     };
     let (tx, mut rx) = mpsc::channel(64);
+    let writing = capture.clone();
     let writer = tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            if wire::send(&mut out, &event).await.is_err() {
-                break;
-            }
-        }
-        let _ = out.finish();
+        writing
+            .scope(async move {
+                while let Some(event) = rx.recv().await {
+                    if wire::send(&mut out, &event).await.is_err() {
+                        break;
+                    }
+                }
+                let _ = out.finish();
+            })
+            .await
     });
-    let r = receive_sync(
-        &task, &mut input, &conn, &opts, &cancel, &tx, &engine, &ident,
-    )
-    .await;
+    let r = capture
+        .scope(receive_sync(
+            &task, &mut input, &conn, &opts, &cancel, &tx, &engine, &ident,
+        ))
+        .await;
     engine
-        .finish_external(
+        .finish_external_metrics(
             &ident,
             r.as_ref().err().map(ToString::to_string),
             r.as_ref().err().map(|e| e.code.as_str()),
+            Some(capture.snapshot(true)),
         )
         .await?;
     log.status(if r.is_ok() { "succeeded" } else { "failed" });
@@ -485,12 +528,25 @@ async fn receive_sync(
             let before = std::time::Instant::now();
             let receiver = Arc::new(
                 crate::wire::blocking(move || {
+                    let _phase = crate::metrics::phase("prepare");
                     let _guard = guard;
                     sync::Receiver::prepare_with(&r, &st, manifest, strict)
                 })
                 .await
                 .map_err(sync_error)??,
             );
+            crate::metrics::set("files", "changed", receiver.needed.len() as u64);
+            crate::metrics::set("bytes", "payload", 0);
+            crate::metrics::set("files", "noop", u64::from(receiver.needed.is_empty()));
+            let logical = receiver
+                .needed
+                .iter()
+                .filter_map(|p| match receiver.manifest.entries.get(p) {
+                    Some(crate::sync::Entry::File { size, .. }) => Some(*size),
+                    _ => None,
+                })
+                .fold(0u64, u64::saturating_add);
+            crate::metrics::set("bytes", "changed_logical", logical);
             let prepare_ms = before.elapsed().as_millis();
             let mut bytes = 0;
             let mut files = 0;
@@ -500,6 +556,7 @@ async fn receive_sync(
                 let r = receiver.clone();
                 let guard = lease.clone();
                 let offers = crate::wire::blocking(move || {
+                    let _phase = crate::metrics::phase("delta_signatures");
                     let _guard = guard;
                     crate::sync_transfer::offers(&r)
                 })
@@ -509,10 +566,12 @@ async fn receive_sync(
                 crate::sync_transfer::send_offers(tx, &offers)
                     .await
                     .map_err(sync_error)?;
+                let transfer = crate::metrics::phase("receive_install");
                 let stats =
                     crate::sync_transfer::receive(input, receiver.clone(), &offers, lease.clone())
                         .await
                         .map_err(sync_error)?;
+                drop(transfer);
                 bytes = stats.bytes;
                 files = stats.files;
                 reused_bytes = stats.reused_bytes;
@@ -581,7 +640,7 @@ async fn receive_sync(
                     let mut f = tokio::fs::File::create(&temp).await.map_err(sync_error)?;
                     let copied = tokio::io::copy(
                         &mut tokio::io::AsyncReadExt::take(
-                            stream,
+                            crate::metrics::Metered::new(stream, "payload"),
                             if streamed { *size } else { size + 1 },
                         ),
                         &mut f,

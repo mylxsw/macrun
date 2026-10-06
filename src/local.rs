@@ -306,6 +306,21 @@ async fn dispatch(
     if action == "task_list" {
         return task_page(connections, args).await;
     }
+    if action.starts_with("metrics_") {
+        return crate::metrics::query(
+            connections
+                .iter()
+                .map(|c| crate::metrics::Profile {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    data: c.engine.metrics_data(),
+                })
+                .collect(),
+            action,
+            args,
+        )
+        .await;
+    }
     let mut selected = args
         .as_object_mut()
         .and_then(|v| v.remove("connection_id"))

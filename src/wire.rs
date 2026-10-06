@@ -5,6 +5,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 pub async fn send<W: AsyncWrite + Unpin, T: Serialize>(w: &mut W, v: &T) -> Result<()> {
+    let mut measured = crate::metrics::Metered::new(w, "control_tx");
+    let w = &mut measured;
     let bytes = serde_json::to_vec(v)?;
     if bytes.len() > MAX_FRAME {
         bail!("message exceeds frame limit");
@@ -15,6 +17,8 @@ pub async fn send<W: AsyncWrite + Unpin, T: Serialize>(w: &mut W, v: &T) -> Resu
     Ok(())
 }
 pub async fn recv<R: AsyncRead + Unpin, T: DeserializeOwned>(r: &mut R) -> Result<T> {
+    let mut measured = crate::metrics::Metered::new(r, "control_rx");
+    let r = &mut measured;
     let n = r.read_u32().await? as usize;
     if n > MAX_FRAME {
         bail!("message exceeds frame limit");
@@ -90,7 +94,9 @@ pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     private_write(&temp, &serde_json::to_vec_pretty(value)?)?;
     std::fs::rename(temp, path)?;
     if path.file_name().is_some_and(|n| n == "result.json") {
-        crate::history::record_written(path, &serde_json::to_value(value)?);
+        let record = serde_json::to_value(value)?;
+        crate::history::record_written(path, &record);
+        crate::metrics::record_written(path, &record);
     }
     Ok(())
 }
@@ -150,6 +156,7 @@ where
     T: Send + 'static,
 {
     static SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
+    let capture = crate::metrics::current();
     let permit = SLOTS
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(8)))
         .clone()
@@ -157,7 +164,11 @@ where
         .await?;
     Ok(tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        work()
+        if let Some(capture) = capture {
+            capture.sync_scope(work)
+        } else {
+            work()
+        }
     })
     .await?)
 }

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Real CLI/MCP -> Unix socket -> QUIC -> generic worker; no GUI required."""
 import base64,json,os,pathlib,socket,subprocess,sys,tempfile,time,uuid
+import sqlite3,struct
 binary=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
 fixture=pathlib.Path('tests/fixtures/mcp.py').resolve()
 root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-generic-'))
 source=root/'source';source.mkdir();mirror=root/'mirror';server=root/'server';worker=root/'worker'
 sock=str(root/'cli.sock')
+control_sock=str(root/'control.sock')
 with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
 (source/'macrun.toml').write_text(f'remote_root = {json.dumps(str(mirror))}\nexclude = ["ignored"]\n')
 (source/'hello.txt').write_text('first');(source/'ignored').write_text('skip')
@@ -36,6 +38,15 @@ def done(task):
   time.sleep(.05)
  raise AssertionError(('task did not finish',task))
 def submit(command,**extra):return call('exec.start',command=command,cwd=str(mirror),request_id=str(uuid.uuid4()),**extra)['task_id']
+def control(action,**args):
+ with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as s:
+  s.settimeout(10);s.connect(control_sock);body=json.dumps(dict(action=action,args=args)).encode();s.sendall(struct.pack('>I',len(body))+body)
+  def exact(n):
+   chunks=b''
+   while len(chunks)<n:
+    part=s.recv(n-len(chunks));assert part,'control socket truncated';chunks+=part
+   return chunks
+  result=json.loads(exact(struct.unpack('>I',exact(4))[0]));assert not isinstance(result.get('error'),str),result;return result
 try:
  cli('init','--data',str(server))
  srvargs=['--socket',sock,'serve','--listen',f'127.0.0.1:{port}','--data',str(server)]
@@ -47,7 +58,7 @@ try:
   if pathlib.Path(sock).exists():break
   time.sleep(.05)
  assert 'worker_offline' in cli('exec','--cwd','/tmp','true',ok=False)
- wrkargs=['worker','--server',(f'{transport}://' if transport!='quic' else '')+f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config)]
+ wrkargs=['worker','--server',(f'{transport}://' if transport!='quic' else '')+f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config),'--control-socket',control_sock]
  wrk=spawn(wrkargs);ready()
  assert call('status')['worker']['transport']==('quic' if transport=='quic' else 'tcp_tls')
  # Malformed IDs must return an actionable error without killing the CLI connection.
@@ -71,6 +82,17 @@ try:
  assert (root/'download').read_bytes()==blob
  cli('download','--resume',str(mirror/'binary'),str(root/'resumed'))
  assert (root/'resumed').read_bytes()==blob and not (root/'resumed.macrun-download').exists()
+ produced=done(submit('printf generated-file > build-output',outputs=['build-output']))
+ assert produced['metrics']['bytes']['declared_outputs']==len(b'generated-file')
+ dashboard=control('metrics_dashboard');assert dashboard['measured']>0 and dashboard['bytes']['payload']>=len(blob)*2
+ # Report sender is independent of heartbeat and acknowledges after terminal persistence.
+ for _ in range(100):
+  sync_records=[json.loads(p.read_text()) for p in worker.glob('tasks/*/result.json') if json.loads(p.read_text()).get('kind')=='sync']
+  if any(r.get('server_metrics') for r in sync_records):break
+  time.sleep(.1)
+ else:raise AssertionError('server performance report was not merged on worker')
+ assert any(r['metrics'].get('transport')==('quic' if transport=='quic' else 'tcp_tls') for r in sync_records)
+ print('PASS: worker metrics, declared output sizes, actual transfer bytes, and server report merge')
  call('file.write',path=str(mirror/'text'),text='abcdef')
  assert call('file.read',path=str(mirror/'text'),offset=2,length=3,text=True)['text']=='cde'
  assert any(x['name']=='binary' for x in call('file.list',path=str(mirror))['entries'])
@@ -128,6 +150,13 @@ try:
   time.sleep(.1)
  else:raise AssertionError('restart did not mark unknown')
  assert not (mirror/'restart-count').exists()
+ wrk.terminate();wrk.wait(timeout=10)
+ # Desktop queries this same local index while the worker is stopped.
+ with sqlite3.connect(f'file:{worker / "metrics.sqlite"}?mode=ro',uri=True) as db:
+  rows=db.execute('SELECT summary FROM operations').fetchall()
+ assert rows and any(json.loads(r[0]).get('metrics') for r in rows)
+ assert not any('中文测试' in r[0] or 'should-not-run' in r[0] for r in rows)
+ print('PASS: persisted offline SQLite history survives worker restart and shutdown')
  # Operational logs are JSON lines; request payloads never appear in them.
  # A live writer (or the deliberately SIGKILLed server) can leave a partial
  # trailing record. Validate every complete JSON line, not an in-flight suffix.

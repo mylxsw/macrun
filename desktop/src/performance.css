@@ -1,0 +1,138 @@
+.performance-page {
+  padding-bottom: 24px;
+}
+.perf-muted {
+  color: var(--muted, #858585);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.perf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 20px 0;
+}
+.perf-filters label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.perf-filters select {
+  max-width: 180px;
+  padding: 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid #9995;
+}
+.perf-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.perf-cards article {
+  border: 1px solid #9994;
+  border-radius: 9px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+.perf-cards span,
+.perf-cards small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.perf-cards b {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.perf-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.perf-trend {
+  margin: 16px 0;
+  border: 1px solid #9994;
+  border-radius: 8px;
+  padding: 12px;
+}
+.perf-trend figcaption {
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.perf-trend svg {
+  width: 100%;
+  height: 90px;
+  color: #6295cc;
+}
+.perf-table {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+.perf-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  min-width: 740px;
+}
+.perf-table button { white-space: nowrap; }
+.performance-page .page-header { flex-wrap: wrap; }
+.perf-table th,
+.perf-table td {
+  padding: 9px 6px;
+  text-align: left;
+  border-bottom: 1px solid #9993;
+}
+.perf-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  font-size: 12px;
+}
+.perf-selection {
+  margin-top: 24px;
+  border-top: 1px solid #9994;
+  padding-top: 20px;
+}
+.performance-detail h4 {
+  margin: 20px 0 12px;
+}
+.perf-phase {
+  display: grid;
+  grid-template-columns: 120px 1fr 85px 50px;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.perf-phase meter {
+  width: 100%;
+}
+.perf-phase b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.perf-facts {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+  font-size: 12px;
+  margin-top: 20px;
+}
+.perf-facts dd {
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .perf-cards,
+  .perf-charts {
+    grid-template-columns: 1fr;
+  }
+  .perf-phase {
+    grid-template-columns: 100px 1fr 75px;
+  }
+  .perf-phase small {
+    display: none;
+  }
+}
