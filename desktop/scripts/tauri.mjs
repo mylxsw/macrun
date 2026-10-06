@@ -1,11 +1,14 @@
 import { spawnSync, execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { workerTarget } from "./worker-build.mjs";
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const target = workerTarget(process.argv.slice(2));
 execFileSync(
   process.execPath,
   [
     "scripts/prepare-worker.mjs",
+    ...(target ? ["--target", target] : []),
     ...(process.argv[2] === "build" && !process.argv.includes("--debug")
       ? ["--release"]
       : []),
