@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -85,7 +86,7 @@ elif name == "ditto":
             [
                 "bash",
                 str(self.root / "scripts/release/macos.sh"),
-                "0.2.0",
+                tomllib.loads((self.root / "Cargo.toml").read_text())["package"]["version"],
                 "aarch64-apple-darwin",
             ],
             env={**self.env, **overrides},

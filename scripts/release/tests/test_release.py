@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -17,7 +18,8 @@ spec = importlib.util.spec_from_file_location(
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 SHA = "a" * 40
-TAG = "v0.2.0"
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
+TAG = f"v{VERSION}"
 
 
 class ReleaseTests(unittest.TestCase):
@@ -40,7 +42,7 @@ class ReleaseTests(unittest.TestCase):
         }
 
     def test_version_validation(self):
-        self.assertEqual(release.version(TAG), "0.2.0")
+        self.assertEqual(release.version("v0.2.0"), "0.2.0")
         for bad in [
             "0.2.0",
             "v01.2.0",
@@ -54,7 +56,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_repository_versions_and_every_mismatch(self):
         self.assertEqual(
-            release.check_versions(TAG, lambda n: (ROOT / n).read_text()), "0.2.0"
+            release.check_versions(TAG, lambda n: (ROOT / n).read_text()), VERSION
         )
         names = [
             "Cargo.toml",
@@ -69,7 +71,7 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 release.check_versions(
                     TAG,
-                    lambda n: (ROOT / n).read_text().replace("0.2.0", "9.9.9")
+                    lambda n: (ROOT / n).read_text().replace(VERSION, "9.9.9")
                     if n == name
                     else (ROOT / n).read_text(),
                 )

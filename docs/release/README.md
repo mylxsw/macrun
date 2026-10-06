@@ -72,7 +72,7 @@ DMG 分发也不需要创建 App Store 商品页。
 
 ## 发布前版本准备
 
-目前版本统一为 `0.2.1`。发布新版本时先更新以下字段，并把修改合入 main：
+目前版本统一为 `0.2.2`。发布新版本时先更新以下字段，并把修改合入 main：
 
 - `Cargo.toml`、`desktop/src-tauri/Cargo.toml` 中本项目包版本。
 - `desktop/package.json`、`desktop/src-tauri/tauri.conf.json` 中版本。

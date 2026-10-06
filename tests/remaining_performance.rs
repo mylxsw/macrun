@@ -347,22 +347,24 @@ async fn interrupted_download_resumes_verified_prefix_before_atomic_publish() {
                 // A concurrent fork inherits open file descriptions until exec.
                 // Retain equivalent duplicates across the immediate retry, so
                 // releasing locks by descriptor close alone fails reliably.
-                let descriptors: Vec<_> =
-                    fs::read_dir("/proc/self/fd").unwrap().flatten().collect();
-                for entry in descriptors {
-                    let Ok(path) = fs::read_link(entry.path()) else {
-                        continue;
-                    };
-                    if path == output_for_server.with_extension("macrun-download-lock")
-                        || path == output_for_server.with_extension("macrun-download")
-                    {
-                        let fd = entry.file_name().to_str().unwrap().parse().unwrap();
-                        // SAFETY: the downloader owns both descriptors and is
-                        // awaiting this server's reply on this single-threaded
-                        // runtime, so neither descriptor can close here.
-                        let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
-                        inherited_locks.push(borrowed.try_clone_to_owned().unwrap());
-                    }
+                // Resolve every descriptor before duplicating any: a duplicate
+                // could reuse the descriptor of the now-closed directory scan.
+                let descriptors: Vec<i32> = fs::read_dir("/proc/self/fd")
+                    .unwrap()
+                    .flatten()
+                    .filter_map(|entry| {
+                        let path = fs::read_link(entry.path()).ok()?;
+                        (path == output_for_server.with_extension("macrun-download-lock")
+                            || path == output_for_server.with_extension("macrun-download"))
+                        .then(|| entry.file_name().to_str().unwrap().parse().unwrap())
+                    })
+                    .collect();
+                for fd in descriptors {
+                    // SAFETY: the downloader owns both descriptors and is
+                    // awaiting this server's reply on this single-threaded
+                    // runtime, so neither descriptor can close here.
+                    let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
+                    inherited_locks.push(borrowed.try_clone_to_owned().unwrap());
                 }
                 assert_eq!(inherited_locks.len(), 2);
             }
