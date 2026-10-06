@@ -3,7 +3,7 @@ use crate::{
     backend::Client,
     config::{WorkerConfig, expand},
     files::string,
-    model::{Event, id, now},
+    model::{Event, Fault, id, now},
     process, wire,
 };
 use anyhow::{Result, bail};
@@ -135,14 +135,15 @@ impl Engine {
                 v["error"] = json!({"code":"approval_interrupted","message":"Approval interrupted by restart; command was not dispatched."});
                 wire::atomic_json(&p, &v)?;
             }
+            let journal = dir.join("process.json");
+            if journal.exists() {
+                v["recovery"] = json!(process::recover(&journal).err());
+                wire::atomic_json(&p, &v)?;
+            }
             if ["accepted", "running"].contains(&v["status"].as_str().unwrap_or("")) {
                 v["status"] = json!("unknown");
                 v["ended_at"] = json!(now());
                 v["error"] = json!({"code":"worker_restarted","message":"Execution interrupted; effects may have occurred. Never automatically replay."});
-                let journal = dir.join("process.json");
-                if journal.exists() {
-                    v["recovery"] = json!(process::recover(&journal).err());
-                }
                 wire::atomic_json(&p, &v)?;
                 crate::logging::event(
                     "worker",
@@ -1282,7 +1283,8 @@ impl Engine {
             serde_json::from_value(a.get("env").cloned().unwrap_or(json!({})))?;
         let (tx, mut rx) = mpsc::channel(64);
         let p = dir.join("output.log");
-        let writer = tokio::spawn(async move {
+        let mut writer = tokio::task::JoinSet::new();
+        writer.spawn(async move {
             let mut f = tokio::fs::File::create(p).await?;
             while let Some(e) = rx.recv().await {
                 if let Event::Log { text, .. } = e {
@@ -1308,7 +1310,16 @@ impl Engine {
         drop(execution);
         drop(tx);
         let drain = crate::metrics::phase("log_drain");
-        writer.await??;
+        let written = tokio::time::timeout(Duration::from_secs(2), writer.join_next()).await;
+        writer.shutdown().await;
+        written
+            .map_err(|_| {
+                Fault::new(
+                    "recovery_required",
+                    "command log flush timed out; log may be incomplete",
+                )
+            })?
+            .ok_or_else(|| anyhow::anyhow!("command log writer missing"))???;
         drop(drain);
         if let Ok(meta) = tokio::fs::metadata(dir.join("output.log")).await {
             crate::metrics::set("bytes", "stored_log", meta.len());
