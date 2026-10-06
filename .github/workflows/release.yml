@@ -1,0 +1,188 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag on main (vX.Y.Z)
+        required: true
+        type: string
+      publish:
+        description: Publish after all checks (leave off for first installation acceptance)
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: resolve
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/release.py resolve --tag "$RELEASE_TAG"
+
+  linux:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Test and package on Debian 12
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          docker run --rm --platform "linux/$RELEASE_ARCH" -v "$PWD:/src" -w /src \
+            -e RELEASE_VERSION -e RELEASE_ARCH rust:1.98-bookworm bash -c '
+            set -euo pipefail
+            apt-get update
+            apt-get install -y --no-install-recommends python3 dpkg-dev
+            rustup component add rustfmt clippy
+            python3 -m unittest discover -s scripts/release/tests -v
+            make check
+            make smoke PROFILE=debug
+            for transport in tcp auto; do
+              MACRUN_TEST_TRANSPORT="$transport" python3 scripts/smoke.py target/debug/macrun
+            done
+            bash scripts/release/linux.sh "$RELEASE_VERSION" "$RELEASE_ARCH"
+          '
+      - name: Install, reinstall and remove on supported distributions
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: |
+          for image in debian:bookworm-slim ubuntu:24.04; do
+            docker run --rm --platform "linux/$RELEASE_ARCH" -v "$PWD:/src:ro" -w /src \
+              -e RELEASE_VERSION -e RELEASE_ARCH "$image" bash scripts/release/test-linux-install.sh
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test core and release scripts
+        run: |
+          python3 -m unittest discover -s scripts/release/tests -v
+          make check
+          make smoke PROFILE=debug
+      - name: Test desktop
+        run: |
+          cd desktop
+          npm ci --include=dev
+          npm test
+          npm run build
+          npm run prepare:worker
+          cd ..
+          cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
+          cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+          python3 scripts/desktop-smoke.py
+      - name: Sign, notarize and verify DMG
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: bash scripts/release/macos.sh "$RELEASE_VERSION" "$RELEASE_TARGET"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: notary-${{ matrix.target }}
+          path: dist/notary/*.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.target }}
+          path: dist/release/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, linux, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: dist/release
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: dist/release
+      - name: Verify, upload and optionally publish
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          MAKE_PUBLIC: ${{ inputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release/release.py collect --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+          args=()
+          if [ "$MAKE_PUBLIC" = true ]; then args+=(--public); fi
+          python3 scripts/release/release.py publish --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" "${args[@]}"

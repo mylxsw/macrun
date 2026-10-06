@@ -21,3 +21,7 @@
 /desktop/src-tauri/binaries/
 
 /desktop/src-tauri/gen/
+
+# Python release tooling
+__pycache__/
+.coverage

@@ -15,7 +15,15 @@ const compiled = ts.transpileModule(source, {
     module: ts.ModuleKind.CommonJS,
   },
 }).outputText;
-function load(search = "") {
+function load(search = "", now = Date.now()) {
+  class FixtureDate extends Date {
+    constructor(...args) {
+      super(...(args.length ? args : [now]));
+    }
+    static now() {
+      return now;
+    }
+  }
   const context = vm.createContext({
     exports: {},
     window: {},
@@ -27,6 +35,7 @@ function load(search = "") {
     queueMicrotask,
     TextEncoder,
     TextDecoder,
+    Date: FixtureDate,
   });
   new vm.Script(compiled).runInContext(context);
   return {
@@ -150,21 +159,33 @@ test("visual snapshot retains active tasks beyond its recent history window", ()
   assert.equal(fixture.app.snapshot.total_tasks, 1500);
 });
 
-test("visual v4 scenario separates non-zero exits from Macrun problems", async () => {
-  const fixture = load("?scenario=v4");
-  const summary = fixture.app.snapshot.today_summary;
-  assert.ok(summary.exited >= 2);
-  const attention = await control(fixture, "task_list", {
-    status: "attention",
-    limit: 100,
+for (const hour of [0, 12]) {
+  test(`visual v4 scenario separates exits and today's counts at hour ${hour}`, async () => {
+    const now = new Date(2026, 9, 6, hour, 30).getTime();
+    const fixture = load("?scenario=v4", now);
+    const summary = fixture.app.snapshot.today_summary;
+    const attention = await control(fixture, "task_list", {
+      status: "attention",
+      limit: 100,
+    });
+    assert.ok(
+      attention.tasks.every(
+        (task) => !(task.status === "failed" && task.result?.exit_code),
+      ),
+    );
+    const all = await control(fixture, "task_list", { limit: 100 });
+    const exits = all.tasks.filter(
+      (task) => task.status === "failed" && task.result?.exit_code,
+    );
+    assert.ok(exits.length >= 2);
+    assert.equal(all.counts.exited, exits.length);
+    // After midnight some fixture history belongs to yesterday, including exits.
+    const today = new Date(now).toDateString();
+    const todaysExits = exits.filter(
+      (task) => new Date(task.started_at).toDateString() === today,
+    );
+    assert.equal(summary.exited || 0, todaysExits.length);
+    assert.equal(fixture.app.settings.connections.length, 1);
+    assert.equal(fixture.app.snapshot.connections.length, 2);
   });
-  assert.ok(
-    attention.tasks.every(
-      (task) => !(task.status === "failed" && task.result?.exit_code),
-    ),
-  );
-  const all = await control(fixture, "task_list", { limit: 100 });
-  assert.equal(all.counts.exited, summary.exited);
-  assert.equal(fixture.app.settings.connections.length, 1);
-  assert.equal(fixture.app.snapshot.connections.length, 2);
-});
+}

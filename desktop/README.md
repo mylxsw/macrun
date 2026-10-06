@@ -2,6 +2,8 @@
 
 Tauri 2 + React + TypeScript，按 `docs/desktop/` v2 设计开发，托管现有 Rust worker。当前实现面向 macOS，Windows 仍是独立的平台适配任务。
 
+正式发布的 DMG、Apple 签名／公证和 Linux 安装包流程见[自动发布与首次配置](../docs/release/README.md)，包含维护者需要准备的六项 Secrets 及获取步骤。
+
 当前状态：v2 七个画板已完成一轮原生／浏览器还原检查，旧版配置迁移已实机执行。当前继续检查大量任务、操作反馈、桌面控制和权限；具体证据及未完成项目见 [界面与交互验收](../docs/desktop/quality-review.md)。不要把构建成功视为正式发布完成。
 
 ## 构建与开发
