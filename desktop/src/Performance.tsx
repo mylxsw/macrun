@@ -323,8 +323,8 @@ export function Performance({
     [message, setMessage] = useState("");
   const detailGeneration = useRef(0);
   const window = useMemo(() => {
-    const now = Date.now();
-    return { from_ms: now - Number(days) * 86400000, to_ms: now + 1 };
+    const to = Date.now() + 1;
+    return { from_ms: to - Number(days) * 86400000, to_ms: to };
   }, [days, refresh]);
   const filters = {
     ...window,

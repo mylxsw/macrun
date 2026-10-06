@@ -77,6 +77,18 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+test("90-day filter fits the native maximum half-open window exactly", async () => {
+  render(<Performance active app={null} />);
+  await screen.findByText(/1\/1 个任务有性能指标/);
+  fireEvent.change(screen.getByLabelText("时间"), { target: { value: "90" } });
+  await waitFor(() =>
+    expect(
+      bridge.invoke.mock.calls.at(-1)?.[1].args.to_ms -
+        bridge.invoke.mock.calls.at(-1)?.[1].args.from_ms,
+    ).toBe(90 * 86400000),
+  );
+});
+
 test("missing values, zero byte outputs and precise counter strings remain distinct", () => {
   expect(bytes(undefined)).toBe("未采集");
   expect(bytes(0)).toBe("0 B");
