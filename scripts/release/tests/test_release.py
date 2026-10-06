@@ -209,6 +209,7 @@ class ReleaseTests(unittest.TestCase):
             patch.object(release, "resolve", return_value=SHA),
             patch.object(release, "release_record", side_effect=records),
             patch.object(release, "run", side_effect=run),
+            patch.object(release.time, "sleep"),
         ):
             release.publish(self.directory, TAG, SHA, public)
         return calls
@@ -226,13 +227,36 @@ class ReleaseTests(unittest.TestCase):
         calls = self.publish_mock(False, [self.record(["SHA256SUMS"]), complete])
         self.assertFalse(any(c[2] in ["create", "edit"] for c in calls))
 
+    def test_publish_tolerates_stale_create_and_upload_reads(self):
+        self.collected()
+        complete = self.record(p.name for p in self.directory.iterdir())
+        calls = self.publish_mock(
+            True,
+            [None, None, self.record(), self.record(), self.record(["SHA256SUMS"]), complete, complete],
+        )
+        self.assertEqual(sum(c[:3] == ("gh", "release", "create") for c in calls), 1)
+        self.assertEqual(sum(c[:3] == ("gh", "release", "upload") for c in calls), 1)
+        self.assertEqual(calls[-1], ("gh", "release", "edit", TAG, "--draft=false"))
+
+    def test_refresh_never_retries_api_errors_or_unsafe_drafts(self):
+        for state in [subprocess.CalledProcessError(1, "gh"), {**self.record(), "draft": False}, self.record(["foreign.txt"])]:
+            with (
+                self.subTest(state=state),
+                patch.object(release, "release_record", side_effect=[state]) as lookup,
+                patch.object(release.time, "sleep") as sleep,
+                self.assertRaises((ValueError, subprocess.CalledProcessError)),
+            ):
+                release.refreshed_draft(TAG, SHA, set())
+            lookup.assert_called_once()
+            sleep.assert_not_called()
+
     def test_publish_refuses_bad_remote_states(self):
         self.collected()
         complete = self.record(p.name for p in self.directory.iterdir())
         cases = [
-            ([None, None], False),
+            ([None] * 6, False),
             ([self.record(["foreign.txt"])], False),
-            ([self.record(), self.record()], False),
+            ([self.record()] * 6, False),
             ([self.record(), complete], True),
         ]
         for records, corruption in cases:
