@@ -406,6 +406,21 @@ pub async fn download_resumable(
         .custom_flags(libc::O_NOFOLLOW)
         .open(lock_path)?;
     fs2::FileExt::try_lock_exclusive(&lock)?;
+    let result = download_resumable_locked(socket, workspace, remote, local, client).await;
+    // Closing our descriptor is insufficient when a concurrent fork temporarily
+    // inherits it. Release the completed transfer's lock before allowing a retry.
+    fs2::FileExt::unlock(&lock)?;
+    result
+}
+
+async fn download_resumable_locked(
+    socket: &Path,
+    workspace: &Path,
+    remote: &str,
+    local: &Path,
+    client: Option<&str>,
+) -> Result<Value> {
+    use std::os::unix::fs::OpenOptionsExt;
     let part = local.with_extension("macrun-download");
     let journal = local.with_extension("macrun-download-meta");
     let identity = json!({"socket":socket,"workspace":workspace,"remote":remote,"client":client});
@@ -424,48 +439,56 @@ pub async fn download_resumable(
         .custom_flags(libc::O_NOFOLLOW)
         .open(&part)?;
     fs2::FileExt::try_lock_exclusive(&file)?;
-    let offset = file.metadata()?.len();
-    let mut args = json!({"path":remote,"offset":offset});
-    if existing {
-        let record: Value = serde_json::from_slice(&tokio::fs::read(&journal).await?)?;
+    let result = async {
+        let offset = file.metadata()?.len();
+        let mut args = json!({"path":remote,"offset":offset});
+        if existing {
+            let record: Value = serde_json::from_slice(&tokio::fs::read(&journal).await?)?;
+            ensure!(
+                record["identity"] == identity,
+                "partial download belongs to another source"
+            );
+            args["version"] = record["version"].clone();
+        }
+        if !existing {
+            wire::persist(&journal, &json!({"identity":identity,"version":null})).await?;
+        }
+        let mut stream = connect(socket, workspace, "file.download", args, client).await?;
+        let ready = response(&mut stream).await?;
+        let bytes = ready["size"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("missing download size"))?;
+        if offset > 0 {
+            let p = part.clone();
+            let hash = wire::blocking(move || crate::sync::hash(&p)).await??;
+            ensure!(
+                ready["prefix_hash"] == hash,
+                "download prefix mismatch; partial file or source changed"
+            );
+        }
+        wire::persist(
+            &journal,
+            &json!({"identity":identity,"version":ready["version"]}),
+        )
+        .await?;
+        let mut file = tokio::fs::File::from_std(file.try_clone()?);
+        let copied = copy(&mut stream, &mut file, bytes, &CancellationToken::new()).await;
+        file.flush().await?;
+        let hash = copied?;
+        let end = response(&mut stream).await?;
         ensure!(
-            record["identity"] == identity,
-            "partial download belongs to another source"
+            end["hash"] == hash && file.metadata().await?.len() == offset + bytes,
+            "download checksum or size mismatch"
         );
-        args["version"] = record["version"].clone();
+        file.sync_all().await?;
+        tokio::fs::rename(&part, local).await?;
+        tokio::fs::remove_file(&journal).await?;
+        Ok(end)
     }
-    if !existing {
-        wire::persist(&journal, &json!({"identity":identity,"version":null})).await?;
-    }
-    let mut stream = connect(socket, workspace, "file.download", args, client).await?;
-    let ready = response(&mut stream).await?;
-    let bytes = ready["size"]
-        .as_u64()
-        .ok_or_else(|| anyhow::anyhow!("missing download size"))?;
-    if offset > 0 {
-        let p = part.clone();
-        let hash = wire::blocking(move || crate::sync::hash(&p)).await??;
-        ensure!(
-            ready["prefix_hash"] == hash,
-            "download prefix mismatch; partial file or source changed"
-        );
-    }
-    wire::persist(
-        &journal,
-        &json!({"identity":identity,"version":ready["version"]}),
-    )
-    .await?;
-    let mut file = tokio::fs::File::from_std(file);
-    let copied = copy(&mut stream, &mut file, bytes, &CancellationToken::new()).await;
-    file.flush().await?;
-    let hash = copied?;
-    let end = response(&mut stream).await?;
-    ensure!(
-        end["hash"] == hash && file.metadata().await?.len() == offset + bytes,
-        "download checksum or size mismatch"
-    );
-    file.sync_all().await?;
-    tokio::fs::rename(&part, local).await?;
-    tokio::fs::remove_file(&journal).await?;
-    Ok(end)
+    .await;
+    // The copy path drains pending writes before returning, including on EOF.
+    // On cancellation this block is skipped and the remaining I/O handles keep
+    // their lock until they close, preventing another writer from racing them.
+    fs2::FileExt::unlock(&file)?;
+    result
 }

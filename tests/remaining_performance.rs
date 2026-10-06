@@ -330,13 +330,41 @@ async fn interrupted_download_resumes_verified_prefix_before_atomic_publish() {
     let socket = d.path().join("socket");
     let output = d.path().join("result.bin");
     let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    #[cfg(target_os = "linux")]
+    let output_for_server = output.clone();
     let server = tokio::spawn(async move {
+        #[cfg(target_os = "linux")]
+        let mut inherited_locks = Vec::new();
         for attempt in 0..2 {
             let (mut stream, _) = listener.accept().await.unwrap();
             let request: macrun::model::Request = wire::recv(&mut stream).await.unwrap();
             assert_eq!(request.args["offset"], if attempt == 0 { 0 } else { 2 });
             if attempt == 1 {
                 assert_eq!(request.args["version"], "v1");
+            }
+            #[cfg(target_os = "linux")]
+            if attempt == 0 {
+                // A concurrent fork inherits open file descriptions until exec.
+                // Retain equivalent duplicates across the immediate retry, so
+                // releasing locks by descriptor close alone fails reliably.
+                let descriptors: Vec<_> =
+                    fs::read_dir("/proc/self/fd").unwrap().flatten().collect();
+                for entry in descriptors {
+                    let Ok(path) = fs::read_link(entry.path()) else {
+                        continue;
+                    };
+                    if path == output_for_server.with_extension("macrun-download-lock")
+                        || path == output_for_server.with_extension("macrun-download")
+                    {
+                        let fd = entry.file_name().to_str().unwrap().parse().unwrap();
+                        // SAFETY: the downloader owns both descriptors and is
+                        // awaiting this server's reply on this single-threaded
+                        // runtime, so neither descriptor can close here.
+                        let borrowed = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
+                        inherited_locks.push(borrowed.try_clone_to_owned().unwrap());
+                    }
+                }
+                assert_eq!(inherited_locks.len(), 2);
             }
             wire::send(&mut stream,&macrun::model::Reply::Status{value:json!({"ready":true,"size":if attempt==0{6}else{4},"version":"v1","prefix_hash":blake3::hash(b"ab").to_hex().to_string()})}).await.unwrap();
             if attempt == 0 {
@@ -353,6 +381,8 @@ async fn interrupted_download_resumes_verified_prefix_before_atomic_publish() {
                 .unwrap();
             }
         }
+        #[cfg(target_os = "linux")]
+        drop(inherited_locks);
     });
     assert!(
         macrun::transfer::download_resumable(&socket, d.path(), "/source", &output, None)

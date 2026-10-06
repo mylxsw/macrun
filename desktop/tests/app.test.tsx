@@ -286,17 +286,24 @@ async function chooseStatus(
   );
 }
 
-test("navigation keeps all nine task states independently usable", async () => {
-  const user = userEvent.setup();
-  await mount();
-  await user.click(navigation().getByRole("button", { name: "活动" }));
-  for (const status of Object.keys(statuses)) {
+test.each(Object.keys(statuses))(
+  "activity filters the %s task state independently",
+  async (status) => {
+    const user = userEvent.setup();
+    await mount();
+    await user.click(navigation().getByRole("button", { name: "活动" }));
     await chooseStatus(user, status);
     await waitFor(() =>
       expect(detail().getByText(`task-${status}`)).toBeTruthy(),
     );
     expect(taskList().getAllByRole("button")).toHaveLength(1);
-  }
+  },
+);
+
+test("navigation keeps attention and type filters independently usable", async () => {
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "活动" }));
   // "Needs attention" sums the Macrun-level problem states.
   await user.click(screen.getByRole("button", { name: /^需要关注\s*4$/ }));
   await waitFor(() =>

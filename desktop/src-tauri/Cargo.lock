@@ -2313,7 +2313,7 @@ dependencies = [
 
 [[package]]
 name = "macrun"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "macrun-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "blake3",
