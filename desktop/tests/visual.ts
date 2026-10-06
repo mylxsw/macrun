@@ -546,6 +546,7 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       state: "ready",
       version: "Cua Driver · UI fixture",
       configured: true,
+      permissions: { accessibility: true, screen_recording: true },
     };
   if (command === "grant_cua_permissions")
     return "fixture permission verification";
