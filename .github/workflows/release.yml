@@ -35,8 +35,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release/release.py resolve --tag "$RELEASE_TAG"
 
-  linux:
+  checks:
     needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install coverage==7.10.7
+      - run: python -m coverage run --source=scripts/release --omit='*/tests/*' -m unittest discover -s scripts/release/tests -v
+      - run: python -m coverage report --fail-under=80
+      - run: bash -n scripts/release/*.sh
+
+  linux:
+    needs: [prepare, checks]
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +80,6 @@ jobs:
             apt-get update
             apt-get install -y --no-install-recommends python3 dpkg-dev
             rustup component add rustfmt clippy
-            python3 -m unittest discover -s scripts/release/tests -v
             make check
             make smoke PROFILE=debug
             for transport in tcp auto; do
@@ -87,7 +103,7 @@ jobs:
           if-no-files-found: error
 
   macos:
-    needs: prepare
+    needs: [prepare, checks]
     strategy:
       fail-fast: false
       matrix:
@@ -114,11 +130,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test core and release scripts
+      - name: Test core
         run: |
-          python3 -m unittest discover -s scripts/release/tests -v
           make check
           make smoke PROFILE=debug
+          for transport in tcp auto; do
+            MACRUN_TEST_TRANSPORT="$transport" python3 scripts/smoke.py target/debug/macrun
+          done
       - name: Test desktop
         run: |
           cd desktop
