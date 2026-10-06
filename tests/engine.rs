@@ -304,3 +304,67 @@ async fn different_server_engines_do_not_overlap_on_the_same_desktop() {
     first.shutdown().await.unwrap();
     second.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn escaped_helper_cleanup_releases_workspace_and_completes_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = Engine::open(dir.path().join("state"), WorkerConfig::default()).unwrap();
+    // The fixture detaches, ignores TERM, and inherits both output pipes.
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/process_tree.py");
+    let command = format!(
+        "python3 '{}' exit '{}'",
+        fixture.display(),
+        dir.path().display()
+    );
+    let task = id();
+    e.handle(
+        "exec.start",
+        json!({"request_id":task,"command":command,"cwd":dir.path(),"timeout_seconds":2}),
+    )
+    .await
+    .unwrap();
+    let result = wait(&e, &task).await;
+    assert_eq!(result["status"], "succeeded", "{result}");
+    assert!(
+        result["output"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("child output")
+    );
+    let child: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("child.json")).unwrap()).unwrap();
+    assert!(macrun::process::identity(child["pid"].as_u64().unwrap() as u32).is_none());
+    let next = id();
+    e.handle(
+        "exec.start",
+        json!({"request_id":next,"command":"printf next-task","cwd":dir.path()}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(wait(&e, &next).await["output"]["text"], "next-task");
+    e.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn restart_retries_retained_journals_for_already_unknown_tasks() {
+    let dir = tempfile::tempdir().unwrap();
+    let task = id();
+    let root = dir.path().join("tasks").join(&task);
+    macrun::wire::atomic_json(
+        &root.join("result.json"),
+        &json!({"task_id":task,"status":"unknown","ended_at":1}),
+    )
+    .unwrap();
+    macrun::wire::atomic_json(
+        &root.join("process.json"),
+        &json!({"tree":{"version":2,"owner":id(),"processes":{}}}),
+    )
+    .unwrap();
+    let e = Engine::open(dir.path().into(), WorkerConfig::default()).unwrap();
+    assert!(!root.join("process.json").exists());
+    assert_eq!(
+        e.handle("task.get", json!({"task_id":task})).await.unwrap()["status"],
+        "unknown"
+    );
+}

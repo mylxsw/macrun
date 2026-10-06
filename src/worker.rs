@@ -95,6 +95,7 @@ pub async fn worker_profiles(
         "invalid saved client identity"
     );
     let shutdown = CancellationToken::new();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     if parent_pipe {
         let stop = shutdown.clone();
         std::thread::spawn(move || {
@@ -181,6 +182,7 @@ pub async fn worker_profiles(
     let mut outcome = tokio::select! {
         _=shutdown.cancelled()=>Ok(()),
         result=tokio::signal::ctrl_c()=>result.map_err(anyhow::Error::from),
+        _=terminate.recv()=>Ok(()),
         result=tasks.join_next()=>match result {
             Some(Ok(result)) => result,
             Some(Err(error)) => Err(error.into()),

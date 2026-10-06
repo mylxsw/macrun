@@ -139,6 +139,8 @@ Replace `TASK_UUID` with the `task_id` returned by `exec`. If it is still runnin
 
 You now have a working remote connection. To keep it running after you close your terminals, follow [the background-service and restart guide](docs/operations.md).
 
+Command completion, timeout and cancellation clean up attributed child processes, including test helpers in separate process groups. See [cleanup limits and recovery](docs/operations.md#command-descendants-and-stalled-tests) for details.
+
 ## Give Claude Code or Codex access
 
 Register Macrun **on the Linux server where your agent runs**. Choose your client:

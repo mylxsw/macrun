@@ -1,5 +1,6 @@
 use crate::{
     model::{Event, Fault, Outcome},
+    process_tree::{OWNER_ENV, Tree},
     wire,
 };
 use serde::{Deserialize, Serialize};
@@ -35,12 +36,6 @@ pub fn alive(i: &Identity) -> bool {
 pub fn signal_group(pid: u32, sig: i32) {
     unsafe {
         libc::kill(-(pid as i32), sig);
-    }
-}
-struct KillGroup(u32);
-impl Drop for KillGroup {
-    fn drop(&mut self) {
-        signal_group(self.0, libc::SIGKILL);
     }
 }
 // Execution parameters stay explicit at the two call sites.
@@ -113,18 +108,23 @@ pub async fn run_command_until(
     log: &str,
     journal: &Path,
 ) -> Outcome<i32> {
+    let mut tree = Tree::new();
     let mut cmd = Command::new(program);
     cmd.args(args)
         .envs(env)
+        .env(OWNER_ENV, tree.owner())
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     cmd.process_group(0);
-    wire::persist(journal, &serde_json::json!({"state":"spawning"}))
-        .await
-        .map_err(|e| Fault::new("recovery_required", e))?;
+    wire::persist(
+        journal,
+        &serde_json::json!({"state":"spawning", "tree": &tree}),
+    )
+    .await
+    .map_err(|e| Fault::new("recovery_required", e))?;
     if cancel.is_cancelled() {
         let _ = std::fs::remove_file(journal);
         return Err(Fault::new("cancelled", "cancelled before command dispatch"));
@@ -140,68 +140,107 @@ pub async fn run_command_until(
         .spawn()
         .map_err(|e| Fault::new("invalid_config", format!("{program}: {e}")))?;
     let pid = child.id().unwrap();
-    let guard = KillGroup(pid);
-    wire::persist(
-        journal,
-        &serde_json::json!({"state":"running","identity":identity(pid),"pid":pid}),
-    )
-    .await
-    .map_err(|e| Fault::new("recovery_required", e))?;
+    tree.add_root(pid);
+    let root = identity(pid);
+    tree.persist(journal, &root).await?;
     let out = child.stdout.take().unwrap();
     let err = child.stderr.take().unwrap();
-    let a = tokio::spawn(pump(
+    let mut pumps = tokio::task::JoinSet::new();
+    pumps.spawn(pump(
         out,
         events.clone(),
         log.into(),
         "stdout",
         crate::metrics::current(),
     ));
-    let b = tokio::spawn(pump(
+    pumps.spawn(pump(
         err,
         events.clone(),
         log.into(),
         "stderr",
         crate::metrics::current(),
     ));
-    let result = tokio::select! {
-        status=child.wait()=>status.map_err(|e|Fault::new("recovery_required",e)).map(|s| s.code().unwrap_or(128)),
-        _=cancel.cancelled()=>Err(Fault::new("cancelled","task cancelled")),
-        _=tokio::time::sleep_until(deadline)=>Err(Fault::new("timed_out",format!("{program} exceeded command deadline"))),
+    let mut scan = tokio::time::interval(Duration::from_millis(20));
+    scan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let result = loop {
+        tokio::select! {
+            status=child.wait()=>break status.map_err(|e|Fault::new("recovery_required",e)).map(|s| s.code().unwrap_or(128)),
+            _=cancel.cancelled()=>break Err(Fault::new("cancelled","task cancelled")),
+            _=tokio::time::sleep_until(deadline)=>break Err(Fault::new("timed_out",format!("{program} exceeded command deadline"))),
+            _=scan.tick()=>{
+                if tree.refresh_children() && let Err(error) = tree.persist(journal, &root).await {
+                    break Err(error);
+                }
+            }
+        }
     };
-    if result
-        .as_ref()
-        .is_err_and(|e| matches!(e.code.as_str(), "cancelled" | "timed_out"))
-    {
-        signal_group(pid, libc::SIGTERM);
-        if tokio::time::timeout(Duration::from_secs(5), child.wait())
-            .await
-            .is_err()
-        {
-            signal_group(pid, libc::SIGKILL);
-            let _ = child.wait().await;
+    // Collect cross-group children before terminating their parents. The marker
+    // also finds fast-forked/reparented helpers that escaped the periodic scan.
+    tree.refresh();
+    let recorded = tree.persist(journal, &root).await;
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        let until = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            tree.signal(signal);
+            let _ = child.try_wait();
+            tree.refresh();
+            if tree.is_empty() || tokio::time::Instant::now() >= until {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if tree.is_empty() {
+            break;
         }
     }
-    // Also close lingering descendants/pipe writers after the parent exits.
-    drop(guard);
-    let _ = tokio::time::timeout(Duration::from_secs(2), async {
-        let _ = a.await;
-        let _ = b.await;
+    // Child owns the directly spawned PID even if process inspection failed.
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = child.start_kill();
+    }
+    let reaped = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+    let drained = tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(result) = pumps.join_next().await {
+            result
+                .map_err(|e| Fault::new("recovery_required", e))?
+                .map_err(|e| Fault::new("recovery_required", e))?;
+        }
+        Ok::<_, Fault>(())
     })
     .await;
+    // Dropping JoinHandles detaches their tasks. JoinSet instead aborts on Drop;
+    // explicitly join aborted readers here so no sender outlives this command.
+    pumps.shutdown().await;
+    tree.refresh();
+    if !tree.is_empty() || !matches!(reaped, Ok(Ok(_))) {
+        tree.persist(journal, &root).await?;
+        return Err(Fault::new(
+            "recovery_required",
+            "command descendants did not stop; process journal retained",
+        ));
+    }
+    tree.disarm();
+    recorded?;
+    drained.map_err(|_| {
+        Fault::new(
+            "recovery_required",
+            "command output did not close; log capture truncated, process journal retained",
+        )
+    })??;
     std::fs::remove_file(journal).map_err(|e| Fault::new("recovery_required", e))?;
     result
 }
+
 async fn pump<R: tokio::io::AsyncRead + Unpin>(
     mut r: R,
     tx: mpsc::Sender<Event>,
     name: String,
     counter: &str,
     capture: Option<crate::metrics::Capture>,
-) {
+) -> std::io::Result<()> {
     let mut b = [0; 8192];
     let mut pending = Vec::new();
     loop {
-        let n = r.read(&mut b).await.unwrap_or(0);
+        let n = r.read(&mut b).await?;
         if let Some(c) = &capture {
             c.add("bytes", counter, n as u64);
         }
@@ -246,6 +285,7 @@ async fn pump<R: tokio::io::AsyncRead + Unpin>(
             break;
         }
     }
+    Ok(())
 }
 
 pub fn recover(journal: &Path) -> Outcome<()> {
@@ -256,6 +296,18 @@ pub fn recover(journal: &Path) -> Outcome<()> {
         &std::fs::read(journal).map_err(|e| Fault::new("recovery_required", e))?,
     )
     .map_err(|e| Fault::new("recovery_required", e))?;
+    if let Some(value) = v.get("tree") {
+        let tree = Tree::recover(value)?;
+        if !tree.is_empty() {
+            tree.signal(libc::SIGKILL);
+            return Err(Fault::new(
+                "recovery_required",
+                "descendant cleanup requested or ownership unresolved; journal retained for verification on restart",
+            ));
+        }
+        std::fs::remove_file(journal).map_err(|e| Fault::new("recovery_required", e))?;
+        return Ok(());
+    }
     let Some(i) = v
         .get("identity")
         .and_then(|v| serde_json::from_value::<Identity>(v.clone()).ok())

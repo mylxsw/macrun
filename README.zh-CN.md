@@ -139,6 +139,8 @@ macrun task TASK_UUID
 
 至此，两台机器已连通。希望关闭终端后仍然运行，请继续阅读 [后台运行与重启手册](docs/operations.md)。
 
+命令结束、超时或取消后，Worker 会清理能够确认归属的子进程，包括独立进程组中的测试辅助进程。详见[清理边界与恢复机制](docs/operations.md#command-descendants-and-stalled-tests)。
+
 ## 接入 Claude Code 或 Codex
 
 在 **运行 Agent 的 Linux 服务器上** 注册工具。按你使用的客户端选择：

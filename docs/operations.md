@@ -124,6 +124,40 @@ To test autostart, schedule an authorized login/reboot test and repeat these che
 
 Network reconnect retains worker tasks and backend sessions, but worker restart does not promise process continuation. Completed results remain in the worker data directory. Logs and task results have no automatic retention policy.
 
+## Command descendants and stalled tests
+
+Each command has a private process group and an inherited `MACRUN_PROCESS_OWNER`
+nonce. The worker also records descendants' OS birth identities while the command
+runs. Cleanup covers the original group and attributed descendants that create new
+process groups or sessions, including Swift test helpers. It checks birth identity
+before signalling a PID, so an executable change does not lose ownership and a
+stale PID record cannot by itself authorize a kill. On Linux, identity includes the
+boot ID; on macOS it includes the microsecond process start timestamp.
+
+Normal command completion, timeout and cancellation all clean up owned descendants.
+Cleanup allows one second for TERM, then one second for KILL, with up to one second
+to reap the directly spawned process. Output readers have a two-second drain limit
+and are explicitly aborted and joined when that expires. The log writer has a
+separate two-second flush limit. These are bounded cleanup allowances after the
+command deadline, not additional execution time. Worker SIGTERM and Ctrl-C both
+request graceful task cancellation.
+
+A truncated log or incomplete cleanup returns `recovery_required` rather than
+silently reporting command success. An unresolved `process.json` stays with the
+task. On restart the worker rechecks retained records, including tasks already
+marked `unknown`, and terminates identifiable orphans without replaying commands.
+A recovery pass that signals a process retains its journal until a later restart
+confirms exit. Older journals remain readable; an ambiguous leaderless group is
+retained for inspection rather than killed based solely on its numeric group ID.
+
+This is lifecycle management, not an OS sandbox: descendants that clear the nonce
+(or whose environment macOS hides), detach and lose observable ancestry between
+scans may not be attributable. Programs started by an unrelated service such as
+LaunchServices are also outside this guarantee. Do not strip the nonce when
+launching test helpers. Previously orphaned processes with no ownership record are
+not globally killed by name. If one remains, inspect its executable, test bundle,
+PID and start time before targeting it; do not use `killall swiftpm-testing-helper`.
+
 ## Updates and rollback
 
 1. Record the currently deployed commit, binary/config locations and important running tasks.
