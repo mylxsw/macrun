@@ -17,6 +17,7 @@ pub fn resource(group: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 pub struct Reservation {
+    pub parent_task_id: String,
     pub group: String,
     pub guard: tokio::sync::OwnedMutexGuard<()>,
 }

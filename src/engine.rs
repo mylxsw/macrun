@@ -23,6 +23,7 @@ type Slot = Arc<Mutex<Option<Client>>>;
 pub struct Engine {
     data: PathBuf,
     history: crate::history::TaskHistory,
+    metrics_store: Option<crate::metrics::Store>,
     config: WorkerConfig,
     submissions: Mutex<()>,
     tasks: Mutex<BTreeMap<String, CancellationToken>>,
@@ -168,6 +169,11 @@ impl Engine {
         let (changes, _) = watch::channel(0);
         Ok(Arc::new(Self {
             history: crate::history::TaskHistory::new(data.clone()),
+            metrics_store: crate::metrics::Store::open(data.clone())
+                .inspect_err(|_| {
+                    crate::logging::event("worker", "metrics_index_failed", json!({}));
+                })
+                .ok(),
             data,
             config,
             submissions: Mutex::new(()),
@@ -406,6 +412,15 @@ impl Engine {
         error: Option<String>,
         code: Option<&str>,
     ) -> Result<()> {
+        self.finish_external_metrics(ident, error, code, None).await
+    }
+    pub async fn finish_external_metrics(
+        &self,
+        ident: &str,
+        error: Option<String>,
+        code: Option<&str>,
+        metrics: Option<crate::metrics::Metrics>,
+    ) -> Result<()> {
         let p = self.directory(ident)?.join("result.json");
         let mut v: Value = serde_json::from_slice(&tokio::fs::read(&p).await?)?;
         let cancelled = self
@@ -424,6 +439,10 @@ impl Engine {
             "succeeded"
         });
         v["ended_at"] = json!(now());
+        if let Some(metrics) = metrics {
+            v["metrics"] = json!(metrics);
+            v["metrics_version"] = json!(env!("CARGO_PKG_VERSION"));
+        }
         if let Some(message) = error {
             v["error"] = json!({"message":message});
         }
@@ -535,11 +554,60 @@ impl Engine {
                 .await?;
                 tokio::fs::remove_dir_all(dir).await?;
                 self.history.removed(ident);
+                if let Some(store) = &self.metrics_store {
+                    let _ = store.remove(ident);
+                }
                 removed += 1;
+            } else if record["ended_at"]
+                .as_u64()
+                .is_some_and(|at| at < now().saturating_sub(7 * 86_400_000))
+            {
+                let path = dir.join("result.json");
+                let mut value: Value = serde_json::from_slice(&tokio::fs::read(&path).await?)?;
+                if crate::metrics::prune_samples(&mut value, now().saturating_sub(7 * 86_400_000)) {
+                    wire::persist(&path, &value).await?;
+                }
             }
         }
+        let attempts = self.data.join("metrics-attempts");
+        let store = self.metrics_store.clone();
+        let attempts_removed = wire::blocking(move || -> Result<usize> {
+            let mut removed = 0;
+            if !attempts.exists() {
+                return Ok(0);
+            }
+            for entry in std::fs::read_dir(attempts)? {
+                let entry = entry?;
+                let path = entry.path();
+                if !entry.file_type()?.is_file() || path.extension().is_none_or(|x| x != "json") {
+                    continue;
+                }
+                let Some(mut record) = std::fs::read(&path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                else {
+                    continue;
+                };
+                if record["ended_at"].as_u64().is_some_and(|at| at < cutoff) {
+                    std::fs::remove_file(path)?;
+                    if let (Some(store), Some(id)) = (&store, record["task_id"].as_str()) {
+                        store.remove(id)?;
+                    }
+                    removed += 1;
+                } else if crate::metrics::prune_samples(
+                    &mut record,
+                    now().saturating_sub(7 * 86_400_000),
+                ) {
+                    crate::wire::atomic_json(&path, &record)?;
+                }
+            }
+            Ok(removed)
+        })
+        .await??;
         self.changed();
-        Ok(json!({"removed":removed,"transfers_removed":transfers_removed,"dedup_preserved":true}))
+        Ok(
+            json!({"removed":removed,"transfers_removed":transfers_removed,"metrics_attempts_removed":attempts_removed,"dedup_preserved":true}),
+        )
     }
     pub async fn local_snapshot(&self) -> Result<Value> {
         let tasks = self.history.shared_records().await?;
@@ -646,6 +714,53 @@ impl Engine {
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
         self.history.page(args).await
     }
+    pub fn metrics_data(&self) -> PathBuf {
+        self.data.clone()
+    }
+    pub async fn record_metrics_attempt(
+        &self,
+        kind: &str,
+        metrics: crate::metrics::Metrics,
+        succeeded: bool,
+    ) -> Result<()> {
+        let ident = id();
+        let value = json!({"task_id":ident,"kind":kind,"status":if succeeded {"succeeded"} else {"failed"},"started_at":now().saturating_sub(metrics.wall_ms as u64),"ended_at":now(),"metrics":metrics,"metrics_version":env!("CARGO_PKG_VERSION")});
+        let dir = self.data.join("metrics-attempts");
+        tokio::fs::create_dir_all(&dir).await?;
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).await?;
+        wire::persist(&dir.join(format!("{ident}.json")), &value).await?;
+        if let Some(store) = self.metrics_store.clone()
+            && wire::blocking(move || store.record(&value)).await?.is_err()
+        {
+            crate::logging::event("worker", "metrics_index_failed", json!({}));
+        }
+        Ok(())
+    }
+    pub fn metrics_capture(&self, a: &Value) -> crate::metrics::Capture {
+        let capture = crate::metrics::Capture::new("worker");
+        capture.update(|m| {
+            for key in ["server", "tool", "resource_group", "desktop_tier"] {
+                if let Some(value) = a[key].as_str() {
+                    m.dimensions.insert(
+                        key.into(),
+                        value.chars().filter(|c| !c.is_control()).take(80).collect(),
+                    );
+                }
+            }
+            if let Some(value) = a["snapshot"].as_bool() {
+                m.dimensions.insert("snapshot".into(), value.to_string());
+            }
+        });
+        if let Some(root) = a["workspace_root"]
+            .as_str()
+            .or(a["remote_root"].as_str())
+            .or(a["cwd"].as_str())
+        {
+            capture.project(&expand(root), &self.fingerprint_key);
+        }
+        capture
+    }
     pub(crate) fn directory(&self, id: &str) -> Result<PathBuf> {
         uuid::Uuid::parse_str(id)?;
         Ok(self.data.join("tasks").join(id))
@@ -748,6 +863,32 @@ impl Engine {
                 self.changed();
                 Ok(v)
             }
+            "performance.report" => {
+                let job = string(&a, "job_id")?;
+                uuid::Uuid::parse_str(job)?;
+                let metrics: crate::metrics::Metrics =
+                    serde_json::from_value(a["metrics"].clone())?;
+                crate::metrics::validate_report(&metrics)?;
+                let _guard = self.submissions.lock().await;
+                let task = self
+                    .history
+                    .records()
+                    .await?
+                    .into_iter()
+                    .find(|r| r["arguments"]["job_id"] == job)
+                    .ok_or_else(|| anyhow::anyhow!("unknown performance operation"))?;
+                let p = self
+                    .directory(string(&task, "task_id")?)?
+                    .join("result.json");
+                let mut record: Value = serde_json::from_slice(&tokio::fs::read(&p).await?)?;
+                anyhow::ensure!(
+                    record["ended_at"].as_u64().is_some(),
+                    "performance operation still running; retry later"
+                );
+                record["server_metrics"] = json!(metrics);
+                wire::persist(&p, &record).await?;
+                Ok(json!({"recorded":true}))
+            }
             _ if kind.starts_with("file.") => {
                 let (ident, cancel) = self.begin_external(kind, a.clone()).await?;
                 let lease = if matches!(kind, "file.write" | "file.move") {
@@ -820,6 +961,16 @@ impl Engine {
         if kind == "exec.start" {
             string(&a, "command")?;
             string(&a, "cwd")?;
+            if let Some(outputs) = a.get("outputs") {
+                let outputs: Vec<String> = serde_json::from_value(outputs.clone())?;
+                anyhow::ensure!(
+                    outputs.len() <= 32 && outputs.iter().all(|p| !p.is_empty() && p.len() <= 1024),
+                    "outputs must contain at most 32 bounded relative paths"
+                );
+                if outputs.is_empty() {
+                    a.as_object_mut().unwrap().remove("outputs");
+                }
+            }
             if let Some(env) = a.get("env") {
                 let _: BTreeMap<String, String> = serde_json::from_value(env.clone())?;
             }
@@ -910,6 +1061,7 @@ impl Engine {
             None
         };
         let needs_approval = needs_approval && rule.is_none();
+        let capture = self.metrics_capture(&a);
         let mut initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
         if let Some(tier) = tier {
             initial["desktop_tier"] = json!(tier);
@@ -944,8 +1096,12 @@ impl Engine {
         let kind = kind.to_owned();
         tokio::spawn(async move {
             let mut result = initial;
-            let outcome = async {
+            if let Some(reserved) = &reservation {
+                capture.update(|m| m.parent_task_id = Some(reserved.parent_task_id.clone()));
+            }
+            let outcome = capture.scope(async {
                 if let Some(approval)=approval {
+                    let _phase=crate::metrics::phase("approval_wait");
                     result["status"]=json!("awaiting_approval");result["approval_deadline"]=json!(now()+60_000);
                     wire::persist(&path,&result).await?;engine.changed();
                     let decision=tokio::select! {
@@ -973,8 +1129,7 @@ impl Engine {
                 } else {
                     engine.backend_request(&a, "tools/call", &cancel, reservation.as_ref()).await
                 }
-            }
-            .await;
+            }).await;
             match outcome {
                 Ok(v) => {
                     result["status"] = json!(if v["exit_code"].as_i64().is_some_and(|n| n != 0)
@@ -985,12 +1140,14 @@ impl Engine {
                         "succeeded"
                     });
                     let dir = dir.clone();
-                    let stored = crate::wire::blocking(move || {
-                        let mut value = v;
-                        let artifacts = crate::artifact::store(&dir, &mut value)?;
-                        Ok::<_, anyhow::Error>((value, artifacts))
-                    })
-                    .await;
+                    let stored = capture
+                        .scope(crate::wire::blocking(move || {
+                            let _phase = crate::metrics::phase("artifact_store");
+                            let mut value = v;
+                            let artifacts = crate::artifact::store(&dir, &mut value)?;
+                            Ok::<_, anyhow::Error>((value, artifacts))
+                        }))
+                        .await;
                     match stored {
                         Ok(Ok((value, artifacts))) => {
                             result["result"] = value;
@@ -1030,6 +1187,14 @@ impl Engine {
                 }
             }
             result["ended_at"] = json!(now());
+            if let Some(artifacts) = result["artifacts"].as_array() {
+                capture.add("files", "artifacts", artifacts.len() as u64);
+                for a in artifacts {
+                    capture.add("bytes", "artifacts", a["bytes"].as_u64().unwrap_or(0));
+                }
+            }
+            result["metrics"] = json!(capture.snapshot(true));
+            result["metrics_version"] = json!(env!("CARGO_PKG_VERSION"));
             if wire::persist(&path, &result).await.is_err() {
                 crate::logging::event("worker", "persist_failed", json!({"task_id":ident}));
             }
@@ -1060,10 +1225,12 @@ impl Engine {
             std::sync::OnceLock::new();
         let deadline = tokio::time::Instant::now()
             + Duration::from_secs(a["timeout_seconds"].as_u64().unwrap_or(3600));
+        let queue = crate::metrics::phase("exec_slot_wait");
         let _slot = tokio::select! {
             slot=tokio::time::timeout_at(deadline,EXEC_SLOTS.get_or_init(||Arc::new(tokio::sync::Semaphore::new(4))).clone().acquire_owned())=>slot.map_err(|_|anyhow::anyhow!("timed_out waiting for command capacity"))??,
             _=cancel.cancelled()=>bail!("cancelled before command dispatch"),
         };
+        drop(queue);
         let cwd = expand(string(a, "cwd")?);
         let root = a["workspace_root"]
             .as_str()
@@ -1085,6 +1252,7 @@ impl Engine {
         }
         let mut run_cwd = cwd.clone();
         if a["snapshot"] == true {
+            let _phase = crate::metrics::phase("snapshot_copy");
             let generation = crate::workspace::generation(&root)?;
             let state = self.data.join("mirrors").join(
                 blake3::hash(root.to_string_lossy().as_bytes())
@@ -1124,6 +1292,7 @@ impl Engine {
             f.sync_all().await?;
             Ok::<_, anyhow::Error>(())
         });
+        let execution = crate::metrics::phase("process_run");
         let r = process::run_command_until(
             "/bin/sh",
             &["-c".into(), string(a, "command")?.into()],
@@ -1136,8 +1305,36 @@ impl Engine {
             &dir.join("process.json"),
         )
         .await;
+        drop(execution);
         drop(tx);
+        let drain = crate::metrics::phase("log_drain");
         writer.await??;
+        drop(drain);
+        if let Ok(meta) = tokio::fs::metadata(dir.join("output.log")).await {
+            crate::metrics::set("bytes", "stored_log", meta.len());
+        }
+        if let Some(declared) = a["outputs"].as_array() {
+            let outputs = declared
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let root = run_cwd.clone();
+            let measured = wire::blocking(move || {
+                let _phase = crate::metrics::phase("output_measure");
+                crate::metrics::measure_output_totals(&root, &outputs)
+            })
+            .await?;
+            if let Some(c) = crate::metrics::current() {
+                c.update(|m| {
+                    m.outputs = measured.0;
+                    if let Some(bytes) = measured.1 {
+                        m.bytes.insert("declared_outputs".into(), bytes);
+                        m.files.insert("declared_outputs".into(), measured.2);
+                    }
+                });
+            }
+        }
         Ok(json!({"exit_code":r?,"workspace":run_cwd,"snapshot":a["snapshot"]==true}))
     }
     fn run_sequence(
@@ -1156,11 +1353,19 @@ impl Engine {
                 .unwrap_or("desktop");
             let deadline = tokio::time::Instant::now()
                 + Duration::from_secs(args["timeout_seconds"].as_u64().unwrap_or(120).min(600));
+            let waiting = crate::metrics::phase("resource_wait");
+            if let Some(c) = crate::metrics::current() {
+                c.update(|m| {
+                    m.dimensions.insert("resource_group".into(), group.into());
+                });
+            }
             let guard = tokio::select! {
                 r=tokio::time::timeout_at(deadline,crate::scheduler::resource(group).lock_owned())=>r.map_err(|_|anyhow::anyhow!("timed_out waiting for sequence resource"))?,
                 _=cancel.cancelled()=>bail!("cancelled before sequence dispatch"),
             };
+            drop(waiting);
             let reserved = Arc::new(crate::scheduler::Reservation {
+                parent_task_id: parent.clone(),
                 group: group.into(),
                 guard,
             });
@@ -1242,6 +1447,7 @@ impl Engine {
         );
         let deadline = tokio::time::Instant::now() + timeout;
         let queued_at = std::time::Instant::now();
+        let resource_wait = crate::metrics::phase("resource_wait");
         let group = self
             .config
             .resource_groups
@@ -1259,8 +1465,11 @@ impl Engine {
         } else {
             None
         };
+        drop(resource_wait);
+        let backend_wait = crate::metrics::phase("backend_lock_wait");
         // Waiting for the per-backend lock is cancellable, but never drops somebody else's client.
         let mut guard = tokio::select! {v=tokio::time::timeout_at(deadline,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
+        drop(backend_wait);
         if let Some(expected) = a["session"].as_str() {
             if guard.as_ref().is_none_or(|c| c.generation != expected) {
                 bail!("stale_session: rediscover tools and observe the target again");
@@ -1280,6 +1489,7 @@ impl Engine {
         let queue_ms = queued_at.elapsed().as_millis();
         let operation = async {
             if guard.is_none() {
+                let _phase = crate::metrics::phase("backend_start");
                 *guard = Some(Client::connect(&self.config.mcp[name]).await?);
             }
             let c = guard.as_mut().unwrap();
@@ -1293,7 +1503,9 @@ impl Engine {
             } else {
                 params
             };
+            let call = crate::metrics::phase("backend_call");
             let result = c.rpc(method, params).await?;
+            drop(call);
             if method == "tools/list" {
                 // Keep counting under the backend lock so a late page cannot
                 // overwrite a restarted session or a newer first-page refresh.

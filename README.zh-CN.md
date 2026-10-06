@@ -289,6 +289,7 @@ Linux 本机 `make build` 不需要 Docker。跨平台构建要按 **Linux 服�
 | --- | --- |
 | 让 Agent 安装配置 Macrun | [Agent 安装手册](docs/agent-install.md) |
 | 后台运行、日志、重启、排错和升级 | [运维手册](docs/operations.md) |
+| 性能历史、产物大小和指标导出 | [本地性能指标](docs/performance-metrics.md) |
 | 指导 Agent 正确使用工具 | [Macrun Skill](skills/macrun/SKILL.md) |
 | 内部实现 | [设计说明](docs/design.md) |
 | 到底做过哪些测试 | [验证记录](docs/validation.md) |

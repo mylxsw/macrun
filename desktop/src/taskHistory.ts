@@ -266,6 +266,8 @@ export function useTaskHistory({
               ? { message: "工具返回执行错误，请查看输出。" }
               : undefined),
           progress: record.progress,
+          metrics: record.metrics,
+          server_metrics: record.server_metrics,
           result:
             record.result?.exit_code === undefined
               ? undefined

@@ -115,6 +115,7 @@ pub async fn send<W: AsyncWrite + Unpin>(
     offers: &[Offer],
     out: &mut W,
 ) -> Result<()> {
+    let _phase = crate::metrics::phase("send_payload");
     let mut seen = BTreeSet::new();
     let mut at = 0;
     while at < offers.len() {
@@ -145,6 +146,7 @@ pub async fn send<W: AsyncWrite + Unpin>(
                 .map(|p| size(manifest, p))
                 .collect::<Result<_>>()?;
             let payload = wire::blocking(move || -> Result<Vec<u8>> {
+                let _phase = crate::metrics::phase("pack_encode");
                 let mut encoder =
                     flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
                 for (path, expected) in batch.into_iter().zip(sizes) {
@@ -171,7 +173,12 @@ pub async fn send<W: AsyncWrite + Unpin>(
                 },
             )
             .await?;
-            out.write_all(&payload).await?;
+            crate::metrics::add("bytes", "pack_raw", raw_size as u64);
+            crate::metrics::add("bytes", "pack_compressed", payload.len() as u64);
+            crate::metrics::add("files", "packs", 1);
+            crate::metrics::Metered::new(&mut *out, "payload")
+                .write_all(&payload)
+                .await?;
             continue;
         }
         let path = root.join(&offer.path);
@@ -203,7 +210,12 @@ pub async fn send<W: AsyncWrite + Unpin>(
                 let n = (length - offset).min(BLOCK as u64);
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
                 ensure!(
-                    tokio::io::copy(&mut (&mut file).take(n), out).await? == n,
+                    tokio::io::copy(
+                        &mut (&mut file).take(n),
+                        &mut crate::metrics::Metered::new(&mut *out, "payload")
+                    )
+                    .await?
+                        == n,
                     "source_changed: delta length"
                 );
             }
@@ -217,7 +229,12 @@ pub async fn send<W: AsyncWrite + Unpin>(
             )
             .await?;
             ensure!(
-                tokio::io::copy(&mut file.take(length), out).await? == length,
+                tokio::io::copy(
+                    &mut file.take(length),
+                    &mut crate::metrics::Metered::new(&mut *out, "payload")
+                )
+                .await?
+                    == length,
                 "source_changed: file length"
             );
         }
@@ -273,7 +290,12 @@ pub async fn receive<R: AsyncRead + Unpin>(
                 }
                 ensure!(total == raw_size, "pack size mismatch");
                 let mut payload = vec![0; bytes];
-                input.read_exact(&mut payload).await?;
+                crate::metrics::Metered::new(&mut *input, "payload")
+                    .read_exact(&mut payload)
+                    .await?;
+                crate::metrics::add("bytes", "pack_raw", raw_size as u64);
+                crate::metrics::add("bytes", "pack_compressed", bytes as u64);
+                crate::metrics::add("files", "packs", 1);
                 let r = receiver.clone();
                 let guard = lease.clone();
                 let dir = incoming.clone();
@@ -281,6 +303,7 @@ pub async fn receive<R: AsyncRead + Unpin>(
                 wire::blocking(move || -> Result<()> {
                     let _guard = guard;
                     let mut decoder = flate2::read::ZlibDecoder::new(payload.as_slice());
+                    let decoding = crate::metrics::phase("pack_decode");
                     let mut raw = Vec::new();
                     (&mut decoder)
                         .take((PACK + 1) as u64)
@@ -289,6 +312,7 @@ pub async fn receive<R: AsyncRead + Unpin>(
                         raw.len() == raw_size && decoder.total_in() == payload.len() as u64,
                         "invalid compressed pack"
                     );
+                    drop(decoding);
                     let mut offset = 0;
                     for path in paths {
                         let n = size(&r.manifest, &path)? as usize;
@@ -312,7 +336,12 @@ pub async fn receive<R: AsyncRead + Unpin>(
                 let temp = incoming.join(crate::model::id());
                 let mut file = tokio::fs::File::create(&temp).await?;
                 ensure!(
-                    tokio::io::copy(&mut (&mut *input).take(length), &mut file).await? == length,
+                    tokio::io::copy(
+                        &mut crate::metrics::Metered::new(&mut *input, "payload").take(length),
+                        &mut file
+                    )
+                    .await?
+                        == length,
                     "truncated file"
                 );
                 file.sync_all().await?;
@@ -350,7 +379,9 @@ pub async fn receive<R: AsyncRead + Unpin>(
                 for i in 0..count {
                     let n = (length - (i * BLOCK) as u64).min(BLOCK as u64) as usize;
                     if updates.contains(&i) {
-                        input.read_exact(&mut buffer[..n]).await?;
+                        crate::metrics::Metered::new(&mut *input, "payload")
+                            .read_exact(&mut buffer[..n])
+                            .await?;
                         stats.bytes += n as u64;
                     } else {
                         old.seek(std::io::SeekFrom::Start((i * BLOCK) as u64))
@@ -358,6 +389,7 @@ pub async fn receive<R: AsyncRead + Unpin>(
                         old.read_exact(&mut buffer[..n]).await?;
                         ensure!(offer.blocks.get(i).is_some_and(|h|*h==blake3::hash(&buffer[..n]).to_hex().as_str()),"delta base changed");
                         stats.reused_bytes += n as u64;
+                        crate::metrics::add("bytes", "reused", n as u64);
                     }
                     file.write_all(&buffer[..n]).await?;
                 }

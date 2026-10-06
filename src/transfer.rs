@@ -59,6 +59,18 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     out: &mut W,
     engine: &Arc<Engine>,
 ) -> Result<bool> {
+    serve_observed(kind, args, input, out, engine, None, None).await
+}
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_observed<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    kind: &str,
+    args: &Value,
+    input: &mut R,
+    out: &mut W,
+    engine: &Arc<Engine>,
+    transport: Option<&str>,
+    rtt: Option<std::time::Duration>,
+) -> Result<bool> {
     static SLOTS: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> = std::sync::OnceLock::new();
     let _slot = SLOTS
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(8)))
@@ -82,6 +94,21 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         Some(engine.begin_external(kind, json!({"path":path})).await?)
     };
     let cancel = record.as_ref().map(|(_, c)| c.clone()).unwrap_or_default();
+    let capture = engine.metrics_capture(args);
+    capture.update(|m| {
+        m.transport = transport.map(str::to_owned);
+        m.rtt_ms = rtt.map(|r| r.as_secs_f64() * 1000.0);
+        m.direction = Some(
+            if kind == "file.upload" {
+                "to_mac"
+            } else {
+                "from_mac"
+            }
+            .into(),
+        );
+        m.transfer_id = args["transfer_id"].as_str().map(str::to_owned);
+        m.parent_task_id = artifact.then(|| args["task_id"].as_str().unwrap_or("").to_owned());
+    });
     let operation = async {
         let _lease = if kind == "file.upload" {
             Some(Arc::new(crate::workspace::Lease::acquire(
@@ -94,6 +121,7 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             let size = args["size"]
                 .as_u64()
                 .ok_or_else(|| anyhow::anyhow!("size required"))?;
+            crate::metrics::set("bytes", "full_file", size);
             let expected = string(args, "hash")?;
             ensure!(expected.len() == 64, "hash required");
             if let Some(parent) = path.parent() {
@@ -131,18 +159,22 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 if let Ok(meta)=tokio::fs::symlink_metadata(&temporary).await {ensure!(meta.is_file(),"invalid transfer staging file");}
                 let mut file=tokio::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary).await?;
                 let offset=file.metadata().await?.len();
+                crate::metrics::set("bytes","resume_offset",offset);
                 ensure!(offset<=size,"staging file exceeds expected size");
                 let p=temporary.clone();
                 let prefix=crate::wire::blocking(move||crate::sync::hash(&p)).await??;
                 use tokio::io::AsyncSeekExt;
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
                 status(out,json!({"ready":true,"size":size-offset,"offset":offset,"prefix_hash":prefix,"transfer_id":transfer_id})).await?;
-                let copied=copy(input,&mut file,size-offset,&cancel).await;
+                crate::metrics::set("bytes","payload",0);
+                let copy_phase=crate::metrics::phase("copy_payload");
+                let copied=copy(&mut crate::metrics::Metered::new(&mut *input,"payload"),&mut file,size-offset,&cancel).await;
+                drop(copy_phase);
                 // Drain Tokio's pending filesystem write before exposing a
                 // resumable offset or releasing the destination lease.
                 file.flush().await?;
                 copied?;
-                file.sync_all().await?;
+                { let _phase=crate::metrics::phase("fsync"); file.sync_all().await?; }
                 drop(file);
                 let p=temporary.clone();
                 let hash=crate::wire::blocking(move||crate::sync::hash(&p)).await??;
@@ -151,12 +183,14 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 // already-started publish is still running on a blocking thread.
                 let (from,to,meta,lease)=(temporary.clone(),path.clone(),journal.clone(),_lease.clone());
                 crate::wire::blocking(move || {
+                    let _phase=crate::metrics::phase("publish");
                     let _lease=lease;
                     std::fs::rename(from,&to)?;
                     if let Some(parent)=to.parent(){std::fs::File::open(parent)?.sync_all()?;}
                     std::fs::remove_file(meta)?;
                     Ok::<_,anyhow::Error>(())
                 }).await??;
+                crate::metrics::set("bytes","confirmed_logical",size);
                 Ok::<_,anyhow::Error>(json!({"bytes":size,"transferred_bytes":size-offset,"hash":hash,"transfer_id":transfer_id}))
             }.await;
             if result
@@ -173,6 +207,8 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             let before = file.metadata().await?;
             ensure!(before.is_file(), "path is not a regular file");
             let offset = args["offset"].as_u64().unwrap_or(0);
+            crate::metrics::set("bytes", "full_file", before.len());
+            crate::metrics::set("bytes", "resume_offset", offset);
             ensure!(offset <= before.len(), "offset exceeds file length");
             use tokio::io::AsyncSeekExt;
             file.seek(std::io::SeekFrom::Start(offset)).await?;
@@ -200,7 +236,16 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 json!({"ready":true,"size":before.len()-offset,"version":version,"offset":offset,"prefix_hash":prefix_hash}),
             )
             .await?;
-            let hash = copy(&mut file, out, before.len() - offset, &cancel).await?;
+            crate::metrics::set("bytes", "payload", 0);
+            let copy_phase = crate::metrics::phase("copy_payload");
+            let hash = copy(
+                &mut file,
+                &mut crate::metrics::Metered::new(&mut *out, "payload"),
+                before.len() - offset,
+                &cancel,
+            )
+            .await?;
+            drop(copy_phase);
             let after = file.metadata().await?;
             use std::os::unix::fs::MetadataExt;
             ensure!(
@@ -214,7 +259,8 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             Ok(json!({"bytes":before.len()-offset,"hash":hash,"version":version}))
         }
     };
-    let result = tokio::time::timeout(Duration::from_secs(3600), operation)
+    let result = capture
+        .scope(tokio::time::timeout(Duration::from_secs(3600), operation))
         .await
         .unwrap_or_else(|_| Err(anyhow::anyhow!("transfer overall timeout")));
     crate::logging::event(
@@ -224,8 +270,21 @@ pub async fn serve<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     );
     if let Some((ident, _)) = record {
         engine
-            .finish_external(&ident, result.as_ref().err().map(ToString::to_string), None)
+            .finish_external_metrics(
+                &ident,
+                result.as_ref().err().map(ToString::to_string),
+                None,
+                Some(capture.snapshot(true)),
+            )
             .await?;
+    } else {
+        if engine
+            .record_metrics_attempt(kind, capture.snapshot(true), result.is_ok())
+            .await
+            .is_err()
+        {
+            crate::logging::event("worker", "metrics_attempt_failed", json!({}));
+        }
     }
     match result {
         Ok(value) => {

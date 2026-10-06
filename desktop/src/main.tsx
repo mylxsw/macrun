@@ -6,6 +6,7 @@ import {
   usePermissionChecks,
 } from "./Features";
 import { Overview, StepMark } from "./Overview";
+import { Performance, PerformanceDetail } from "./Performance";
 import { Access } from "./Access";
 import { ThisMac } from "./ThisMac";
 import { CommandPreview } from "./CommandPreview";
@@ -208,7 +209,16 @@ function App() {
   const positions = useRef(new Map<string, number>());
   const pageRef = useRef("live");
   const setPage = (next: string) => {
-    if (!["live", "tasks", "access", "desktop", "settings"].includes(next))
+    if (
+      ![
+        "live",
+        "tasks",
+        "performance",
+        "access",
+        "desktop",
+        "settings",
+      ].includes(next)
+    )
       return;
     if (content.current)
       positions.current.set(pageRef.current, content.current.scrollTop);
@@ -559,6 +569,7 @@ function App() {
   const nav = [
     ["live", "概览", Activity],
     ["tasks", "活动", History],
+    ["performance", "性能", Activity],
     ["access", "权限", Shield],
     ["desktop", "本机", Laptop],
   ] as const;
@@ -1058,6 +1069,11 @@ function App() {
             />
           </RetainedPage>
         )}
+        {visited.includes("performance") && (
+          <RetainedPage active={page === "performance"}>
+            <Performance active={page === "performance"} app={app} />
+          </RetainedPage>
+        )}
         {visited.includes("tasks") && (
           <RetainedPage active={page === "tasks"}>
             <header className="page-header v4-toolbar">
@@ -1504,6 +1520,10 @@ function App() {
                             </button>
                           </dd>
                         </dl>
+                        <PerformanceDetail
+                          metrics={sel.metrics}
+                          server={sel.server_metrics}
+                        />
                         {explanation && !explanation.agentExit && (
                           <div className="v4-explain" role="note">
                             <div>

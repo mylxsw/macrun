@@ -205,6 +205,27 @@ async fn upload_resumes_checksums_and_records_one_task_per_attempt() {
             .to_string_lossy()
             .contains("macrun-part")
     }));
+    let metrics = macrun::metrics::query(
+        vec![macrun::metrics::Profile {
+            id: "primary".into(),
+            name: "test".into(),
+            data: d.path().join("state"),
+        }],
+        "metrics_dashboard",
+        json!({}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(metrics["total"], 2);
+    assert_eq!(metrics["bytes"]["payload"], data.len());
+    let rows = metrics["operations"].as_array().unwrap();
+    let failed = rows.iter().find(|r| r["status"] == "failed").unwrap();
+    assert_eq!(failed["metrics"]["bytes"]["payload"], offset);
+    assert!(failed["metrics"]["bytes"]["confirmed_logical"].is_null());
+    let success = rows.iter().find(|r| r["status"] == "succeeded").unwrap();
+    assert_eq!(success["metrics"]["bytes"]["resume_offset"], offset);
+    assert_eq!(success["metrics"]["bytes"]["payload"], data.len() - offset);
+    assert_eq!(success["metrics"]["bytes"]["confirmed_logical"], data.len());
 }
 
 #[tokio::test]

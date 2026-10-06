@@ -1272,3 +1272,34 @@ test("stopped worker does not show saved multi-server snapshots as online", asyn
   expect(list.queryByText("已连接")).toBeNull();
   expect(list.getAllByText("未连接")).toHaveLength(2);
 });
+
+test("performance navigation opens the dashboard and remains usable after worker shutdown", async () => {
+  const original = bridge.invoke.getMockImplementation();
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "control" && args.action === "metrics_dashboard")
+      return {
+        as_of: Date.now(),
+        total: 0,
+        measured: 0,
+        counts: {},
+        success_denominator: 0,
+        latency: { n: 0, p50_ms: null, p95_ms: null, p99_ms: null },
+        bytes: {},
+        phases_ms: {},
+        operations: [],
+        next_cursor: null,
+        series: [],
+        projects: {},
+        errors: [],
+      };
+    return original?.(command, args);
+  });
+  app.worker_running = false;
+  await mount();
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "性能", exact: true }));
+  await screen.findByRole("heading", { name: "性能", exact: true });
+  await screen.findByText("暂无匹配的性能历史。");
+  expect(screen.getByText(/执行器已停止 · 仍可查看/)).toBeTruthy();
+});

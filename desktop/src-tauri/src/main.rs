@@ -935,6 +935,12 @@ async fn control(
     args: Value,
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<Value, String> {
+    if action.starts_with("metrics_") {
+        let profiles = metrics_profiles(&rt);
+        return macrun::metrics::query(profiles, &action, args)
+            .await
+            .map_err(|e| e.to_string());
+    }
     if ![
         "pause",
         "desktop",
@@ -960,6 +966,53 @@ async fn control(
     local::request(&rt.socket, &action, args)
         .await
         .map_err(|e| e.to_string())
+}
+fn metrics_profiles(rt: &Runtime) -> Vec<macrun::metrics::Profile> {
+    let cfg = rt.settings.lock().unwrap().clone();
+    let mut profiles = vec![macrun::metrics::Profile {
+        id: "primary".into(),
+        name: cfg.server,
+        data: rt.data.join("worker"),
+    }];
+    for c in cfg.connections {
+        if uuid::Uuid::parse_str(&c.id).is_ok() {
+            profiles.push(macrun::metrics::Profile {
+                id: c.id.clone(),
+                name: c.name,
+                data: rt.data.join("worker/servers").join(c.id),
+            });
+        }
+    }
+    profiles
+}
+#[tauri::command]
+async fn export_metrics(
+    app: tauri::AppHandle,
+    args: Value,
+    format: String,
+    rt: tauri::State<'_, Runtime>,
+) -> std::result::Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    if !["json", "csv"].contains(&format.as_str()) {
+        return Err("不支持的导出格式".into());
+    }
+    let profiles = metrics_profiles(&rt);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(format!("macrun-performance.{format}"))
+        .add_filter("性能数据", &[&format])
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let Some(path) = rx.await.map_err(|e| e.to_string())? else {
+        return Ok(json!({"cancelled":true}));
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    let count = macrun::metrics::export(profiles, args, format, path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"count":count,"cancelled":false}))
 }
 #[tauri::command]
 async fn stop_worker(
@@ -1111,6 +1164,7 @@ fn main() {
     };
     builder
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -1152,6 +1206,7 @@ fn main() {
             native::migrate_legacy,
             start_worker,
             control,
+            export_metrics,
             stop_worker,
             exit_app,
             open_log,

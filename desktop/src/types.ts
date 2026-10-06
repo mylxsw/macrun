@@ -1,4 +1,27 @@
+export type Metrics = {
+  schema_version: number;
+  origin: string;
+  wall_ms: number;
+  complete: boolean;
+  phases: { name: string; wall_ms: number; count: number; max_ms: number }[];
+  bytes: Record<string, number | string>;
+  files: Record<string, number | string>;
+  samples: { offset_ms: number; payload_bytes: number | string }[];
+  outputs: { name: string; bytes: number | string | null; status: string }[];
+  project_id?: string | null;
+  project_name?: string | null;
+  remote_job_id?: string | null;
+  first_payload_offset_ms?: number | null;
+  last_payload_offset_ms?: number | null;
+  rtt_ms?: number | null;
+  transport?: string | null;
+  direction?: string | null;
+  parent_task_id?: string | null;
+  dimensions?: Record<string, string>;
+};
 export type Task = {
+  metrics?: Metrics;
+  server_metrics?: Metrics;
   connection_id?: string;
   connection_name?: string;
   task_id: string;
