@@ -1,3 +1,4 @@
+import { tr, getLocale } from "./i18n.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -90,11 +91,11 @@ export function Approvals({
       { action: "approve", args: { task_id: t.task_id, allow, scope } },
       allow
         ? {
-            once: "已允许这一次",
-            similar: "已允许，15 分钟内同类请求不再询问",
-            session: "已允许，执行器重启前不再询问",
+            once: tr("已允许这一次"),
+            similar: tr("已允许，15 分钟内同类请求不再询问"),
+            session: tr("已允许，执行器重启前不再询问"),
           }[scope]
-        : "已拒绝，Agent 会收到 approval_rejected",
+        : tr("已拒绝，Agent 会收到 approval_rejected"),
     );
   return (
     <>
@@ -103,14 +104,14 @@ export function Approvals({
         const deadline = t.approval_deadline || t.started_at + APPROVAL_MS;
         const left = Math.max(0, Math.ceil((deadline - now) / 1000));
         const reasons = desktop
-          ? [`桌面 · ${tierLabels[t.desktop_tier || "control"]}`]
+          ? [tr("桌面 · {0}", tierLabels[t.desktop_tier || "control"])]
           : riskReasons(t.arguments.command);
         const server = serverLabel(t);
         return (
           <section
             className={`card approval ${compact ? "compact" : ""}`}
             key={t.task_id}
-            aria-label="等待你确认"
+            aria-label={tr("等待你确认")}
           >
             <div className="row approval-head">
               <span
@@ -122,22 +123,21 @@ export function Approvals({
               />
               <strong>
                 {desktop
-                  ? "Agent 想操作桌面"
-                  : `${projectOf(t, workspaces).name} 想运行一条命令`}
+                  ? tr("Agent 想操作桌面")
+                  : tr("{0} 想运行一条命令", projectOf(t, workspaces).name)}
               </strong>
               <small
                 className="approval-left"
                 role="timer"
-                title="到时没有处理，Agent 会收到 approval_expired"
+                title={tr("到时没有处理，Agent 会收到 approval_expired")}
               >
-                {server ? `${server} · ` : ""}
-                {left} 秒后自动拒绝
+                {tr("{0}{1} 秒后自动拒绝", server ? `${server} · ` : "", left)}
               </small>
               {compact && waiting.length > 1 && (
                 <span className="approval-pager push">
                   <button
                     className="icon-button"
-                    aria-label="上一条待确认"
+                    aria-label={tr("上一条待确认")}
                     onClick={() =>
                       setIndex((i) => (i + waiting.length - 1) % waiting.length)
                     }
@@ -147,7 +147,7 @@ export function Approvals({
                   {Math.min(index, waiting.length - 1) + 1} / {waiting.length}
                   <button
                     className="icon-button"
-                    aria-label="下一条待确认"
+                    aria-label={tr("下一条待确认")}
                     onClick={() => setIndex((i) => (i + 1) % waiting.length)}
                   >
                     ›
@@ -175,7 +175,7 @@ export function Approvals({
                 aria-busy={pending(t.task_id)}
                 onClick={() => decide(t, false)}
               >
-                拒绝
+                {tr("拒绝")}
               </button>
               <span className="push" />
               <button
@@ -183,23 +183,26 @@ export function Approvals({
                 aria-busy={pending(t.task_id)}
                 title={
                   desktop
-                    ? "15 分钟内，同一后端的同一工具不再询问"
-                    : "15 分钟内，同一程序在这个目录及子目录中不再询问"
+                    ? tr("15 分钟内，同一后端的同一工具不再询问")
+                    : tr("15 分钟内，同一程序在这个目录及子目录中不再询问")
                 }
                 onClick={() => decide(t, true, "similar")}
               >
-                15 分钟内允许同类
+                {tr("15 分钟内允许同类")}
               </button>
               {!compact && (
                 <button
                   disabled={disabled || pending(t.task_id)}
                   aria-busy={pending(t.task_id)}
-                  title="执行器重启后失效，可在设置与安全中撤销"
+                  title={tr("执行器重启后失效，可在设置与安全中撤销")}
                   onClick={() => decide(t, true, "session")}
                 >
                   {desktop
-                    ? `本次运行允许${tierLabels[t.desktop_tier || "control"]}`
-                    : "本次运行允许此目录"}
+                    ? tr(
+                        "本次运行允许{0}",
+                        tierLabels[t.desktop_tier || "control"],
+                      )
+                    : tr("本次运行允许此目录")}
                 </button>
               )}
               <button
@@ -208,7 +211,7 @@ export function Approvals({
                 className="primary"
                 onClick={() => decide(t, true)}
               >
-                允许一次
+                {tr("允许一次")}
               </button>
             </div>
           </section>
@@ -252,14 +255,14 @@ export function Pairing({
   const checkConnection = async (connectionId = result?.connection_id) => {
     const checks = await act("connection_check", { connectionId });
     if (checks) setResult((v: any) => ({ ...v, ...checks }));
-    else setError("配对已保存，暂时无法完成连接检查，请稍后重试。");
+    else setError(tr("配对已保存，暂时无法完成连接检查，请稍后重试。"));
   };
   const finish = async (route: "desktop" | "main") => {
     if (route === "main") {
       const saved = await act(
         "control",
         { action: "desktop", args: { enabled: false } },
-        "仅启用命令与文件能力",
+        tr("仅启用命令与文件能力"),
       );
       if (saved === undefined) return;
     }
@@ -272,14 +275,14 @@ export function Pairing({
   return (
     <div className="pairing-screen">
       <div className="pairing-drag" data-tauri-drag-region aria-hidden="true" />
-      <aside className="pairing-sidebar" aria-label="配对步骤">
+      <aside className="pairing-sidebar" aria-label={tr("配对步骤")}>
         <div className="pairing-brand">
           <span className="logo">
             <img src={appIcon} alt="" className="brand-icon" />
           </span>
-          <b>{adding ? "添加服务器" : "连接到服务器"}</b>
+          <b>{adding ? tr("添加服务器") : tr("连接到服务器")}</b>
         </div>
-        {["配对码", "检查连接", "桌面控制"].map((name, i) => (
+        {[tr("配对码"), tr("检查连接"), tr("桌面控制")].map((name, i) => (
           <div
             key={name}
             className={`pairing-step ${step === i + 1 ? "current" : step > i + 1 ? "done" : ""}`}
@@ -290,14 +293,16 @@ export function Pairing({
           </div>
         ))}
         <p className="muted pairing-help">
-          还没有服务器？先在 Linux 上按 README 第 1–2 步安装 Macrun 服务端。
+          {tr(
+            "还没有服务器？先在 Linux 上按 README 第 1–2 步安装 Macrun 服务端。",
+          )}
         </p>
       </aside>
       <main className="pairing-content">
         {onClose && (
           <button
             className="pairing-close icon-button"
-            aria-label="关闭配对"
+            aria-label={tr("关闭配对")}
             onClick={onClose}
             disabled={pending}
           >
@@ -306,21 +311,26 @@ export function Pairing({
         )}
         {step === 1 ? (
           <>
-            <h1>粘贴配对码</h1>
+            <h1>{tr("粘贴配对码")}</h1>
             <p className="pairing-intro">
-              在服务器上运行下面这条命令，它会生成一个 10
-              分钟内有效、只能用一次的配对码。
+              {tr(
+                "在服务器上运行下面这条命令，它会生成一个 10 分钟内有效、只能用一次的配对码。",
+              )}
             </p>
             {adding && (
               <p className="muted">
-                这台服务器将作为新增连接保存，现有服务器和任务记录会保留。
+                {tr(
+                  "这台服务器将作为新增连接保存，现有服务器和任务记录会保留。",
+                )}
               </p>
             )}
             <pre className="term pairing-command">
-              {"$ macrun invite --data 服务端数据目录 --server 服务器地址:7443"}
+              {tr(
+                "$ macrun invite --data 服务端数据目录 --server 服务器地址:7443",
+              )}
             </pre>
             <label className="pairing-code">
-              配对码
+              {tr("配对码")}
               <input
                 className="mono"
                 autoFocus
@@ -332,12 +342,13 @@ export function Pairing({
               />
             </label>
             <p className="muted">
-              配对码包含服务器地址和证书指纹。令牌会通过加密连接下发，并存入钥匙串，不需要再用
-              scp 复制文件。
+              {tr(
+                "配对码包含服务器地址和证书指纹。令牌会通过加密连接下发，并存入钥匙串，不需要再用 scp 复制文件。",
+              )}
             </p>
             {running && (
               <p className="error-text" role="status">
-                请先在设置中断开现有连接，再重新配对。
+                {tr("请先在设置中断开现有连接，再重新配对。")}
               </p>
             )}
             {error && (
@@ -348,7 +359,7 @@ export function Pairing({
             <div className="pairing-actions">
               {onManual && (
                 <button onClick={onManual} disabled={pending}>
-                  手动填写地址和证书
+                  {tr("手动填写地址和证书")}
                 </button>
               )}
               <button
@@ -358,7 +369,9 @@ export function Pairing({
                   perform(async () => {
                     const paired = await act("pair", { uri: uri.trim() });
                     if (!paired) {
-                      setError("配对未完成，请检查配对码是否有效，然后重试。");
+                      setError(
+                        tr("配对未完成，请检查配对码是否有效，然后重试。"),
+                      );
                       return;
                     }
                     setResult(paired);
@@ -367,7 +380,9 @@ export function Pairing({
                     const started = await act("start_worker");
                     if (started === undefined) {
                       setError(
-                        "配对已保存，但执行器尚未启动。请在设置中重新连接。",
+                        tr(
+                          "配对已保存，但执行器尚未启动。请在设置中重新连接。",
+                        ),
                       );
                       return;
                     }
@@ -375,22 +390,24 @@ export function Pairing({
                   })
                 }
               >
-                {pending ? "连接中…" : "连接"}
+                {pending ? tr("连接中…") : tr("pairing.connect::连接")}
               </button>
             </div>
           </>
         ) : step === 2 ? (
           <>
-            <h1>检查连接</h1>
+            <h1>{tr("检查连接")}</h1>
             <p className="pairing-intro">
-              配对已保存。正在等待执行器启动和服务器握手，连接超时后可重试，无需重新配对。
+              {tr(
+                "配对已保存。正在等待执行器启动和服务器握手，连接超时后可重试，无需重新配对。",
+              )}
             </p>
             <div className="card pairing-checks">
               <div className="feature-line">
                 <span className="check-icon ok">
                   <Check size={13} />
                 </span>
-                <span className="grow">令牌已存入钥匙串</span>
+                <span className="grow">{tr("令牌已存入钥匙串")}</span>
                 <small>Keychain</small>
               </div>
               {result?.checks?.map((c: any) => (
@@ -405,15 +422,15 @@ export function Pairing({
                     )}
                   </span>
                   <span className="grow">{c.name}</span>
-                  <small>{c.ok ? "已通过" : "尚未通过"}</small>
+                  <small>{c.ok ? tr("已通过") : tr("尚未通过")}</small>
                 </div>
               ))}
               <div className="feature-line">
-                <span className="grow">证书指纹已固定</span>
+                <span className="grow">{tr("证书指纹已固定")}</span>
                 <small className="mono wrap">{result?.fingerprint}</small>
               </div>
             </div>
-            {pending && <p role="status">正在等待连接就绪…</p>}
+            {pending && <p role="status">{tr("正在等待连接就绪…")}</p>}
             {(result?.error || error) && (
               <p className="error-text" role="alert">
                 {result?.error || error}
@@ -428,7 +445,9 @@ export function Pairing({
                     if (!running) {
                       const started = await act("start_worker");
                       if (started === undefined) {
-                        setError("配对已保存，但执行器尚未启动。请重试连接。");
+                        setError(
+                          tr("配对已保存，但执行器尚未启动。请重试连接。"),
+                        );
                         return;
                       }
                     }
@@ -436,7 +455,7 @@ export function Pairing({
                   })
                 }
               >
-                重新检查
+                {tr("重新检查")}
               </button>
               <button
                 disabled={pending || !passed}
@@ -450,7 +469,7 @@ export function Pairing({
                   })
                 }
               >
-                试运行一条本机命令
+                {tr("试运行一条本机命令")}
               </button>
               {result?.testId && (
                 <button
@@ -466,14 +485,18 @@ export function Pairing({
                     })
                   }
                 >
-                  查询试运行：
-                  {statuses[result.testStatus as keyof typeof statuses] ||
-                    "等待结果"}
+                  {tr(
+                    "查询试运行：{0}",
+                    statuses[result.testStatus as keyof typeof statuses] ||
+                      tr("等待结果"),
+                  )}
                 </button>
               )}
             </div>
             <p className="muted">
-              连接通过后即可运行命令和同步文件。结果未知的命令不会自动重放。
+              {tr(
+                "连接通过后即可运行命令和同步文件。结果未知的命令不会自动重放。",
+              )}
             </p>
             <div className="pairing-actions">
               <button
@@ -481,15 +504,17 @@ export function Pairing({
                 className="primary"
                 onClick={() => setStep(3)}
               >
-                继续
+                {tr("继续")}
               </button>
             </div>
           </>
         ) : (
           <>
-            <h1>桌面控制（可选）</h1>
+            <h1>{tr("桌面控制（可选）")}</h1>
             <p className="pairing-intro">
-              需要让 Agent 截图、点击应用时再开启。跳过不影响命令和文件。
+              {tr(
+                "需要让 Agent 截图、点击应用时再开启。跳过不影响命令和文件。",
+              )}
             </p>
             <CuaSetup act={act} />
             {error && (
@@ -502,14 +527,14 @@ export function Pairing({
                 disabled={pending}
                 onClick={() => perform(() => finish("main"))}
               >
-                稍后再说
+                {tr("稍后再说")}
               </button>
               <button
                 className="primary"
                 disabled={pending}
                 onClick={() => perform(() => finish("desktop"))}
               >
-                完成
+                {tr("完成")}
               </button>
             </div>
           </>
@@ -522,15 +547,21 @@ export function Pairing({
 const tierCopy: Record<DesktopTier, { detail: string; icon: typeof Monitor }> =
   {
     observe: {
-      detail: "截图、读取窗口和界面结构，可能看到其他应用里的内容",
+      get detail() {
+        return tr("截图、读取窗口和界面结构，可能看到其他应用里的内容");
+      },
       icon: Eye,
     },
     control: {
-      detail: "点击、输入、按键、滚动、拖动和切换窗口；操作时显示屏幕提示",
+      get detail() {
+        return tr("点击、输入、按键、滚动、拖动和切换窗口；操作时显示屏幕提示");
+      },
       icon: MousePointer2,
     },
     high: {
-      detail: "结束进程、下载文件、回放录制等后端标为最高风险的工具",
+      get detail() {
+        return tr("结束进程、下载文件、回放录制等后端标为最高风险的工具");
+      },
       icon: CircleAlert,
     },
   };
@@ -565,10 +596,10 @@ export function DesktopTiers({
         action: "safety",
         args: { ...snapshot.safety, desktop: { ...policy, [tier]: value } },
       },
-      `桌面“${tierLabels[tier]}”已设为“${tierPolicyLabels[value]}”`,
+      tr("桌面“{0}”已设为“{1}”", tierLabels[tier], tierPolicyLabels[value]),
     );
   return (
-    <section className="desktop-tiers" aria-label="桌面工具分级">
+    <section className="desktop-tiers" aria-label={tr("桌面工具分级")}>
       {tierOrder.map((tier) => {
         const Icon = tierCopy[tier].icon;
         return (
@@ -586,7 +617,7 @@ export function DesktopTiers({
                 >
                   {tools[tier].slice(0, 5).join(" · ")}
                   {tools[tier].length > 5
-                    ? ` · 共 ${tools[tier].length} 个`
+                    ? tr(" · 共 {0} 个", tools[tier].length)
                     : ""}
                 </small>
               )}
@@ -594,7 +625,7 @@ export function DesktopTiers({
             <div
               className="v4-seg"
               role="group"
-              aria-label={`桌面工具：${tierLabels[tier]}`}
+              aria-label={tr("桌面工具：{0}", tierLabels[tier])}
             >
               {policyOrder.map((value) => (
                 <button
@@ -612,10 +643,17 @@ export function DesktopTiers({
         );
       })}
       <p className="v4-perm-foot">
-        按后端对每个工具的声明归类
-        {known
-          ? `：看屏幕 ${tools.observe.length} · 点击和输入 ${tools.control.length} · 不可撤回 ${tools.high.length}`
-          : "；读取工具列表后显示每类包含的工具"}
+        {tr(
+          "按后端对每个工具的声明归类{0}",
+          known
+            ? tr(
+                "：看屏幕 {0} · 点击和输入 {1} · 不可撤回 {2}",
+                tools.observe.length,
+                tools.control.length,
+                tools.high.length,
+              )
+            : tr("；读取工具列表后显示每类包含的工具"),
+        )}
       </p>
     </section>
   );
@@ -624,10 +662,14 @@ function ruleText(rule: AllowRule) {
   if (rule.kind === "mcp.call")
     return rule.scope === "similar"
       ? `${rule.server} · ${rule.tool}`
-      : `${rule.server} · 所有“${tierLabels[rule.tier || "control"]}”工具`;
+      : tr(
+          "{0} · 所有“{1}”工具",
+          rule.server,
+          tierLabels[rule.tier || "control"],
+        );
   return rule.scope === "similar"
-    ? `${rule.program} · ${rule.cwd} 及子目录`
-    : `所有命令 · ${rule.cwd} 及子目录`;
+    ? tr("{0} · {1} 及子目录", rule.program, rule.cwd)
+    : tr("所有命令 · {0} 及子目录", rule.cwd);
 }
 /** Temporary approvals granted from prompts; held in worker memory only. */
 export function AllowRules({
@@ -658,8 +700,15 @@ export function AllowRules({
             </div>
             <small>
               {rule.expires_at
-                ? `${new Date(rule.expires_at).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })} 前有效`
-                : "直到执行器重启"}
+                ? tr(
+                    "{0} 前有效",
+                    new Date(rule.expires_at).toLocaleTimeString(getLocale(), {
+                      hour12: false,
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  )
+                : tr("直到执行器重启")}
             </small>
           </div>
           <button
@@ -669,38 +718,51 @@ export function AllowRules({
               act(
                 "control",
                 { action: "revoke_rule", args: { rule_id: rule.id } },
-                "已撤销临时允许",
+                tr("已撤销临时允许"),
               )
             }
           >
-            撤销
+            {tr("撤销")}
           </button>
         </div>
       ))}
       {!rules.length && (
         <p className="v4-note">
-          暂无临时允许。在确认请求中选择“15
-          分钟内允许同类”或“本次运行允许”后出现在这里，执行器重启后全部失效。
+          {tr(
+            "暂无临时允许。在确认请求中选择“15 分钟内允许同类”或“本次运行允许”后出现在这里，执行器重启后全部失效。",
+          )}
         </p>
       )}
     </div>
   );
 }
-const approvalModes = [
+const approvalModes = () => [
   {
     key: "direct",
-    label: "直接执行",
-    hint: "不做命令确认，适合专门给 Agent 使用的机器。",
+    get label() {
+      return tr("直接执行");
+    },
+    get hint() {
+      return tr("不做命令确认，适合专门给 Agent 使用的机器。");
+    },
   },
   {
     key: "risk",
-    label: "风险命令先问",
-    hint: "已知只读命令直接执行，其余命令先请你确认。",
+    get label() {
+      return tr("风险命令先问");
+    },
+    get hint() {
+      return tr("已知只读命令直接执行，其余命令先请你确认。");
+    },
   },
   {
     key: "all",
-    label: "每条都问",
-    hint: "每条命令都需要你点“允许”。",
+    get label() {
+      return tr("每条都问");
+    },
+    get hint() {
+      return tr("每条命令都需要你点“允许”。");
+    },
   },
 ];
 export function SafetyPanel({
@@ -746,14 +808,14 @@ export function SafetyPanel({
           <Terminal size={15} />
         </span>
         <div className="grow">
-          <b>运行命令</b>
+          <b>{tr("运行命令")}</b>
           <p>
-            {approvalModes.find((m) => m.key === draft?.approval)?.hint ||
-              "连接执行器后可设置工作目录和命令确认。"}
+            {approvalModes().find((m) => m.key === draft?.approval)?.hint ||
+              tr("连接执行器后可设置工作目录和命令确认。")}
           </p>
         </div>
-        <div className="v4-seg" role="group" aria-label="命令确认方式">
-          {approvalModes.map((mode) => (
+        <div className="v4-seg" role="group" aria-label={tr("命令确认方式")}>
+          {approvalModes().map((mode) => (
             <button
               key={mode.key}
               className={draft?.approval === mode.key ? "on" : ""}
@@ -771,8 +833,9 @@ export function SafetyPanel({
           <span className="v4-ico small" />
           <div className="grow">
             <p>
-              未知程序或脚本、重定向和管道、组合命令会先问你；60
-              秒未处理自动拒绝。规则不能识别所有脚本行为。
+              {tr(
+                "未知程序或脚本、重定向和管道、组合命令会先问你；60 秒未处理自动拒绝。规则不能识别所有脚本行为。",
+              )}
             </p>
           </div>
         </div>
@@ -782,20 +845,22 @@ export function SafetyPanel({
           <Folder size={15} />
         </span>
         <div className="grow">
-          <b>可以使用的目录</b>
+          <b>{tr("可以使用的目录")}</b>
           <p>
             {!draft
-              ? "连接执行器后可设置目录限制。"
+              ? tr("连接执行器后可设置目录限制。")
               : draft.restrict_paths
-                ? "命令的工作目录、文件读写和同步目标必须位于这些目录之内。"
-                : "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。"}
+                ? tr("命令的工作目录、文件读写和同步目标必须位于这些目录之内。")
+                : tr(
+                    "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。",
+                  )}
           </p>
           <div className="path-controls">
             {draft?.roots.map((root) => (
               <span className="pathchip mono" key={root}>
                 {root}
                 <button
-                  aria-label={`移除 ${root}`}
+                  aria-label={tr("移除 {0}", root)}
                   className="icon-button"
                   disabled={disabled}
                   onClick={() =>
@@ -819,7 +884,7 @@ export function SafetyPanel({
               >
                 <input
                   autoFocus
-                  aria-label="允许的绝对目录"
+                  aria-label={tr("允许的绝对目录")}
                   placeholder="/absolute/path"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
@@ -828,10 +893,10 @@ export function SafetyPanel({
                   }}
                 />
                 <button type="submit" disabled={!path.trim() || disabled}>
-                  添加
+                  {tr("添加")}
                 </button>
                 <button type="button" onClick={() => setAdding(false)}>
-                  取消
+                  {tr("取消")}
                 </button>
               </form>
             ) : (
@@ -841,17 +906,19 @@ export function SafetyPanel({
                 onClick={() => setAdding(true)}
               >
                 <Plus size={13} />
-                添加目录
+                {tr("添加目录")}
               </button>
             )}
           </div>
         </div>
         <label className="path-policy-toggle">
-          <small>{draft?.restrict_paths ? "仅限这些目录" : "任意目录"}</small>
+          <small>
+            {draft?.restrict_paths ? tr("仅限这些目录") : tr("任意目录")}
+          </small>
           <input
             className="switch"
             type="checkbox"
-            aria-label="限制工作目录"
+            aria-label={tr("限制工作目录")}
             checked={draft?.restrict_paths || false}
             disabled={disabled || !draft}
             onChange={(e) => update("restrict_paths", e.target.checked)}
@@ -862,7 +929,7 @@ export function SafetyPanel({
         <>
           <div className="v4-perm">
             <div className="grow">
-              <b>临时允许</b>
+              <b>{tr("临时允许")}</b>
               <AllowRules
                 rules={snapshot?.allow_rules || []}
                 act={act}
@@ -872,11 +939,11 @@ export function SafetyPanel({
           </div>
           <EnvProtection />
           <details className="feature-disclosure safety-options">
-            <summary>记录管理</summary>
+            <summary>{tr("记录管理")}</summary>
             <div className="feature-disclosure-body">
               {includeRetention && (
                 <label className="field">
-                  <span>任务记录保留</span>
+                  <span>{tr("任务记录保留")}</span>
                   <select
                     value={draft?.retention_days || 30}
                     disabled={disabled || !draft}
@@ -886,7 +953,7 @@ export function SafetyPanel({
                   >
                     {[7, 30, 90].map((n) => (
                       <option key={n} value={n}>
-                        {n} 天
+                        {tr("{0} 天", n)}
                       </option>
                     ))}
                   </select>
@@ -899,7 +966,7 @@ export function SafetyPanel({
       )}
       {dirty && (
         <div className="v4-savebar">
-          <small className="grow">更改尚未保存</small>
+          <small className="grow">{tr("更改尚未保存")}</small>
           <button
             disabled={disabled}
             onClick={() => {
@@ -907,7 +974,7 @@ export function SafetyPanel({
               setDirty(false);
             }}
           >
-            取消更改
+            {tr("取消更改")}
           </button>
           <button
             className="primary"
@@ -925,12 +992,12 @@ export function SafetyPanel({
                     roots: draft?.roots.filter((r) => r.trim()),
                   },
                 },
-                "安全设置已保存",
+                tr("安全设置已保存"),
               );
               if (saved !== undefined) setDirty(false);
             }}
           >
-            保存安全设置
+            {tr("保存安全设置")}
           </button>
         </div>
       )}
@@ -942,15 +1009,17 @@ export function EnvProtection() {
   return (
     <label className="v4-perm">
       <div className="grow">
-        <b>记录中隐藏环境变量的值</b>
-        <p>任务详情只显示变量名；命令自己打印的秘密仍可能出现在输出中。</p>
+        <b>{tr("记录中隐藏环境变量的值")}</b>
+        <p>
+          {tr("任务详情只显示变量名；命令自己打印的秘密仍可能出现在输出中。")}
+        </p>
       </div>
       <input
         type="checkbox"
         className="switch fixed-switch"
         checked
         disabled
-        aria-label="环境变量保护始终开启"
+        aria-label={tr("环境变量保护始终开启")}
       />
     </label>
   );
@@ -969,11 +1038,11 @@ export function PruneButton({
         act(
           "control",
           { action: "prune", args: {} },
-          "过期记录已清理，去重编号已保留",
+          tr("过期记录已清理，去重编号已保留"),
         )
       }
     >
-      清理过期记录
+      {tr("清理过期记录")}
     </button>
   );
 }
@@ -990,8 +1059,8 @@ export function WorkspaceList({
   return (
     <section className="workspace-section">
       <div className="row between">
-        <h2>工作区</h2>
-        <small>由服务器同步过来的目录</small>
+        <h2>{tr("工作区")}</h2>
+        <small>{tr("由服务器同步过来的目录")}</small>
       </div>
       <div className="card workspace-list">
         {workspaces.length ? (
@@ -1010,7 +1079,7 @@ export function WorkspaceList({
                 </small>
                 <small>
                   {statuses[w.status as keyof typeof statuses] || w.status} ·{" "}
-                  {new Date(w.time).toLocaleTimeString([], {
+                  {new Date(w.time).toLocaleTimeString(getLocale(), {
                     hour: "2-digit",
                     minute: "2-digit",
                     hour12: false,
@@ -1021,7 +1090,10 @@ export function WorkspaceList({
                 )}
               </div>
               <details className="workspace-actions">
-                <summary aria-label={`打开工作区 ${w.root}`} title="打开工作区">
+                <summary
+                  aria-label={tr("打开工作区 {0}", w.root)}
+                  title={tr("打开工作区")}
+                >
                   <span className={`dot ${w.status}`} />
                 </summary>
                 <div>
@@ -1030,38 +1102,41 @@ export function WorkspaceList({
                       act("open_workspace", { root: w.root, terminal: false })
                     }
                   >
-                    在访达中打开
+                    {tr("在访达中打开")}
                   </button>
                   <button
                     onClick={() =>
                       act("open_workspace", { root: w.root, terminal: true })
                     }
                   >
-                    在终端中打开
+                    {tr("在终端中打开")}
                   </button>
                 </div>
               </details>
             </div>
           ))
         ) : (
-          <p className="muted">完成首次同步后在这里显示。</p>
+          <p className="muted">{tr("完成首次同步后在这里显示。")}</p>
         )}
       </div>
       {workspaces.length > 6 && (
         <div className="row between workspace-pagination">
           <small>
-            已显示 {Math.min(limit, workspaces.length)} / {workspaces.length}{" "}
-            个工作区
+            {tr(
+              "已显示 {0} / {1} 个工作区",
+              Math.min(limit, workspaces.length),
+              workspaces.length,
+            )}
           </small>
           <div className="actions">
             {limit > 6 && (
               <button className="link" onClick={() => setLimit(6)}>
-                收起
+                {tr("收起")}
               </button>
             )}
             {limit < workspaces.length && (
               <button className="link" onClick={() => setLimit((v) => v + 6)}>
-                查看更多工作区
+                {tr("查看更多工作区")}
               </button>
             )}
           </div>
@@ -1101,7 +1176,7 @@ export function usePermissionChecks(read: Act = readNative, enabled = true) {
         errors.push(
           results[0].status === "rejected"
             ? failureText(results[0].reason)
-            : "未收到权限检查结果",
+            : tr("未收到权限检查结果"),
         );
       }
       if (results[1].status === "fulfilled" && results[1].value)
@@ -1111,7 +1186,7 @@ export function usePermissionChecks(read: Act = readNative, enabled = true) {
         errors.push(
           results[1].status === "rejected"
             ? failureText(results[1].reason)
-            : "未收到输入检测结果",
+            : tr("未收到输入检测结果"),
         );
       }
       setError(errors.join("；"));
@@ -1217,7 +1292,7 @@ export function BackendPanel({
         ? await act(command, params)
         : await act(command, params, success);
     if (result === undefined || result === false)
-      throw new Error("操作未完成，请查看错误提示后重试。");
+      throw new Error(tr("操作未完成，请查看错误提示后重试。"));
     return result;
   };
   const observe = async () => {
@@ -1229,12 +1304,12 @@ export function BackendPanel({
         Array.isArray(argumentsValue) ||
         typeof argumentsValue !== "object"
       ) {
-        setParseError("工具参数必须为 JSON 对象，例如 {}。");
+        setParseError(tr("工具参数必须为 JSON 对象，例如 {}。"));
         return;
       }
       setParseError("");
     } catch {
-      setParseError("工具参数必须为有效 JSON");
+      setParseError(tr("工具参数必须为有效 JSON"));
       return;
     }
     await perform("observe", async () => {
@@ -1248,7 +1323,7 @@ export function BackendPanel({
         },
       });
       if (!r?.task_id)
-        throw new Error("未收到操作记录，请在任务列表核对，勿重复执行。");
+        throw new Error(tr("未收到操作记录，请在任务列表核对，勿重复执行。"));
       setObservationError("");
       setObservation(r);
     });
@@ -1268,7 +1343,7 @@ export function BackendPanel({
           action: "task_detail",
           args: { task_id: observation.task_id },
         });
-        if (!r?.task_id) throw new Error("未收到操作状态");
+        if (!r?.task_id) throw new Error(tr("未收到操作状态"));
         if (cancelled) return;
         setObservation(r);
         setObservationError("");
@@ -1277,7 +1352,10 @@ export function BackendPanel({
       } catch (error) {
         if (!cancelled)
           setObservationError(
-            `无法读取操作状态：${failureText(error)}。可重新读取状态，不会再次执行工具。`,
+            tr(
+              "无法读取操作状态：{0}。可重新读取状态，不会再次执行工具。",
+              failureText(error),
+            ),
           );
       }
     };
@@ -1307,12 +1385,12 @@ export function BackendPanel({
           (t: any) => !t || typeof t.name !== "string" || !t.name,
         )
       )
-        throw new Error("后端未返回有效工具列表");
+        throw new Error(tr("后端未返回有效工具列表"));
       if (append && value.session !== tools.session)
-        throw new Error("后端会话已变化，请重新读取工具。");
+        throw new Error(tr("后端会话已变化，请重新读取工具。"));
       const cursors = append ? [...(tools.cursors || []), cursor] : [];
       if (value.result.nextCursor && cursors.includes(value.result.nextCursor))
-        throw new Error("后端重复返回分页位置，请重新读取工具。");
+        throw new Error(tr("后端重复返回分页位置，请重新读取工具。"));
       const items = append
         ? [...tools.result.tools, ...value.result.tools]
         : value.result.tools;
@@ -1328,36 +1406,36 @@ export function BackendPanel({
     });
   const checks = [
     {
-      name: "辅助功能 · Macrun Desktop",
+      name: tr("辅助功能 · Macrun Desktop"),
       optional: true,
       ok: permissions?.accessibility,
       detail: permissions?.accessibility
-        ? "当前应用已授权；后端点击和输入仍使用后端自己的权限"
-        : "当前应用未获授权；不代表桌面后端未授权",
+        ? tr("当前应用已授权；后端点击和输入仍使用后端自己的权限")
+        : tr("当前应用未获授权；不代表桌面后端未授权"),
       kind: "accessibility",
     },
     {
-      name: "屏幕录制 · Macrun Desktop",
+      name: tr("屏幕录制 · Macrun Desktop"),
       optional: true,
       ok: permissions?.screen_recording,
       detail: permissions?.screen_recording
-        ? "当前应用已授权；实际截图由后端完成"
-        : "当前应用未获授权；截图由后端完成，无需为此重复授权",
+        ? tr("当前应用已授权；实际截图由后端完成")
+        : tr("当前应用未获授权；截图由后端完成，无需为此重复授权"),
       kind: "screen",
     },
     {
-      name: "图形登录会话",
+      name: tr("图形登录会话"),
       ok: permissions?.graphical_session,
       detail: permissions?.graphical_session
-        ? "当前用户已登录"
-        : "桌面操作需要图形登录会话",
+        ? tr("当前用户已登录")
+        : tr("桌面操作需要图形登录会话"),
     },
     {
-      name: "防止自动休眠",
+      name: tr("防止自动休眠"),
       ok: permissions?.keep_awake,
       detail: permissions?.keep_awake
-        ? "桌面操作期间正在保持唤醒"
-        : "睡眠后连接与桌面操作都会中断",
+        ? tr("桌面操作期间正在保持唤醒")
+        : tr("睡眠后连接与桌面操作都会中断"),
       awake: true,
     },
   ];
@@ -1366,13 +1444,13 @@ export function BackendPanel({
       {mode !== "advanced" && (
         <section className="requirements-section">
           <div className="row between">
-            <h2>Macrun 自身状态</h2>
+            <h2>{tr("Macrun 自身状态")}</h2>
             <button
               className="link"
               disabled={permissionPending}
               onClick={check}
             >
-              {permissionPending ? "检查中…" : "检查系统权限"}
+              {permissionPending ? tr("检查中…") : tr("检查系统权限")}
             </button>
           </div>
           <div className="card">
@@ -1391,7 +1469,7 @@ export function BackendPanel({
                 </span>
                 <div className="grow">
                   <b>{c.name}</b>
-                  <small>{permissions ? c.detail : "尚未检查"}</small>
+                  <small>{permissions ? c.detail : tr("尚未检查")}</small>
                 </div>
                 {c.kind && permissions && !c.ok && (
                   <button
@@ -1404,7 +1482,7 @@ export function BackendPanel({
                       )
                     }
                   >
-                    系统设置
+                    {tr("系统设置")}
                   </button>
                 )}
                 {c.awake && app && (
@@ -1426,23 +1504,25 @@ export function BackendPanel({
                       )
                     }
                   >
-                    {app.preferences.keep_awake ? "关闭保持唤醒" : "保持唤醒"}
+                    {app.preferences.keep_awake
+                      ? tr("关闭保持唤醒")
+                      : tr("保持唤醒")}
                   </button>
                 )}
               </div>
             ))}
           </div>
           <small className="input-permission-note">
-            以上权限仅检查 Macrun
-            应用，不代表桌面后端的权限。请为实际后端应用（例如 CuaDriver）授权，
-            并在“后端实拍与状态核对”中检查；旧版 macrun 的授权也不等同于 Macrun
-            Desktop。
+            {tr(
+              "以上权限仅检查 Macrun 应用，不代表桌面后端的权限。请为实际后端应用（例如 CuaDriver）授权， 并在“后端实拍与状态核对”中检查；旧版 macrun 的授权也不等同于 Macrun Desktop。",
+            )}
           </small>
           {permissions &&
             (!permissions.accessibility || !permissions.screen_recording) && (
               <small className="input-permission-note">
-                如果系统设置中已开启，但当前应用仍未获授权，请完全退出后重新打开。
-                更换过签名的旧授权可能需要在系统设置中重新添加当前应用。返回此页后会自动刷新。
+                {tr(
+                  "如果系统设置中已开启，但当前应用仍未获授权，请完全退出后重新打开。 更换过签名的旧授权可能需要在系统设置中重新添加当前应用。返回此页后会自动刷新。",
+                )}
               </small>
             )}
           {permissionError && (
@@ -1452,7 +1532,7 @@ export function BackendPanel({
           )}
           {input && !input.available && (
             <small className="input-permission-note">
-              本机输入检测尚不可用。
+              {tr("本机输入检测尚不可用。")}
               <button
                 className="link"
                 disabled={!!pending}
@@ -1464,9 +1544,9 @@ export function BackendPanel({
                   )
                 }
               >
-                授权输入监控
+                {tr("授权输入监控")}
               </button>
-              后重启应用。
+              {tr("后重启应用。")}
             </small>
           )}
         </section>
@@ -1475,13 +1555,15 @@ export function BackendPanel({
         <div className="backend-advanced">
           <CuaSetup act={act} read={read} />
           <details className="feature-disclosure card">
-            <summary>后端实拍与状态核对</summary>
+            <summary>{tr("后端实拍与状态核对")}</summary>
             <div className="feature-disclosure-body">
               <p className="muted">
-                工具由后端提供，可能包含点击和输入操作。请核对用途后选择只读观察或截图工具；结果未知的操作不会自动重放。
+                {tr(
+                  "工具由后端提供，可能包含点击和输入操作。请核对用途后选择只读观察或截图工具；结果未知的操作不会自动重放。",
+                )}
               </p>
               <label className="field">
-                <span>后端</span>
+                <span>{tr("后端")}</span>
                 <select
                   value={server}
                   disabled={!!pending || observing}
@@ -1494,7 +1576,7 @@ export function BackendPanel({
                     setOperationError("");
                   }}
                 >
-                  <option value="">选择后端</option>
+                  <option value="">{tr("选择后端")}</option>
                   {snapshot?.backends.map((b) => (
                     <option key={b.name} value={b.name}>
                       {b.display_name || b.name}
@@ -1509,7 +1591,7 @@ export function BackendPanel({
                   }
                   onClick={() => discoverTools()}
                 >
-                  {pending === "tools" ? "读取工具中…" : "读取工具"}
+                  {pending === "tools" ? tr("读取工具中…") : tr("读取工具")}
                 </button>
                 <button
                   disabled={
@@ -1520,31 +1602,33 @@ export function BackendPanel({
                       await mutate(
                         "control",
                         { action: "restart_backend", args: { server } },
-                        "后端会话已失效，请重新读取工具",
+                        tr("后端会话已失效，请重新读取工具"),
                       );
                       setTools(null);
                       setTool("");
                     })
                   }
                 >
-                  {pending === "restart" ? "重启中…" : "重启后端"}
+                  {pending === "restart" ? tr("重启中…") : tr("重启后端")}
                 </button>
               </div>
               {!executorAvailable && (
                 <small className="input-permission-note">
-                  连接执行器后可读取工具和核对桌面操作。
+                  {tr("连接执行器后可读取工具和核对桌面操作。")}
                 </small>
               )}
               {tools && (
                 <>
                   <label className="field">
-                    <span>工具（{tools.result?.tools?.length || 0}）</span>
+                    <span>
+                      {tr("工具（{0}）", tools.result?.tools?.length || 0)}
+                    </span>
                     <select
                       value={tool}
                       disabled={!!pending || observing}
                       onChange={(e) => setTool(e.target.value)}
                     >
-                      <option value="">选择观察或截图工具</option>
+                      <option value="">{tr("选择观察或截图工具")}</option>
                       {tools.result?.tools?.map((t: any) => (
                         <option key={t.name}>{t.name}</option>
                       ))}
@@ -1555,7 +1639,7 @@ export function BackendPanel({
                       disabled={!!pending || observing || !executorAvailable}
                       onClick={() => discoverTools(true)}
                     >
-                      读取更多工具
+                      {tr("读取更多工具")}
                     </button>
                   )}
                   {tool && (
@@ -1563,7 +1647,7 @@ export function BackendPanel({
                       <p className="muted">
                         {tools.result?.tools?.find((t: any) => t.name === tool)
                           ?.description ||
-                          "后端未提供工具说明，请先核对其用途。"}
+                          tr("后端未提供工具说明，请先核对其用途。")}
                       </p>
                       <pre className="schema">
                         {JSON.stringify(
@@ -1576,7 +1660,7 @@ export function BackendPanel({
                     </>
                   )}
                   <label className="field">
-                    <span>工具参数 JSON</span>
+                    <span>{tr("工具参数 JSON")}</span>
                     <textarea
                       value={args}
                       disabled={!!pending || observing}
@@ -1602,12 +1686,14 @@ export function BackendPanel({
                     }
                     onClick={observe}
                   >
-                    {pending === "observe" ? "提交中…" : "执行观察并核对"}
+                    {pending === "observe"
+                      ? tr("提交中…")
+                      : tr("执行观察并核对")}
                   </button>
                   {(!snapshot?.policy.desktop_enabled ||
                     snapshot.policy.paused) && (
                     <small className="input-permission-note">
-                      请先连接执行器、取消暂停并开启桌面控制。
+                      {tr("请先连接执行器、取消暂停并开启桌面控制。")}
                     </small>
                   )}
                 </>
@@ -1620,9 +1706,11 @@ export function BackendPanel({
               {observation && (
                 <>
                   <p>
-                    状态：
-                    {statuses[observation.status as keyof typeof statuses] ||
-                      observation.status}
+                    {tr(
+                      "状态：{0}",
+                      statuses[observation.status as keyof typeof statuses] ||
+                        observation.status,
+                    )}
                   </p>
                   {observation.error && (
                     <p className="error-text" role="alert">
@@ -1643,7 +1731,7 @@ export function BackendPanel({
                       setObservationRetry((v) => v + 1);
                     }}
                   >
-                    重新读取状态
+                    {tr("重新读取状态")}
                   </button>
                 </>
               )}
@@ -1652,7 +1740,7 @@ export function BackendPanel({
           <details className="feature-disclosure backend-config">
             <summary>
               <Plus size={15} />
-              添加 / 编辑 MCP 后端
+              {tr("添加 / 编辑 MCP 后端")}
             </summary>
             <div className="feature-disclosure-body card">
               <button
@@ -1663,7 +1751,7 @@ export function BackendPanel({
                     async () => {
                       const config = await read("backend_config");
                       if (typeof config !== "string")
-                        throw new Error("未收到后端配置");
+                        throw new Error(tr("未收到后端配置"));
                       setText(config);
                       setConfigNotice("");
                     },
@@ -1671,12 +1759,12 @@ export function BackendPanel({
                   )
                 }
               >
-                {pending === "config-read" ? "读取配置中…" : "读取配置"}
+                {pending === "config-read" ? tr("读取配置中…") : tr("读取配置")}
               </button>
               {text !== null && (
                 <>
                   <label className="field">
-                    <span>worker.toml（修改前断开连接）</span>
+                    <span>{tr("worker.toml（修改前断开连接）")}</span>
                     <textarea
                       className="config-editor"
                       value={text}
@@ -1700,25 +1788,27 @@ export function BackendPanel({
                           await mutate(
                             "save_backends",
                             { text },
-                            "配置已保存并备份，重新连接后生效",
+                            tr("配置已保存并备份，重新连接后生效"),
                           );
                           setConfigDirty(false);
-                          setConfigNotice("配置已保存并备份，重新连接后生效。");
+                          setConfigNotice(
+                            tr("配置已保存并备份，重新连接后生效。"),
+                          );
                         },
                         "config",
                       )
                     }
                   >
-                    {pending === "config-save" ? "保存中…" : "保存配置"}
+                    {pending === "config-save" ? tr("保存中…") : tr("保存配置")}
                   </button>
                   {configDirty && (
                     <small className="input-permission-note">
-                      更改尚未保存。
+                      {tr("更改尚未保存。")}
                     </small>
                   )}
                   {(app?.worker_running || app?.worker_starting) && (
                     <small className="input-permission-note">
-                      请先断开连接，再保存后端配置。
+                      {tr("请先断开连接，再保存后端配置。")}
                     </small>
                   )}
                 </>
@@ -1763,7 +1853,9 @@ function ResultImage({
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
   return failed ? (
-    <small role="status">截图无法显示，请核对后端返回的图片格式。</small>
+    <small role="status">
+      {tr("截图无法显示，请核对后端返回的图片格式。")}
+    </small>
   ) : (
     <img
       className={className}
@@ -1778,7 +1870,7 @@ function structuredPreview(value: unknown) {
   let truncated = false;
   const omitted = () => {
     truncated = true;
-    return "…（已省略）";
+    return tr("…（已省略）");
   };
   const limit = (item: unknown, depth = 0): unknown => {
     if (remaining-- <= 0 || depth > 6) return omitted();
@@ -1818,7 +1910,7 @@ export function ToolResult({ value }: { value: any }) {
     <>
       {value?.result?.isError === true && (
         <p className="error-text" role="alert">
-          后端工具报告执行失败，请查看返回内容。
+          {tr("后端工具报告执行失败，请查看返回内容。")}
         </p>
       )}
       {content.map((c: any, i: number) =>
@@ -1826,7 +1918,7 @@ export function ToolResult({ value }: { value: any }) {
           <ResultImage
             className="observation"
             key={i}
-            alt="后端观察截图"
+            alt={tr("后端观察截图")}
             src={imageSource(c)!}
           />
         ) : c?.type === "text" && typeof c.text === "string" ? (
@@ -1835,19 +1927,19 @@ export function ToolResult({ value }: { value: any }) {
           </pre>
         ) : (
           <small className="input-permission-note" key={i}>
-            此返回内容暂不支持预览。
+            {tr("此返回内容暂不支持预览。")}
           </small>
         ),
       )}
       {structured && (
         <details className="feature-disclosure">
-          <summary>结构化结果</summary>
-          <pre className="schema" aria-label="结构化结果 JSON">
+          <summary>{tr("结构化结果")}</summary>
+          <pre className="schema" aria-label={tr("结构化结果 JSON")}>
             {structured.text}
           </pre>
           {structured.truncated && (
             <small className="input-permission-note">
-              预览已截断较长内容；这里只显示结果，不会执行工具。
+              {tr("预览已截断较长内容；这里只显示结果，不会执行工具。")}
             </small>
           )}
         </details>
@@ -1907,7 +1999,8 @@ export function Replay({
         action: "task_detail",
         args: { task_id: taskId },
       });
-      if (record?.task_id !== taskId) throw new Error("未收到匹配的操作记录");
+      if (record?.task_id !== taskId)
+        throw new Error(tr("未收到匹配的操作记录"));
       if (visibleIds.current.has(taskId)) {
         recordsRef.current = { ...recordsRef.current, [taskId]: record };
         setRecords(recordsRef.current);
@@ -1931,7 +2024,7 @@ export function Replay({
       if (version === selection.current) setDetail(record);
     } catch (error) {
       if (version === selection.current)
-        setError(`操作记录读取失败：${failureText(error)}`);
+        setError(tr("操作记录读取失败：{0}", failureText(error)));
     } finally {
       if (version === selection.current) setLoadingTask("");
     }
@@ -1939,7 +2032,7 @@ export function Replay({
   return (
     <section className="replay-section">
       <div className="row between">
-        <h2>最近操作</h2>
+        <h2>{tr("最近操作")}</h2>
         <div className="actions">
           {recent.length > 0 && (
             <button
@@ -1957,13 +2050,13 @@ export function Replay({
                       await loadRecord(task.task_id);
                     } catch (error) {
                       failures.push(
-                        `${task.arguments.tool || "桌面操作"}：${failureText(error)}`,
+                        `${task.arguments.tool || tr("桌面操作")}：${failureText(error)}`,
                       );
                     }
                   }
                   if (failures.length)
                     setError(
-                      `部分截图读取失败，可重试：${failures.join("；")}`,
+                      tr("部分截图读取失败，可重试：{0}", failures.join("；")),
                     );
                 } finally {
                   screenshotsLoading.current = false;
@@ -1971,12 +2064,12 @@ export function Replay({
                 }
               }}
             >
-              {loading ? "读取中…" : "显示截图"}
+              {loading ? tr("读取中…") : tr("显示截图")}
             </button>
           )}
           {onTasks && (
             <button className="link" onClick={onTasks}>
-              在任务中查看
+              {tr("在任务中查看")}
             </button>
           )}
         </div>
@@ -2000,19 +2093,22 @@ export function Replay({
                 {thumbnail(t.task_id) ? (
                   <ResultImage
                     src={thumbnail(t.task_id)!}
-                    alt={`${t.arguments.tool || "桌面操作"}的记录截图`}
+                    alt={tr(
+                      "{0}的记录截图",
+                      t.arguments.tool || tr("桌面操作"),
+                    )}
                   />
                 ) : (
                   <>
                     <Monitor size={24} />
                     <small>
                       {loadingTask === t.task_id
-                        ? "读取记录中…"
+                        ? tr("读取记录中…")
                         : records[t.task_id]
                           ? terminalStatuses.has(records[t.task_id].status)
-                            ? "这次操作没有截图"
-                            : "操作进行中，点按刷新"
-                          : "查看操作记录"}
+                            ? tr("这次操作没有截图")
+                            : tr("操作进行中，点按刷新")
+                          : tr("查看操作记录")}
                     </small>
                   </>
                 )}
@@ -2021,9 +2117,9 @@ export function Replay({
                 <span className="muted mono">
                   {String(i + 1).padStart(2, "0")}
                 </span>
-                <b className="ellipsis">{t.arguments.tool || "桌面调用"}</b>
+                <b className="ellipsis">{t.arguments.tool || tr("桌面调用")}</b>
                 <small className="mono">
-                  {new Date(t.started_at).toLocaleTimeString([], {
+                  {new Date(t.started_at).toLocaleTimeString(getLocale(), {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}{" "}
@@ -2035,16 +2131,16 @@ export function Replay({
         </div>
       ) : (
         <div className="card replay-empty muted">
-          完成桌面操作后，可在这里查看调用记录和截图。
+          {tr("完成桌面操作后，可在这里查看调用记录和截图。")}
         </div>
       )}
       {detail && (
         <div className="card replay-detail" ref={detailSection}>
           <div className="row between">
-            <h3>操作详情</h3>
+            <h3>{tr("操作详情")}</h3>
             <button
               className="icon-button"
-              aria-label="关闭操作详情"
+              aria-label={tr("关闭操作详情")}
               onClick={() => {
                 selection.current++;
                 setDetail(null);
@@ -2055,8 +2151,10 @@ export function Replay({
             </button>
           </div>
           <p>
-            状态：
-            {statuses[detail.status as keyof typeof statuses] || detail.status}
+            {tr(
+              "状态：{0}",
+              statuses[detail.status as keyof typeof statuses] || detail.status,
+            )}
           </p>
           {detail.error?.message && (
             <p className="error-text" role="alert">
@@ -2069,8 +2167,11 @@ export function Replay({
           {detail.arguments?.arguments?.x !== undefined &&
             detail.arguments?.arguments?.y !== undefined && (
               <p className="mono">
-                点击位置：({detail.arguments.arguments.x},{" "}
-                {detail.arguments.arguments.y})
+                {tr(
+                  "点击位置：({0}, {1})",
+                  detail.arguments.arguments.x,
+                  detail.arguments.arguments.y,
+                )}
               </p>
             )}
           <ToolResult value={detail.result} />

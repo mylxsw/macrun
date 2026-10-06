@@ -121,7 +121,9 @@ export type Snapshot = {
   };
 };
 export type AppState = {
+  locale?: "zh-CN" | "en";
   preferences: {
+    language?: "system" | "zh-CN" | "en";
     show_overlay: boolean;
     yield_input: boolean;
     notifications: boolean;

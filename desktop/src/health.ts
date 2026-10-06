@@ -1,3 +1,4 @@
+import { tr } from "./i18n.mjs";
 import type { AppState, Snapshot } from "./types";
 import { clock } from "./format";
 
@@ -27,48 +28,51 @@ export function desktopChecks(
   const checks: DesktopCheck[] = [
     {
       key: "backend",
-      title: "已配置桌面后端",
+      title: tr("已配置桌面后端"),
       ok: !!backend,
       detail: backend
         ? `${backend.display_name || backend.name} · ${
             backend.tool_count != null
-              ? `已读取 ${backend.tool_count} 个工具`
+              ? tr("已读取 {0} 个工具", backend.tool_count)
               : backend.state === "not_started"
-                ? "首次调用时启动"
-                : "已启动"
+                ? tr("首次调用时启动")
+                : tr("已启动")
           }`
-        : "需要一个本机 computer-use 后端，例如 CuaDriver",
+        : tr("需要一个本机 computer-use 后端，例如 CuaDriver"),
     },
   ];
   if (backend)
     checks.push({
       key: "verified",
-      title: "后端能截图和操作",
+      title: tr("后端能截图和操作"),
       ok: !!lastGood,
       detail: lastGood
-        ? `最近一次桌面调用 ${clock(lastGood.ended_at || lastGood.started_at)} 成功`
+        ? tr(
+            "最近一次桌面调用 {0} 成功",
+            clock(lastGood.ended_at || lastGood.started_at),
+          )
         : lastBad
-          ? "最近的桌面调用没有成功，请实拍核对后端的辅助功能和屏幕录制权限"
-          : "还没有成功的桌面调用；实拍一次确认后端已获系统授权",
+          ? tr("最近的桌面调用没有成功，请实拍核对后端的辅助功能和屏幕录制权限")
+          : tr("还没有成功的桌面调用；实拍一次确认后端已获系统授权"),
     });
   checks.push(
     {
       key: "session",
-      title: "有人登录图形界面",
+      title: tr("有人登录图形界面"),
       ok: permissions ? !!permissions.graphical_session : null,
       detail: !permissions
-        ? "正在检查…"
+        ? tr("正在检查…")
         : permissions.graphical_session
-          ? "当前用户已登录"
-          : "桌面操作需要图形登录会话",
+          ? tr("当前用户已登录")
+          : tr("桌面操作需要图形登录会话"),
     },
     {
       key: "enabled",
-      title: "允许 Agent 操作桌面",
+      title: tr("允许 Agent 操作桌面"),
       ok: !!snapshot?.policy.desktop_enabled,
       detail: snapshot?.policy.desktop_enabled
-        ? "总开关；“停止全部”会关闭它"
-        : "已关闭，Agent 的桌面请求会被拒绝",
+        ? tr("总开关；“停止全部”会关闭它")
+        : tr("已关闭，Agent 的桌面请求会被拒绝"),
     },
   );
   return checks;
@@ -114,8 +118,8 @@ export function health(
 
 /** One-line summary for the overview pill. */
 export function healthLine(h: Health) {
-  if (!h.commands) return "命令不可用";
-  if (!h.desktopEnabled) return "命令可用 · 桌面已关闭";
-  if (!h.desktopMissing) return "一切就绪";
-  return `命令可用 · 桌面需要 ${h.desktopMissing} 步`;
+  if (!h.commands) return tr("命令不可用");
+  if (!h.desktopEnabled) return tr("命令可用 · 桌面已关闭");
+  if (!h.desktopMissing) return tr("一切就绪");
+  return tr("命令可用 · 桌面需要 {0} 步", h.desktopMissing);
 }

@@ -1,3 +1,4 @@
+import { tr } from "./i18n.mjs";
 import React, { useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
@@ -27,7 +28,7 @@ export function CommandPreview({ command }: { command: string }) {
         ref={text}
         id={id}
         className={`mono v4-command-text${expanded ? " expanded" : ""}`}
-        aria-label="完整命令"
+        aria-label={tr("完整命令")}
       >
         {command}
       </pre>
@@ -39,7 +40,7 @@ export function CommandPreview({ command }: { command: string }) {
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          {expanded ? "收起命令" : "展开命令"}
+          {expanded ? tr("收起命令") : tr("展开命令")}
         </button>
       )}
     </div>

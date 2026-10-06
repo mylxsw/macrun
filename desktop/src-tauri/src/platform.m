@@ -4,6 +4,13 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
+bool macrun_system_chinese(void) {
+    @autoreleasepool {
+        NSString *language = NSLocale.preferredLanguages.firstObject;
+        return [[language lowercaseString] hasPrefix:@"zh"];
+    }
+}
+
 // Finder's bundle icon and the running application's Dock tile have separate
 // lifetimes. Set the latter explicitly after launch, including after an update.
 bool macrun_set_application_icon(const unsigned char *bytes, size_t length) {

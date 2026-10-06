@@ -1303,3 +1303,127 @@ test("performance navigation opens the dashboard and remains usable after worker
   await screen.findByText("暂无匹配的性能历史。");
   expect(screen.getByText(/执行器已停止 · 仍可查看/)).toBeTruthy();
 });
+
+test("saved English preference localizes navigation, history and approvals", async () => {
+  Object.assign(app.preferences, { language: "en" });
+  await mount();
+  expect(document.documentElement.lang).toBe("en");
+  const nav = within(
+    screen.getByRole("navigation", { name: "Main navigation" }),
+  );
+  expect(nav.getByRole("button", { name: /^Overview/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
+  await userEvent.setup().click(nav.getByRole("button", { name: "Activity" }));
+  await userEvent
+    .setup()
+    .selectOptions(
+      screen.getByRole("combobox", { name: "More filters" }),
+      "unknown",
+    );
+  const details = within(screen.getByRole("region", { name: "Task details" }));
+  await waitFor(() => expect(details.getByText("task-unknown")).toBeTruthy());
+  expect(
+    details.getByText(
+      "Received unknown; Macrun does not replay automatically.",
+    ),
+  ).toBeTruthy();
+  expect(
+    details.getByRole("button", { name: "Check in This Mac" }),
+  ).toBeTruthy();
+  await userEvent.setup().click(nav.getByRole("button", { name: "This Mac" }));
+  expect(
+    screen.getByText("Show an orange screen border and floating indicator"),
+  ).toBeTruthy();
+  await userEvent
+    .setup()
+    .click(nav.getByRole("button", { name: "Permissions" }));
+  expect(screen.getByRole("radio", { name: /Balanced/ })).toBeTruthy();
+});
+
+test("language changes persist all preferences and update retained pages without losing search", async () => {
+  const original = bridge.invoke.getMockImplementation();
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "save_preferences") {
+      Object.assign(app.preferences, args.preferences);
+      return null;
+    }
+    return original?.(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "活动" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "搜索任务" }),
+    "command-running",
+  );
+  await user.click(settingsButton());
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "语言" }),
+    "en",
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeTruthy(),
+  );
+  expect(bridge.invoke).toHaveBeenCalledWith("save_preferences", {
+    preferences: { ...app.preferences, language: "en" },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Activity", exact: true }),
+  );
+  expect(
+    (screen.getByRole("textbox", { name: "Search tasks" }) as HTMLInputElement)
+      .value,
+  ).toBe("command-running");
+  await user.click(
+    screen.getByRole("button", { name: "Settings", exact: true }),
+  );
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "Language" }),
+    "zh-CN",
+  );
+  await waitFor(() => expect(document.documentElement.lang).toBe("zh-CN"));
+  expect(screen.getByRole("heading", { level: 1, name: "设置" })).toBeTruthy();
+});
+
+test("failed language save retains the current language and can be retried", async () => {
+  const original = bridge.invoke.getMockImplementation();
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "save_preferences") throw new Error("Disk full");
+    return original?.(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(settingsButton());
+  await user.selectOptions(
+    screen.getByRole("combobox", { name: "语言" }),
+    "en",
+  );
+  await waitFor(() =>
+    expect(screen.getByText("Error: Disk full")).toBeTruthy(),
+  );
+  expect(document.documentElement.lang).toBe("zh-CN");
+  expect(
+    (screen.getByRole("combobox", { name: "语言" }) as HTMLSelectElement).value,
+  ).toBe("system");
+});
+
+test("preference events synchronize other windows and system language uses the native locale", async () => {
+  await mount();
+  Object.assign(app.preferences, { language: "system" });
+  await emit("preferences-changed", {
+    preferences: app.preferences,
+    locale: "en",
+  });
+  expect(document.documentElement.lang).toBe("en");
+  expect(
+    screen.getByRole("navigation", { name: "Main navigation" }),
+  ).toBeTruthy();
+  await emit("preferences-changed", {
+    preferences: { ...app.preferences, language: "zh-CN" },
+    locale: "zh-CN",
+  });
+  expect(document.documentElement.lang).toBe("zh-CN");
+  expect(screen.getByRole("navigation", { name: "主导航" })).toBeTruthy();
+});

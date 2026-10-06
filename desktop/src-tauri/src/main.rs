@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod connection_check;
 mod cua_driver;
+mod localization;
 mod migration;
 mod native;
 #[cfg(target_os = "macos")]
@@ -10,6 +11,7 @@ mod native_panel;
 mod panel_model;
 mod supervisor;
 mod tray;
+use crate::localization::{interpolate as tr_format, text as tr};
 use anyhow::{Context, Result};
 use macrun::{local, wire};
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,7 @@ impl Settings {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct Preferences {
+    language: localization::Language,
     show_overlay: bool,
     yield_input: bool,
     notifications: bool,
@@ -79,6 +82,7 @@ struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            language: localization::Language::System,
             show_overlay: true,
             yield_input: true,
             notifications: true,
@@ -87,14 +91,55 @@ impl Default for Preferences {
         }
     }
 }
+
+#[cfg(test)]
+mod preference_tests {
+    use super::*;
+
+    #[test]
+    fn old_preferences_keep_every_flag_and_default_to_system_language() {
+        let old = json!({"show_overlay":false,"yield_input":false,"notifications":false,"keep_awake":false,"auto_connect":false});
+        let mut preferences: Preferences = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(preferences.language, localization::Language::System);
+        preferences.language = localization::Language::English;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preferences.json");
+        wire::atomic_json(&path, &preferences).unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["language"], "en");
+        for (key, value) in old.as_object().unwrap() {
+            assert_eq!(saved[key], *value);
+        }
+        let restored: Preferences = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.language, localization::Language::English);
+        assert!(!restored.auto_connect && !restored.notifications);
+    }
+}
 #[tauri::command]
 fn save_preferences(
     preferences: Preferences,
+    app: tauri::AppHandle,
     rt: tauri::State<Runtime>,
 ) -> std::result::Result<(), String> {
+    let mut current = rt.preferences.lock().unwrap();
     wire::atomic_json(&rt.data.join("preferences.json"), &preferences)
         .map_err(|e| e.to_string())?;
-    *rt.preferences.lock().unwrap() = preferences;
+    localization::apply(preferences.language);
+    *current = preferences.clone();
+    drop(current);
+    let _ = app.emit(
+        "preferences-changed",
+        json!({"preferences":preferences,"locale":localization::locale()}),
+    );
+    if let Err(error) = native_menu(&app) {
+        let _ = app.emit("control-error", error.to_string());
+    }
+    if let Some(icon) = app.tray_by_id("macrun") {
+        let state = tray::TrayState::from_snapshot(&rt.snapshot.lock().unwrap());
+        let _ = icon.set_tooltip(Some(format!("Macrun · {}", state.label())));
+    }
+    #[cfg(target_os = "macos")]
+    native_panel::update(&app, &rt.snapshot.lock().unwrap());
     Ok(())
 }
 #[derive(Clone)]
@@ -130,7 +175,7 @@ fn set_main_mode(
     app: tauri::AppHandle,
     rt: tauri::State<Runtime>,
 ) -> std::result::Result<(), String> {
-    let window = app.get_webview_window("main").ok_or("主窗口不可用")?;
+    let window = app.get_webview_window("main").ok_or(tr("主窗口不可用"))?;
     let mut layout = rt.window_layout.lock().unwrap();
     if layout.pairing == pairing {
         return Ok(());
@@ -154,7 +199,7 @@ fn set_main_mode(
 #[tauri::command]
 fn resize_panel(window: tauri::WebviewWindow, height: f64) -> std::result::Result<(), String> {
     if window.label() != "tray" || !height.is_finite() {
-        return Err("仅快捷面板支持内容高度调整".into());
+        return Err(tr("仅快捷面板支持内容高度调整").into());
     }
     window
         .set_size(tauri::LogicalSize::new(
@@ -273,14 +318,20 @@ fn native_menu(app: &tauri::AppHandle) -> Result<()> {
         .and_then(|item| item.as_submenu().cloned())
     {
         window.insert(
-            &MenuItem::with_id(app, "open-main", "打开主窗口", true, Some("CmdOrCtrl+O"))?,
+            &MenuItem::with_id(
+                app,
+                "open-main",
+                tr("打开主窗口"),
+                true,
+                Some("CmdOrCtrl+O"),
+            )?,
             0,
         )?;
         window.insert(
             &MenuItem::with_id(
                 app,
                 "open-panel",
-                "菜单栏面板",
+                tr("菜单栏面板"),
                 true,
                 Some("CmdOrCtrl+Shift+M"),
             )?,
@@ -295,7 +346,7 @@ fn native_menu(app: &tauri::AppHandle) -> Result<()> {
         .and_then(|item| item.as_submenu().cloned())
     {
         application.insert(
-            &MenuItem::with_id(app, "open-settings", "设置…", true, Some("CmdOrCtrl+,"))?,
+            &MenuItem::with_id(app, "open-settings", tr("设置…"), true, Some("CmdOrCtrl+,"))?,
             2,
         )?;
         // The native Quit item can terminate before the webview confirmation.
@@ -306,19 +357,12 @@ fn native_menu(app: &tauri::AppHandle) -> Result<()> {
         application.append(&MenuItem::with_id(
             app,
             "request-quit",
-            "退出 Macrun",
+            tr("退出 Macrun"),
             true,
             Some("CmdOrCtrl+Q"),
         )?)?;
     }
     app.set_menu(menu)?;
-    app.on_menu_event(|app, event| match event.id().as_ref() {
-        "open-main" => show(app, None),
-        "open-panel" => show_tray(app, false),
-        "open-settings" => show(app, Some("settings")),
-        "request-quit" => request_exit(app),
-        _ => {}
-    });
     Ok(())
 }
 fn legacy_running() -> bool {
@@ -381,7 +425,7 @@ fn read_app_state(app: &tauri::AppHandle) -> Value {
     let running = child
         .as_mut()
         .is_some_and(|c| c.try_wait().ok().flatten().is_none());
-    json!({"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"worker_starting":rt.starting.load(Ordering::SeqCst),"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":system.legacy_running,"legacy_detected":system.legacy_detected,"autostart":system.autostart,"platform":std::env::consts::OS})
+    json!({"locale":localization::locale(),"preferences":*rt.preferences.lock().unwrap(),"worker_running":running,"worker_starting":rt.starting.load(Ordering::SeqCst),"snapshot":*rt.snapshot.lock().unwrap(),"settings":rt.settings.lock().unwrap().public_value(),"data_dir":rt.data,"legacy_running":system.legacy_running,"legacy_detected":system.legacy_detected,"autostart":system.autostart,"platform":std::env::consts::OS})
 }
 
 #[cfg(test)]
@@ -440,7 +484,7 @@ async fn save_settings(
         save_settings_inner(settings, &rt)
     })
     .await
-    .map_err(|_| "保存连接配置的后台任务异常，请重试".to_owned())?
+    .map_err(|_| tr("保存连接配置的后台任务异常，请重试").to_owned())?
 }
 
 fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Result<(), String> {
@@ -452,21 +496,21 @@ fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Res
         {
             let _guard = configuration_edit_guard(rt)?;
         }
-        anyhow::ensure!(!settings.server.trim().is_empty(), "请填写服务器地址");
+        anyhow::ensure!(!settings.server.trim().is_empty(), tr("请填写服务器地址"));
         anyhow::ensure!(
             !settings
                 .connections
                 .iter()
                 .any(|c| c.server == settings.server),
-            "该服务器已在连接列表中"
+            tr("该服务器已在连接列表中")
         );
         anyhow::ensure!(
             PathBuf::from(&settings.cert).is_file(),
-            "服务器证书文件不存在"
+            tr("服务器证书文件不存在")
         );
         anyhow::ensure!(
             !settings.keychain_account.is_empty() || PathBuf::from(&settings.token_file).is_file(),
-            "令牌文件不存在"
+            tr("令牌文件不存在")
         );
         if !settings.backend_config.is_empty() {
             let _: macrun::config::WorkerConfig = toml_config(&settings.backend_config)?;
@@ -480,7 +524,7 @@ fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Res
         settings.certificate_fingerprint = blake3::hash(&cert_bytes).to_hex().to_string();
         if settings.keychain_account.is_empty() {
             let token = std::fs::read_to_string(&settings.token_file)?;
-            anyhow::ensure!(!token.trim().is_empty(), "令牌文件为空");
+            anyhow::ensure!(!token.trim().is_empty(), tr("令牌文件为空"));
             let account = uuid::Uuid::new_v4().to_string();
             security_framework::passwords::set_generic_password(
                 "dev.macrun.desktop",
@@ -494,7 +538,7 @@ fn save_settings_inner(mut settings: Settings, rt: &Runtime) -> std::result::Res
         // active connection, keeping this short lock away from Keychain calls.
         let _guard = configuration_edit_guard(rt)?;
         let mut current = rt.settings.lock().unwrap();
-        anyhow::ensure!(*current == original, "连接配置已变化，请重新检查后保存");
+        anyhow::ensure!(*current == original, tr("连接配置已变化，请重新检查后保存"));
         wire::atomic_json(&rt.data.join("connection.json"), &settings)?;
         *current = settings;
         Ok(())
@@ -507,18 +551,18 @@ fn configuration_edit_guard(
     let mut child = rt.child.lock().unwrap();
     anyhow::ensure!(
         !rt.migrating.load(Ordering::SeqCst),
-        "正在迁移，请等待完成后修改连接"
+        tr("正在迁移，请等待完成后修改连接")
     );
     anyhow::ensure!(
         !rt.starting.load(Ordering::SeqCst),
-        "正在启动，请等待完成后修改连接"
+        tr("正在启动，请等待完成后修改连接")
     );
-    anyhow::ensure!(!rt.exiting.load(Ordering::SeqCst), "应用正在退出");
+    anyhow::ensure!(!rt.exiting.load(Ordering::SeqCst), tr("应用正在退出"));
     anyhow::ensure!(
         !child
             .as_mut()
             .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
-        "请先断开连接再修改配置"
+        tr("请先断开连接再修改配置")
     );
     Ok(child)
 }
@@ -535,7 +579,7 @@ impl<'a> StartAttempt<'a> {
     fn begin(starting: &'a AtomicBool) -> std::result::Result<Self, String> {
         starting
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| "执行器正在启动，请先完成系统授权并等待结果".to_owned())?;
+            .map_err(|_| tr("执行器正在启动，请先完成系统授权并等待结果").to_owned())?;
         Ok(Self {
             starting,
             app: None,
@@ -563,7 +607,7 @@ async fn read_credential_in_background(
 ) -> std::result::Result<Vec<u8>, String> {
     tauri::async_runtime::spawn_blocking(read)
         .await
-        .map_err(|_| "读取连接凭据的后台任务异常，请重试连接".to_owned())?
+        .map_err(|_| tr("读取连接凭据的后台任务异常，请重试连接").to_owned())?
 }
 
 #[cfg(test)]
@@ -652,9 +696,9 @@ async fn resolved_worker_address(address: &str) -> std::result::Result<String, S
     let host = &address[prefix.len()..];
     let resolved = tokio::net::lookup_host(host)
         .await
-        .map_err(|e| format!("服务器地址无效：{e}"))?
+        .map_err(|e| tr_format("服务器地址无效：{0}", &[format!("{e}")]))?
         .find(|a| a.is_ipv4())
-        .ok_or("当前版本需要 IPv4 地址")?;
+        .ok_or(tr("当前版本需要 IPv4 地址"))?;
     Ok(format!("{prefix}{resolved}"))
 }
 
@@ -668,21 +712,21 @@ async fn start_worker(
     {
         let mut child = rt.child.lock().unwrap();
         if rt.migrating.load(Ordering::SeqCst) {
-            return Err("正在迁移旧执行器，请稍后连接".into());
+            return Err(tr("正在迁移旧执行器，请稍后连接").into());
         }
         if rt.exiting.load(Ordering::SeqCst) {
-            return Err("应用正在退出，未启动执行器".into());
+            return Err(tr("应用正在退出，未启动执行器").into());
         }
         if let Some(child) = child.as_mut()
             && child.try_wait().map_err(|e| e.to_string())?.is_none()
         {
-            return Err("执行器已经运行".into());
+            return Err(tr("执行器已经运行").into());
         }
     }
     if !cfg.certificate_fingerprint.is_empty() {
         let bytes = std::fs::read(&cfg.cert).map_err(|e| e.to_string())?;
         if blake3::hash(&bytes).to_hex().as_str() != cfg.certificate_fingerprint {
-            return Err("固定证书已变化，请重新配对或导入".into());
+            return Err(tr("固定证书已变化，请重新配对或导入").into());
         }
     }
     let address = if cfg.connections.is_empty() {
@@ -691,9 +735,10 @@ async fn start_worker(
         None
     }; // Multi-server workers resolve each address independently.
     if legacy_running() {
-        return Err(
-            "检测到旧 LaunchAgent。请先完成迁移，避免重复运行；本版本不会自动停止旧服务。".into(),
-        );
+        return Err(tr(
+            "检测到旧 LaunchAgent。请先完成迁移，避免重复运行；本版本不会自动停止旧服务。",
+        )
+        .into());
     }
     // Keychain may wait for a system authorization dialog. Do not hold the
     // lifecycle lock or block an async executor thread during that wait.
@@ -704,7 +749,7 @@ async fn start_worker(
         Some(
             read_credential_in_background(move || {
                 security_framework::passwords::get_generic_password("dev.macrun.desktop", &account)
-                    .map_err(|_| "无法从钥匙串读取连接凭据，请重试连接或重新配对".to_owned())
+                    .map_err(|_| tr("无法从钥匙串读取连接凭据，请重试连接或重新配对").to_owned())
             })
             .await?,
         )
@@ -729,18 +774,21 @@ async fn start_worker(
         },
     });
     for c in &cfg.connections {
-        uuid::Uuid::parse_str(&c.id).map_err(|_| "无效的连接编号")?;
+        uuid::Uuid::parse_str(&c.id).map_err(|_| tr("无效的连接编号"))?;
         if !c.certificate_fingerprint.is_empty() {
             let bytes = std::fs::read(&c.cert).map_err(|e| e.to_string())?;
             if blake3::hash(&bytes).to_hex().as_str() != c.certificate_fingerprint {
-                return Err(format!("{} 的固定证书已变化，请重新配对", c.name));
+                return Err(tr_format(
+                    "{0} 的固定证书已变化，请重新配对",
+                    std::slice::from_ref(&c.name),
+                ));
             }
         }
         if !c.keychain_account.is_empty() {
             let account = c.keychain_account.clone();
             let token = read_credential_in_background(move || {
                 security_framework::passwords::get_generic_password("dev.macrun.desktop", &account)
-                    .map_err(|_| "无法读取服务器连接凭据".to_owned())
+                    .map_err(|_| tr("无法读取服务器连接凭据").to_owned())
             })
             .await?;
             credentials.insert(
@@ -764,22 +812,22 @@ async fn start_worker(
         let mut slot = rt.child.lock().unwrap();
         anyhow::ensure!(
             !rt.migrating.load(Ordering::SeqCst),
-            "正在迁移旧执行器，请稍后连接"
+            tr("正在迁移旧执行器，请稍后连接")
         );
         anyhow::ensure!(
             !rt.exiting.load(Ordering::SeqCst),
-            "应用正在退出，未启动执行器"
+            tr("应用正在退出，未启动执行器")
         );
         // DNS and Keychain authorization can outlive a migration or connection
         // edit. Never spawn with credentials captured before that await.
         anyhow::ensure!(
             *rt.settings.lock().unwrap() == cfg,
-            "连接配置已变化，请重新连接"
+            tr("连接配置已变化，请重新连接")
         );
         if let Some(c) = slot.as_mut()
             && c.try_wait()?.is_none()
         {
-            anyhow::bail!("执行器已经运行");
+            anyhow::bail!(tr("执行器已经运行"));
         }
         let bundled = std::env::current_exe()?
             .parent()
@@ -866,7 +914,7 @@ async fn start_worker(
         if token.is_some() {
             command.arg("--token-stdin");
         }
-        let mut child = command.spawn().context("无法启动随应用分发的 worker")?;
+        let mut child = command.spawn().context(tr("无法启动随应用分发的 worker"))?;
         if let Some(token) = token {
             use std::io::Write;
             let pipe = child.stdin.as_mut().context("missing credential pipe")?;
@@ -890,18 +938,18 @@ async fn pair(
     let result:Result<Value>=async {
         {let _guard=configuration_edit_guard(&rt)?;}
         let original=rt.settings.lock().unwrap().clone();
-        anyhow::ensure!(add!=Some(true) || original.connections.len()<15,"最多可保存 16 台服务器");
+        anyhow::ensure!(add!=Some(true) || original.connections.len()<15,tr("最多可保存 16 台服务器"));
         let (candidate,_) = macrun::pairing::parse(&uri)?;
-        anyhow::ensure!(!original.connections.iter().any(|c|c.server==candidate.server),"该服务器已经保存，请先移除原连接后重新添加");
-        if add==Some(true) {anyhow::ensure!(original.server!=candidate.server,"该服务器已是主连接");}
+        anyhow::ensure!(!original.connections.iter().any(|c|c.server==candidate.server),tr("该服务器已经保存，请先移除原连接后重新添加"));
+        if add==Some(true) {anyhow::ensure!(original.server!=candidate.server,tr("该服务器已是主连接"));}
         let cert=rt.data.join(format!("paired-{}.der",uuid::Uuid::new_v4()));
         let (invite,token)=macrun::pairing::exchange(&uri,&cert).await?;
         let account=uuid::Uuid::new_v4().to_string();
         let connection_id=if add==Some(true) && !original.server.is_empty() {account.clone()} else {"primary".into()};
-        security_framework::passwords::set_generic_password("dev.macrun.desktop",&account,token.as_bytes()).map_err(|_|anyhow::anyhow!("钥匙串写入失败，请检查系统授权并生成新邀请"))?;
+        security_framework::passwords::set_generic_password("dev.macrun.desktop",&account,token.as_bytes()).map_err(|_|anyhow::anyhow!(tr("钥匙串写入失败，请检查系统授权并生成新邀请")))?;
         let _guard=configuration_edit_guard(&rt)?;
         let mut current=rt.settings.lock().unwrap();
-        anyhow::ensure!(*current==original,"连接配置已变化，请重新配对");
+        anyhow::ensure!(*current==original,tr("连接配置已变化，请重新配对"));
         let mut settings=original;
         if add==Some(true) && !settings.server.is_empty() {
             settings.connections.push(SavedConnection{id:account.clone(),name:invite.server.clone(),server:invite.server,cert:cert.to_string_lossy().into(),token_file:"/dev/null".into(),keychain_account:account,certificate_fingerprint:invite.fingerprint.clone()});
@@ -920,7 +968,10 @@ fn remove_connection(id: String, rt: tauri::State<Runtime>) -> std::result::Resu
         let _guard = configuration_edit_guard(&rt)?;
         let mut current = rt.settings.lock().unwrap();
         let mut next = current.clone();
-        anyhow::ensure!(next.connections.iter().any(|c| c.id == id), "未找到连接");
+        anyhow::ensure!(
+            next.connections.iter().any(|c| c.id == id),
+            tr("未找到连接")
+        );
         next.connections.retain(|c| c.id != id);
         wire::atomic_json(&rt.data.join("connection.json"), &next)?;
         *current = next;
@@ -961,7 +1012,7 @@ async fn control(
     ]
     .contains(&action.as_str())
     {
-        return Err("不支持的控制操作".into());
+        return Err(tr("不支持的控制操作").into());
     }
     local::request(&rt.socket, &action, args)
         .await
@@ -994,14 +1045,14 @@ async fn export_metrics(
 ) -> std::result::Result<Value, String> {
     use tauri_plugin_dialog::DialogExt;
     if !["json", "csv"].contains(&format.as_str()) {
-        return Err("不支持的导出格式".into());
+        return Err(tr("不支持的导出格式").into());
     }
     let profiles = metrics_profiles(&rt);
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
         .set_file_name(format!("macrun-performance.{format}"))
-        .add_filter("性能数据", &[&format])
+        .add_filter(tr("性能数据"), &[&format])
         .save_file(move |path| {
             let _ = tx.send(path);
         });
@@ -1045,7 +1096,7 @@ async fn stop_worker(
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        return Err("执行器仍在退出，请稍候重试；已有连接配置已保留".into());
+        return Err(tr("执行器仍在退出，请稍候重试；已有连接配置已保留").into());
     }
     Ok(())
 }
@@ -1056,7 +1107,7 @@ async fn exit_app(
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
     if rt.migrating.load(Ordering::SeqCst) {
-        return Err("正在迁移旧执行器，请等待完成后退出".into());
+        return Err(tr("正在迁移旧执行器，请等待完成后退出").into());
     }
     let running = rt
         .child
@@ -1071,7 +1122,7 @@ async fn exit_app(
                 .as_ref()
                 .map_or(true, |s| s["active_count"].as_u64().unwrap_or(0) > 0)
         {
-            return Err("仍有任务运行或状态未知，请确认退出。".into());
+            return Err(tr("仍有任务运行或状态未知，请确认退出。").into());
         }
         rt.desired_running.store(false, Ordering::SeqCst);
         if let Err(e) = local::request(&rt.socket, "shutdown", json!({})).await {
@@ -1079,12 +1130,15 @@ async fn exit_app(
             if let Some(c) = rt.child.lock().unwrap().as_mut() {
                 c.stdin.take();
             }
-            return Err(format!("已请求执行器停止，请稍后再退出：{e}"));
+            return Err(tr_format(
+                "已请求执行器停止，请稍后再退出：{0}",
+                &[format!("{e}")],
+            ));
         }
     }
     let _lifecycle = rt.child.lock().unwrap();
     if rt.migrating.load(Ordering::SeqCst) {
-        return Err("正在迁移旧执行器，请等待完成后退出".into());
+        return Err(tr("正在迁移旧执行器，请等待完成后退出").into());
     }
     rt.desired_running.store(false, Ordering::SeqCst);
     rt.exiting.store(true, Ordering::SeqCst);
@@ -1094,7 +1148,7 @@ async fn exit_app(
 #[tauri::command]
 fn open_log(task_id: Option<String>, rt: tauri::State<Runtime>) -> std::result::Result<(), String> {
     let p = if let Some(id) = task_id {
-        let id = uuid::Uuid::parse_str(&id).map_err(|_| "无效任务编号")?;
+        let id = uuid::Uuid::parse_str(&id).map_err(|_| tr("无效任务编号"))?;
         rt.data
             .join("worker/tasks")
             .join(id.to_string())
@@ -1103,7 +1157,7 @@ fn open_log(task_id: Option<String>, rt: tauri::State<Runtime>) -> std::result::
         rt.data.join("worker.log")
     };
     if !p.is_file() {
-        return Err("当前任务没有文本日志".into());
+        return Err(tr("当前任务没有文本日志").into());
     }
     Command::new("open")
         .arg(p)
@@ -1142,7 +1196,7 @@ fn request_quit(app: tauri::AppHandle) {
 fn request_exit(app: &tauri::AppHandle) {
     if app.state::<Runtime>().migrating.load(Ordering::SeqCst) {
         show(app, None);
-        let _ = app.emit("control-error", "正在迁移旧执行器，请等待完成后退出");
+        let _ = app.emit("control-error", tr("正在迁移旧执行器，请等待完成后退出"));
         return;
     }
     show(app, None);
@@ -1236,10 +1290,11 @@ fn main() {
             let socket = std::env::temp_dir()
                 .join(format!("macrun-desktop-{}", &hash[..16]))
                 .join("control.sock");
-            let preferences = std::fs::read(data.join("preferences.json"))
+            let preferences: Preferences = std::fs::read(data.join("preferences.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default();
+            localization::apply(preferences.language);
             app.manage(Runtime {
                 data,
                 socket,
@@ -1262,7 +1317,7 @@ fn main() {
             tauri::tray::TrayIconBuilder::with_id("macrun")
                 .icon(tray_image(tray::TrayState::Offline))
                 .icon_as_template(true)
-                .tooltip("Macrun · 本机执行器")
+                .tooltip(tr("Macrun · 本机执行器"))
                 .on_tray_icon_event(|icon, event| {
                     if let tauri::tray::TrayIconEvent::Click {
                         button_state: tauri::tray::MouseButtonState::Up,
@@ -1281,7 +1336,7 @@ fn main() {
                 "tray",
                 tauri::WebviewUrl::App("index.html?tray=1".into()),
             )
-            .title("Macrun · 菜单栏")
+            .title(tr("Macrun · 菜单栏"))
             .shadow(false)
             .inner_size(352., 510.)
             .resizable(false)
@@ -1296,7 +1351,7 @@ fn main() {
                 "overlay",
                 tauri::WebviewUrl::App("index.html?overlay=1".into()),
             )
-            .title("Macrun · 屏幕提示")
+            .title(tr("Macrun · 屏幕提示"))
             .inner_size(600., 64.)
             .resizable(false)
             .decorations(false)
@@ -1323,7 +1378,10 @@ fn main() {
                         format!("border-{i}-{side}"),
                         tauri::WebviewUrl::App("index.html?border=1".into()),
                     )
-                    .title(format!("Macrun · 屏幕边框 {}-{}", i + 1, side + 1))
+                    .title(tr_format(
+                        "Macrun · 屏幕边框 {0}-{1}",
+                        &[format!("{}", i + 1), format!("{}", side + 1)],
+                    ))
                     .decorations(false)
                     .resizable(false)
                     .focusable(false)
@@ -1350,6 +1408,13 @@ fn main() {
                 }
             }
             native_menu(app.handle())?;
+            app.on_menu_event(|app, event| match event.id().as_ref() {
+                "open-main" => show(app, None),
+                "open-panel" => show_tray(app, false),
+                "open-settings" => show(app, Some("settings")),
+                "request-quit" => request_exit(app),
+                _ => {}
+            });
             unsafe {
                 native::macrun_monitor_start();
             }
@@ -1411,7 +1476,7 @@ fn main() {
                     } else if budget.take_exhausted_notice(running, desired) {
                         let _ = monitor.emit(
                             "control-error",
-                            "执行器连续退出，已暂停自动重试。请查看日志后在设置中重新连接。",
+                            tr("执行器连续退出，已暂停自动重试。请查看日志后在设置中重新连接。"),
                         );
                     }
                 }

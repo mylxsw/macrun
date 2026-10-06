@@ -1,6 +1,7 @@
 //! What the native menu panel shows, derived from a worker snapshot.
 //! Kept free of Tauri and AppKit types so it is unit tested on every platform.
 //! The step summary and project rules mirror `desktop/src/model.mjs`.
+use crate::localization::{interpolate as tr_format, text as tr};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -171,7 +172,7 @@ pub fn project_of(task: &Value, workspaces: &[Value]) -> Project {
     if task["kind"] == "mcp.call" {
         return Project {
             key: format!("{connection}|desktop"),
-            name: "桌面".into(),
+            name: tr("桌面").into(),
             tag: String::new(),
             desktop: true,
         };
@@ -208,7 +209,7 @@ pub fn project_of(task: &Value, workspaces: &[Value]) -> Project {
         }
     }
     let parts: Vec<&str> = root.split('/').filter(|p| !p.is_empty()).collect();
-    let name = parts.last().copied().unwrap_or("未知目录").to_owned();
+    let name = parts.last().copied().unwrap_or(tr("未知目录")).to_owned();
     let mut tag = if parts.len() >= 2 {
         parts[parts.len() - 2].to_owned()
     } else {
@@ -268,9 +269,9 @@ fn server_label(name: &str, index: usize) -> String {
     if !looks_like_address(name) {
         name.to_owned()
     } else if index == 0 {
-        "主服务器".into()
+        tr("主服务器").into()
     } else {
-        format!("服务器 {}", index + 1)
+        tr_format("服务器 {0}", &[format!("{}", index + 1)])
     }
 }
 
@@ -288,10 +289,10 @@ fn clock(ms: u64) -> String {
 
 fn ago(ms: u64) -> String {
     match ms / 60_000 {
-        0 => "刚刚".into(),
-        m if m < 60 => format!("{m} 分钟前"),
-        m if m < 24 * 60 => format!("{} 小时前", m / 60),
-        m => format!("{} 天前", m / (24 * 60)),
+        0 => tr("刚刚").into(),
+        m if m < 60 => tr_format("{0} 分钟前", &[format!("{m}")]),
+        m if m < 24 * 60 => tr_format("{0} 小时前", &[format!("{}", m / 60)]),
+        m => tr_format("{0} 天前", &[format!("{}", m / (24 * 60))]),
     }
 }
 
@@ -307,7 +308,7 @@ fn last_line(text: &str) -> String {
 }
 
 fn desktop_step(task: &Value) -> String {
-    let tool = task["arguments"]["tool"].as_str().unwrap_or("桌面操作");
+    let tool = task["arguments"]["tool"].as_str().unwrap_or(tr("桌面操作"));
     let args = &task["arguments"]["arguments"];
     for key in ["text", "label", "title", "name", "app", "window", "key"] {
         if let Some(v) = args[key].as_str().filter(|v| !v.is_empty()) {
@@ -324,14 +325,16 @@ fn step_of(task: &Value) -> String {
     if task["kind"] == "sync" {
         let p = &task["progress"];
         return match (p["received"].as_u64(), p["total"].as_u64()) {
-            (Some(r), Some(t)) => format!("同步文件 · {r}/{t}"),
-            _ => "同步文件".into(),
+            (Some(r), Some(t)) => {
+                tr_format("同步文件 · {0}/{1}", &[format!("{r}"), format!("{t}")])
+            }
+            _ => tr("同步文件").into(),
         };
     }
     if task["kind"] == "mcp.call" {
         return desktop_step(task);
     }
-    step_summary(task["arguments"]["command"].as_str().unwrap_or("命令")).0
+    step_summary(task["arguments"]["command"].as_str().unwrap_or(tr("命令"))).0
 }
 
 /// Problems the person should know about: Macrun-level failures only.
@@ -348,22 +351,22 @@ fn risk_reasons(command: &str) -> Vec<String> {
     ];
     let mut reasons = Vec::new();
     if command.contains('|') {
-        reasons.push("管道".to_owned());
+        reasons.push(tr("管道").to_owned());
     }
     if command.contains(['>', '<']) {
-        reasons.push("重定向".to_owned());
+        reasons.push(tr("重定向").to_owned());
     }
     if command.contains([';', '&', '\n']) {
-        reasons.push("组合命令".to_owned());
+        reasons.push(tr("组合命令").to_owned());
     }
     if command.contains(['`', '$', '(', ')']) {
-        reasons.push("命令替换".to_owned());
+        reasons.push(tr("命令替换").to_owned());
     }
     let first = command.split_whitespace().next().unwrap_or("");
     if !first.is_empty() && !READ_ONLY.contains(&first) {
-        reasons.push(format!(
-            "未知程序 {}",
-            first.rsplit('/').next().unwrap_or(first)
+        reasons.push(tr_format(
+            "未知程序 {0}",
+            &[first.rsplit('/').next().unwrap_or(first).to_string()],
         ));
     }
     reasons
@@ -371,9 +374,9 @@ fn risk_reasons(command: &str) -> Vec<String> {
 
 fn tier_label(tier: &str) -> &'static str {
     match tier {
-        "observe" => "看屏幕",
-        "high" => "不可撤回的操作",
-        _ => "点击和输入",
+        "observe" => tr("看屏幕"),
+        "high" => tr("不可撤回的操作"),
+        _ => tr("点击和输入"),
     }
 }
 
@@ -391,14 +394,14 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
             .enumerate()
             .map(|(i, c)| {
                 (
-                    server_label(c["name"].as_str().unwrap_or("服务器"), i),
+                    server_label(c["name"].as_str().unwrap_or(tr("服务器")), i),
                     c["connection"]["state"] == "connected",
                     c["connection"]["error"].as_str().map(str::to_owned),
                 )
             })
             .collect(),
         _ => vec![(
-            "服务器".into(),
+            tr("服务器").into(),
             v["connection"]["state"] == "connected",
             v["connection"]["error"].as_str().map(str::to_owned),
         )],
@@ -491,7 +494,7 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
                 .as_u64()
                 .or(t["started_at"].as_u64())
                 .unwrap_or(now);
-            recent.push(json!({"id":t["task_id"],"name":p.name,"tag":p.tag,"detail":format!("{count} 个任务"),"when":ago(now.saturating_sub(ended))}));
+            recent.push(json!({"id":t["task_id"],"name":p.name,"tag":p.tag,"detail":tr_format("{0} 个任务", &[format!("{count}")]),"when":ago(now.saturating_sub(ended))}));
             if recent.len() == 2 {
                 break;
             }
@@ -515,7 +518,7 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
         } else {
             t["arguments"]["command"].as_str().unwrap_or("").to_owned()
         };
-        let countdown = format!("{left} 秒后自动拒绝");
+        let countdown = tr_format("{0} 秒后自动拒绝", &[format!("{left}")]);
         let server = if t["connection_name"].is_string() {
             label_of(t)
         } else {
@@ -527,19 +530,19 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
             .collect::<Vec<_>>()
             .join(" · ");
         let reasons = if desktop {
-            vec![format!("{}类桌面操作", tier_label(tier))]
+            vec![tr_format("{0}类桌面操作", &[tier_label(tier).to_string()])]
         } else {
             risk_reasons(t["arguments"]["command"].as_str().unwrap_or(""))
         };
         json!({
             "id": t["task_id"],
-            "title": if desktop { "Agent 想操作桌面".to_owned() } else { format!("{} 想运行一条命令", project.name) },
+            "title": if desktop { tr("Agent 想操作桌面").to_owned() } else { tr_format("{0} 想运行一条命令", std::slice::from_ref(&project.name)) },
             "meta": meta,
             "command": command,
             "reasons": reasons,
             "cwd": t["arguments"]["cwd"].as_str().unwrap_or(""),
-            "similar": if desktop { "15 分钟内允许这个工具" } else { "15 分钟内允许同类命令" },
-            "session": if desktop { format!("本次运行允许{}", tier_label(tier)) } else { "本次运行允许此目录".to_owned() },
+            "similar": if desktop { tr("15 分钟内允许这个工具") } else { tr("15 分钟内允许同类命令") },
+            "session": if desktop { tr_format("本次运行允许{0}", &[tier_label(tier).to_string()]) } else { tr("本次运行允许此目录").to_owned() },
             "count": approvals.len(),
         })
     });
@@ -548,42 +551,45 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
     if available && online < servers.len() && online > 0 {
         for (name, ok, err) in &servers {
             if !ok {
-                problems.push(json!({"text":format!("连不上 {name}"),"detail":err.clone().unwrap_or_else(|| "正在自动重连".into()),"button":"查看","action":{"action":"open","route":"desktop"}}));
+                problems.push(json!({"text":tr_format("连不上 {0}", std::slice::from_ref(name)),"detail":err.clone().unwrap_or_else(|| tr("正在自动重连").into()),"button":tr("查看"),"action":{"action":"open","route":"desktop"}}));
             }
         }
     }
     if available && paused && (online > 0) && !(working.is_empty() && approvals.is_empty()) {
-        problems.push(json!({"text":"已暂停接收新任务","detail":"正在进行的任务会继续完成","button":"恢复","action":{"action":"pause","args":{"paused":false}}}));
+        problems.push(json!({"text":tr("已暂停接收新任务"),"detail":tr("正在进行的任务会继续完成"),"button":tr("恢复"),"action":{"action":"pause","args":{"paused":false}}}));
     }
 
     let connection_text = if servers.len() > 1 {
-        format!("{online}/{} 台服务器在线", servers.len())
+        tr_format(
+            "{0}/{1} 台服务器在线",
+            &[format!("{online}"), format!("{}", servers.len())],
+        )
     } else {
         match v["connection"]["rtt_ms"].as_u64() {
-            Some(ms) => format!("已连接 · {ms} ms"),
-            None => "已连接".into(),
+            Some(ms) => tr_format("已连接 · {0} ms", &[format!("{ms}")]),
+            None => tr("已连接").into(),
         }
     };
     let (tone, title, subtitle, primary) = if !available {
         (
             "off",
-            "执行器未运行".to_owned(),
-            "打开 Macrun 查看连接".to_owned(),
-            json!({"label":"打开","action":{"action":"open","route":"desktop"}}),
+            tr("执行器未运行").to_owned(),
+            tr("打开 Macrun 查看连接").to_owned(),
+            json!({"label":tr("打开"),"action":{"action":"open","route":"desktop"}}),
         )
     } else if online == 0 {
         let (name, _, err) = &servers[0];
         (
             "error",
             if servers.len() > 1 {
-                "所有服务器都未连接".to_owned()
-            } else if name == "服务器" {
-                "未连接服务器".to_owned()
+                tr("所有服务器都未连接").to_owned()
+            } else if name == tr("服务器") {
+                tr("未连接服务器").to_owned()
             } else {
-                format!("连不上 {name}")
+                tr_format("连不上 {0}", std::slice::from_ref(name))
             },
-            err.clone().unwrap_or_else(|| "正在自动重连".into()),
-            json!({"label":"检查连接","action":{"action":"open","route":"desktop"}}),
+            err.clone().unwrap_or_else(|| tr("正在自动重连").into()),
+            json!({"label":tr("检查连接"),"action":{"action":"open","route":"desktop"}}),
         )
     } else if let Some(a) = &approval {
         (
@@ -595,41 +601,42 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
     } else if paused && working.is_empty() {
         (
             "paused",
-            "已暂停接收新任务".to_owned(),
+            tr("已暂停接收新任务").to_owned(),
             connection_text.clone(),
-            json!({"label":"恢复","action":{"action":"pause","args":{"paused":false}},"primary":true}),
+            json!({"label":tr("恢复"),"action":{"action":"pause","args":{"paused":false}},"primary":true}),
         )
     } else if !working.is_empty() {
         let code_projects = projects - desktop_rows;
         let title = match (code_projects, desktop_rows) {
-            (0, _) => "Agent 正在操作桌面".to_owned(),
-            (1, _) => format!(
-                "正在处理 {}",
-                groups[&order
+            (0, _) => tr("Agent 正在操作桌面").to_owned(),
+            (1, _) => tr_format(
+                "正在处理 {0}",
+                &[groups[&order
                     .iter()
                     .find(|k| !groups[*k].0.desktop)
                     .cloned()
                     .unwrap_or_default()]
                     .0
                     .name
+                    .to_string()],
             ),
-            (n, _) => format!("正在 {n} 个项目上工作"),
+            (n, _) => tr_format("正在 {0} 个项目上工作", &[format!("{n}")]),
         };
         let mut sub = Vec::new();
         if code_projects > 0 && desktop_rows > 0 {
-            sub.push("另有桌面操作".to_owned());
+            sub.push(tr("另有桌面操作").to_owned());
         }
         sub.push(connection_text.clone());
         (
             if code_projects == 0 { "desktop" } else { "run" },
             title,
             sub.join(" · "),
-            json!({"label":"停止","action":{"action":"stop_all"},"danger":true}),
+            json!({"label":tr("停止"),"action":{"action":"stop_all"},"danger":true}),
         )
     } else {
         (
             "ok",
-            "就绪，等待 Agent".to_owned(),
+            tr("就绪，等待 Agent").to_owned(),
             connection_text.clone(),
             Value::Null,
         )
@@ -637,13 +644,17 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
     let today_total = v["today_summary"]["total"].as_u64().unwrap_or(0);
     let today_problems = problem_count(&v["today_summary"]);
     let today = if available {
-        format!(
-            "今天 {today_total} 个任务 · {}",
-            if today_problems == 0 {
-                "没有问题".to_owned()
-            } else {
-                format!("{today_problems} 个问题")
-            }
+        tr_format(
+            "今天 {0} 个任务 · {1}",
+            &[
+                format!("{today_total}"),
+                (if today_problems == 0 {
+                    tr("没有问题").to_owned()
+                } else {
+                    tr_format("{0} 个问题", &[format!("{today_problems}")])
+                })
+                .to_string(),
+            ],
         )
     } else {
         String::new()
@@ -651,6 +662,7 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
     // Structure changes rebuild the AppKit views; text-only changes update
     // labels in place so latency ticks never flicker the panel.
     let structure = json!([
+        crate::localization::locale(),
         tone,
         primary["label"],
         approval.as_ref().map(|a| a["id"].clone()),
@@ -664,6 +676,24 @@ pub fn presentation(v: &Value, pending: Vec<String>, error: String, now: u64) ->
     ])
     .to_string();
     json!({
+        "labels": json!({"取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）":tr("取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）"),
+    "拒绝":tr("拒绝"),
+    "允许一次":tr("允许一次"),
+    "更多允许方式":tr("更多允许方式"),
+    "更多":tr("更多"),
+    "桌面操作":tr("桌面操作"),
+    "%@ %@，查看任务详情":tr("%@ %@，查看任务详情"),
+    "还有 %ld 个项目":tr("还有 %ld 个项目"),
+    "最近":tr("最近"),
+    "恢复":tr("恢复"),
+    "查看今天的活动":tr("查看今天的活动"),
+    "接收新任务":tr("接收新任务"),
+    "允许 Agent 操作桌面":tr("允许 Agent 操作桌面"),
+    "打开 Macrun":tr("打开 Macrun"),
+    "设置…":tr("设置…"),
+    "退出 Macrun":tr("退出 Macrun"),
+    "正在请求执行器…":tr("正在请求执行器…"),
+    "Macrun · 快捷面板":tr("Macrun · 快捷面板")}),
         "tone": tone,
         "title": title,
         "subtitle": subtitle,

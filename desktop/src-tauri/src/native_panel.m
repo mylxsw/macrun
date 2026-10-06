@@ -234,7 +234,7 @@ static NSColor *toneColor(NSString *tone) {
             button.attributedTitle = [[NSAttributedString alloc] initWithString:primary[@"label"]
                 attributes:@{NSForegroundColorAttributeName: NSColor.systemRedColor,
                              NSFontAttributeName: [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold]}];
-            button.toolTip = @"取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）";
+            button.toolTip = [self localized:@"取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）"];
         }
         if ([primary[@"primary"] boolValue]) button.keyEquivalent = @"\r";
         self.controls[@"primary"] = button;
@@ -271,14 +271,14 @@ static NSColor *toneColor(NSString *tone) {
     if ([a[@"cwd"] length]) [lines addObject:[self mono:a[@"cwd"] size:11 color:NSColor.secondaryLabelColor]];
     NSDictionary *deny = @{@"action":@"approve",@"args":@{@"task_id":task,@"allow":@NO,@"scope":@"once"}};
     NSDictionary *once = @{@"action":@"approve",@"args":@{@"task_id":task,@"allow":@YES,@"scope":@"once"}};
-    NSButton *no = [self button:@"拒绝" action:deny];
-    NSButton *yes = [self button:@"允许一次" action:once];
+    NSButton *no = [self button:[self localized:@"拒绝"] action:deny];
+    NSButton *yes = [self button:[self localized:@"允许一次"] action:once];
     yes.keyEquivalent = @"\r";
     NSPopUpButton *more = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES];
     more.controlSize = NSControlSizeSmall;
     more.font = [NSFont systemFontOfSize:12];
-    more.toolTip = @"更多允许方式";
-    [more addItemWithTitle:@"更多"];
+    more.toolTip = [self localized:@"更多允许方式"];
+    [more addItemWithTitle:[self localized:@"更多"]];
     for (NSArray *scope in @[@[@"similar", a[@"similar"] ?: @""], @[@"session", a[@"session"] ?: @""]]) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:scope[1] action:@selector(sendMenu:) keyEquivalent:@""];
         item.target = self;
@@ -326,7 +326,7 @@ static NSColor *toneColor(NSString *tone) {
             [spin startAnimation:nil];
             lead = spin;
         }
-        NSTextField *name = [self text:desktop ? @"桌面操作" : r[@"name"] size:13 weight:NSFontWeightSemibold];
+        NSTextField *name = [self text:desktop ? [self localized:@"桌面操作"] : r[@"name"] size:13 weight:NSFontWeightSemibold];
         if (desktop) name.textColor = NSColor.systemOrangeColor;
         NSTextField *tag = [self keep:[self text:r[@"tag"] size:11.5 weight:NSFontWeightRegular] as:[prefix stringByAppendingString:@"tag"]];
         tag.textColor = NSColor.secondaryLabelColor;
@@ -339,19 +339,19 @@ static NSColor *toneColor(NSString *tone) {
         NSStackView *lines = [self column:@[top, step, tail] spacing:1];
         NSStackView *content = [self row:@[lead, lines] spacing:9];
         content.alignment = NSLayoutAttributeTop;
-        NSString *label = [NSString stringWithFormat:@"%@ %@，查看任务详情", r[@"name"], r[@"step"]];
+        NSString *label = [NSString stringWithFormat:[self localized:@"%@ %@，查看任务详情"], r[@"name"], r[@"step"]];
         [self add:[self clickable:content action:@{@"action":@"open",@"route":[@"tasks:" stringByAppendingString:r[@"id"]]} label:label] inset:Inset - 8];
     }
     NSInteger more = [self.model[@"more"] integerValue];
     if (more > 0) {
-        NSTextField *text = [self text:[NSString stringWithFormat:@"还有 %ld 个项目", (long)more] size:12 weight:NSFontWeightRegular];
+        NSTextField *text = [self text:[NSString stringWithFormat:[self localized:@"还有 %ld 个项目"], (long)more] size:12 weight:NSFontWeightRegular];
         text.textColor = NSColor.secondaryLabelColor;
         [self add:[self clickable:text action:@{@"action":@"open",@"route":@"live"} label:text.stringValue] inset:Inset - 8];
     }
 }
 - (void)buildRecent {
     NSArray *recent = self.model[@"recent"];
-    NSTextField *heading = [self text:@"最近" size:11 weight:NSFontWeightSemibold];
+    NSTextField *heading = [self text:[self localized:@"最近"] size:11 weight:NSFontWeightSemibold];
     heading.textColor = NSColor.tertiaryLabelColor;
     [self add:heading inset:Inset];
     for (NSDictionary *r in recent) {
@@ -367,7 +367,7 @@ static NSColor *toneColor(NSString *tone) {
 }
 - (void)buildProblems {
     for (NSDictionary *p in self.model[@"problems"]) {
-        BOOL pause = [p[@"button"] isEqualToString:@"恢复"];
+        BOOL pause = [p[@"button"] isEqualToString:[self localized:@"恢复"]];
         NSImageView *icon = [self symbol:pause ? @"pause.circle" : @"exclamationmark.triangle" color:pause ? NSColor.secondaryLabelColor : NSColor.systemOrangeColor];
         NSTextField *text = [self text:p[@"text"] size:12.5 weight:NSFontWeightRegular];
         NSTextField *detail = [self text:p[@"detail"] size:11.5 weight:NSFontWeightRegular];
@@ -398,10 +398,10 @@ static NSColor *toneColor(NSString *tone) {
         today.textColor = NSColor.secondaryLabelColor;
         NSTextField *chevron = [self text:@"›" size:13 weight:NSFontWeightRegular];
         chevron.textColor = NSColor.tertiaryLabelColor;
-        [self add:[self clickable:[self row:@[today, [self spacer], chevron] spacing:6] action:@{@"action":@"open",@"route":@"tasks"} label:@"查看今天的活动"] inset:Inset - 8];
+        [self add:[self clickable:[self row:@[today, [self spacer], chevron] spacing:6] action:@{@"action":@"open",@"route":@"tasks"} label:[self localized:@"查看今天的活动"]] inset:Inset - 8];
     }
     [self separator];
-    for (NSArray *item in @[@[@"pause", @"接收新任务"], @[@"desktop", @"允许 Agent 操作桌面"]]) {
+    for (NSArray *item in @[@[@"pause", [self localized:@"接收新任务"]], @[@"desktop", [self localized:@"允许 Agent 操作桌面"]]]) {
         NSTextField *label = [self text:item[1] size:13 weight:NSFontWeightRegular];
         NSSwitch *toggle = [NSSwitch new];
         toggle.controlSize = NSControlSizeSmall;
@@ -411,13 +411,17 @@ static NSColor *toneColor(NSString *tone) {
         [self add:[self row:@[label, [self spacer], toggle] spacing:10] inset:Inset];
     }
     [self separator];
-    [self add:[self menuRow:@"打开 Macrun" shortcut:@"⌘O" action:@{@"action":@"open",@"route":@"live"}] inset:Inset - 8];
-    [self add:[self menuRow:@"设置…" shortcut:@"⌘," action:@{@"action":@"open",@"route":@"settings"}] inset:Inset - 8];
-    [self add:[self menuRow:@"退出 Macrun" shortcut:@"⌘Q" action:@{@"action":@"quit"}] inset:Inset - 8];
+    [self add:[self menuRow:[self localized:@"打开 Macrun"] shortcut:@"⌘O" action:@{@"action":@"open",@"route":@"live"}] inset:Inset - 8];
+    [self add:[self menuRow:[self localized:@"设置…"] shortcut:@"⌘," action:@{@"action":@"open",@"route":@"settings"}] inset:Inset - 8];
+    [self add:[self menuRow:[self localized:@"退出 Macrun"] shortcut:@"⌘Q" action:@{@"action":@"quit"}] inset:Inset - 8];
     NSTextField *error = [self text:@"" size:12 weight:NSFontWeightRegular];
     error.maximumNumberOfLines = 3; error.lineBreakMode = NSLineBreakByWordWrapping;
     self.controls[@"error"] = error;
     [self add:error inset:Inset];
+}
+
+- (NSString *)localized:(NSString *)source {
+    return self.model[@"labels"][source] ?: source;
 }
 
 // MARK: updates
@@ -430,6 +434,7 @@ static NSColor *toneColor(NSString *tone) {
 }
 - (void)update:(NSDictionary *)model {
     self.model = model;
+    self.panel.title = [self localized:@"Macrun · 快捷面板"];
     // Rebuild only when the layout changes, never for latency ticks or output.
     NSString *structure = model[@"structure"] ?: @"";
     if (![structure isEqualToString:self.structure]) {
@@ -474,7 +479,7 @@ static NSColor *toneColor(NSString *tone) {
     NSTextField *feedback = (NSTextField *)self.controls[@"error"];
     feedback.textColor = error.length ? NSColor.systemRedColor : NSColor.secondaryLabelColor;
     feedback.toolTip = error;
-    feedback.stringValue = error.length ? error : (pending.count ? @"正在请求执行器…" : @"");
+    feedback.stringValue = error.length ? error : (pending.count ? [self localized:@"正在请求执行器…"] : @"");
     feedback.hidden = !feedback.stringValue.length;
     [self.stack layoutSubtreeIfNeeded];
     CGFloat height = MAX(160, self.stack.fittingSize.height + 24);
@@ -494,7 +499,7 @@ void macrun_panel_init(ActionCallback callback) {
     controller.panel = [[MacrunPanel alloc] initWithContentRect:NSMakeRect(0, 0, PanelWidth, 240)
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
         backing:NSBackingStoreBuffered defer:NO];
-    controller.panel.title = @"Macrun · 快捷面板";
+    controller.panel.title = [controller localized:@"Macrun · 快捷面板"];
     controller.panel.floatingPanel = YES;
     controller.panel.level = NSPopUpMenuWindowLevel;
     controller.panel.hidesOnDeactivate = NO;

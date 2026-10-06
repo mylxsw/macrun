@@ -2,6 +2,7 @@
 //! Calm states are monochrome template images that macOS tints for light and
 //! dark menu bars. Only states that need the person (an approval, or the agent
 //! using the desktop) are drawn in colour, with a coloured link.
+use crate::localization::text as tr;
 use serde_json::Value;
 
 pub const WIDTH: u32 = 44;
@@ -37,12 +38,12 @@ impl TrayState {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Idle => "空闲",
-            Self::Working => "工作中",
-            Self::Approval => "待确认",
-            Self::Desktop => "正在操作桌面",
-            Self::Offline => "断线",
-            Self::Paused => "暂停",
+            Self::Idle => tr("空闲"),
+            Self::Working => tr("工作中"),
+            Self::Approval => tr("待确认"),
+            Self::Desktop => tr("正在操作桌面"),
+            Self::Offline => tr("断线"),
+            Self::Paused => tr("暂停"),
         }
     }
     /// Template images must be pure alpha masks; coloured states are not templates.

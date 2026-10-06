@@ -1,6 +1,7 @@
 //! Optional local Cua Driver setup. Commands and the installer URL are fixed here,
 //! never supplied by the webview. Existing MCP entries are preserved.
 use super::*;
+use crate::localization::{interpolate as tr_format, text as tr};
 use std::{os::unix::fs::PermissionsExt, path::Path};
 use tokio::process::Command as AsyncCommand;
 
@@ -73,7 +74,7 @@ async fn output(command: &mut AsyncCommand, timeout: Duration) -> Result<String>
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .process_group(0);
-    let mut child = command.spawn().context("无法启动 Cua Driver 操作")?;
+    let mut child = command.spawn().context(tr("无法启动 Cua Driver 操作"))?;
     let _group = ProcessGroup(child.id().context("missing process id")?);
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -101,15 +102,18 @@ async fn output(command: &mut AsyncCommand, timeout: Duration) -> Result<String>
         )
     })
     .await
-    .context("操作超时，已停止操作进程；请检查网络或系统授权后重试")??;
+    .context(tr("操作超时，已停止操作进程；请检查网络或系统授权后重试"))??;
     anyhow::ensure!(
         status.success(),
-        "操作失败：{}",
-        if stderr.trim().is_empty() {
-            &stdout
-        } else {
-            &stderr
-        }
+        tr_format(
+            "操作失败：{0}",
+            &[if stderr.trim().is_empty() {
+                &stdout
+            } else {
+                &stderr
+            }
+            .to_string()]
+        )
     );
     Ok(stdout.trim().to_owned())
 }
@@ -121,7 +125,7 @@ async fn inspect(rt: &Runtime) -> Result<Value> {
     .await?;
     if !supported(&os) {
         return Ok(
-            json!({"state":"unsupported","detail":"Cua Driver 需要 macOS 14 或更新版本；可跳过桌面控制。"}),
+            json!({"state":"unsupported","detail":tr("Cua Driver 需要 macOS 14 或更新版本；可跳过桌面控制。")}),
         );
     }
     let cfg = config(rt)?;
@@ -159,13 +163,15 @@ async fn inspect_candidates(
                     json!({"state":"ready","path":resolved,"version":version,"configured":configured}),
                 );
             }
-            Ok(_) => failure = Some("Cua Driver 没有返回版本信息".to_owned()),
+            Ok(_) => failure = Some(tr("Cua Driver 没有返回版本信息").to_owned()),
             Err(e) => failure = Some(e.to_string()),
         }
     }
     Ok(match failure {
         Some(error) => json!({"state":"broken","detail":error}),
-        None => json!({"state":"missing","detail":"尚未安装 Cua Driver"}),
+        None => {
+            json!({"state":"missing","detail":tr("尚未安装 Cua Driver")})
+        }
     })
 }
 #[tauri::command]
@@ -173,7 +179,7 @@ pub async fn cua_status(rt: tauri::State<'_, Runtime>) -> std::result::Result<Va
     let _guard = match SETUP.try_lock() {
         Ok(guard) => guard,
         Err(_) => {
-            return Ok(json!({"state":"busy","detail":"正在处理 Cua Driver，请稍后重新检测"}));
+            return Ok(json!({"state":"busy","detail":tr("正在处理 Cua Driver，请稍后重新检测")}));
         }
     };
     inspect(&rt).await.map_err(|e| e.to_string())
@@ -182,12 +188,14 @@ pub async fn cua_status(rt: tauri::State<'_, Runtime>) -> std::result::Result<Va
 pub async fn install_cua_driver(
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<Value, String> {
-    let _guard = SETUP.try_lock().map_err(|_| "Cua Driver 操作正在进行")?;
+    let _guard = SETUP
+        .try_lock()
+        .map_err(|_| tr("Cua Driver 操作正在进行"))?;
     let result: Result<Value> = async {
         let status = inspect(&rt).await?;
         anyhow::ensure!(
             status["state"] != "unsupported",
-            "Cua Driver 需要 macOS 14 或更新版本"
+            tr("Cua Driver 需要 macOS 14 或更新版本")
         );
         if status["state"] == "ready" {
             return Ok(status);
@@ -242,7 +250,7 @@ pub async fn install_cua_driver(
         let installed = inspect(&rt).await?;
         anyhow::ensure!(
             installed["state"] == "ready",
-            "安装结束但未检测到可用的 Cua Driver，请重新检测或重试安装"
+            tr("安装结束但未检测到可用的 Cua Driver，请重新检测或重试安装")
         );
         Ok(installed)
     }
@@ -278,9 +286,13 @@ fn with_driver(mut config: macrun::config::WorkerConfig, path: &str) -> Result<S
 pub async fn configure_cua_driver(
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<(), String> {
-    let _guard = SETUP.try_lock().map_err(|_| "Cua Driver 操作正在进行")?;
+    let _guard = SETUP
+        .try_lock()
+        .map_err(|_| tr("Cua Driver 操作正在进行"))?;
     let status = inspect(&rt).await.map_err(|e| e.to_string())?;
-    let path = status["path"].as_str().ok_or("请先安装可用的 Cua Driver")?;
+    let path = status["path"]
+        .as_str()
+        .ok_or(tr("请先安装可用的 Cua Driver"))?;
     if status["configured"] == true {
         return Ok(());
     }
@@ -292,9 +304,13 @@ pub async fn configure_cua_driver(
 pub async fn grant_cua_permissions(
     rt: tauri::State<'_, Runtime>,
 ) -> std::result::Result<String, String> {
-    let _guard = SETUP.try_lock().map_err(|_| "Cua Driver 操作正在进行")?;
+    let _guard = SETUP
+        .try_lock()
+        .map_err(|_| tr("Cua Driver 操作正在进行"))?;
     let status = inspect(&rt).await.map_err(|e| e.to_string())?;
-    let path = status["path"].as_str().ok_or("请先安装可用的 Cua Driver")?;
+    let path = status["path"]
+        .as_str()
+        .ok_or(tr("请先安装可用的 Cua Driver"))?;
     // Official grant command uses LaunchServices for the app's TCC identity and
     // verifies capture. A denied grant is an error; opening Settings isn't success.
     output(

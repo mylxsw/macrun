@@ -1,3 +1,4 @@
+import { tr } from "./i18n.mjs";
 import { useRef, useState } from "react";
 import {
   Check,
@@ -13,19 +14,22 @@ import { span, type ServerView } from "./format";
 import type { DesktopCheck, Health } from "./health";
 import type { AppState, Snapshot } from "./types";
 
-const prefs = [
+const prefs = () =>
   [
-    "show_overlay",
-    "屏幕四周显示橙色边框和浮动提示",
-    "Agent 操作期间显示正在做什么，浮条上有“停止”按钮。",
-  ],
-  [
-    "yield_input",
-    "我动鼠标或键盘时，Agent 让出 30 秒",
-    "检测到本地输入后暂停新的桌面操作；已发出的点击不会撤回。需要“输入监控”权限。",
-  ],
-  ["keep_awake", "防止 Mac 自动休眠", "休眠会中断连接和桌面操作。"],
-] as const;
+    [
+      "show_overlay",
+      tr("屏幕四周显示橙色边框和浮动提示"),
+      tr("Agent 操作期间显示正在做什么，浮条上有“停止”按钮。"),
+    ],
+    [
+      "yield_input",
+      tr("我动鼠标或键盘时，Agent 让出 30 秒"),
+      tr(
+        "检测到本地输入后暂停新的桌面操作；已发出的点击不会撤回。需要“输入监控”权限。",
+      ),
+    ],
+    ["keep_awake", tr("防止 Mac 自动休眠"), tr("休眠会中断连接和桌面操作。")],
+  ] as const;
 
 function Mark({ ok }: { ok: boolean | null }) {
   return (
@@ -57,16 +61,16 @@ function ServerRow({
   const close = () => menu.current?.removeAttribute("open");
   const detail = connected
     ? [
-        `已连接 ${span(Date.now() - (c?.since || Date.now()))}`,
+        tr("已连接 {0}", span(Date.now() - (c?.since || Date.now()))),
         c?.rtt_ms != null ? `${c.rtt_ms} ms` : "",
       ]
         .filter(Boolean)
         .join(" · ")
     : app?.worker_starting
-      ? "正在启动执行器"
+      ? tr("正在启动执行器")
       : app?.worker_running
-        ? c?.error || "正在重连"
-        : "未连接";
+        ? c?.error || tr("正在重连")
+        : tr("未连接");
   return (
     <div className="v4-server">
       <span className={`dot ${connected ? "succeeded" : "cancelled"}`} />
@@ -74,16 +78,16 @@ function ServerRow({
         <b>{server.label}</b>
         <p className={!connected && c?.error ? "v4-err" : ""}>{detail}</p>
         {reveal && (
-          <p className="mono v4-faint" aria-label="服务器地址">
+          <p className="mono v4-faint" aria-label={tr("服务器地址")}>
             {server.address}
             {server.id === "primary" && app?.settings.certificate_fingerprint
-              ? ` · 证书 ${app.settings.certificate_fingerprint}`
+              ? tr(" · 证书 {0}", app.settings.certificate_fingerprint)
               : ""}
           </p>
         )}
       </div>
       <details className="v4-menu" ref={menu}>
-        <summary aria-label={`${server.label} 的更多操作`}>
+        <summary aria-label={tr("{0} 的更多操作", server.label)}>
           <Ellipsis size={15} />
         </summary>
         <div role="menu">
@@ -94,7 +98,7 @@ function ServerRow({
               close();
             }}
           >
-            {reveal ? "隐藏地址与证书" : "显示地址与证书"}
+            {reveal ? tr("隐藏地址与证书") : tr("显示地址与证书")}
           </button>
           <button
             role="menuitem"
@@ -104,23 +108,23 @@ function ServerRow({
               onPair(false);
             }}
           >
-            重新配对
+            {tr("重新配对")}
           </button>
           {server.id !== "primary" && (
             <button
               role="menuitem"
               disabled={busy || app?.worker_running}
-              title={app?.worker_running ? "请先断开连接" : undefined}
+              title={app?.worker_running ? tr("请先断开连接") : undefined}
               onClick={() => {
                 close();
                 act(
                   "remove_connection",
                   { id: server.id },
-                  "连接已移除，历史数据仍保留",
+                  tr("连接已移除，历史数据仍保留"),
                 );
               }}
             >
-              移除
+              {tr("移除")}
             </button>
           )}
           <button
@@ -130,7 +134,7 @@ function ServerRow({
               onSettings();
             }}
           >
-            连接详情与手动配置
+            {tr("连接详情与手动配置")}
           </button>
         </div>
       </details>
@@ -178,62 +182,72 @@ export function ThisMac({
   );
   const fix = (check: DesktopCheck) =>
     check.key === "backend" ? (
-      <button onClick={openTechnical}>配置后端</button>
+      <button onClick={openTechnical}>{tr("配置后端")}</button>
     ) : check.key === "verified" ? (
-      <button onClick={openTechnical}>实拍核对</button>
+      <button onClick={openTechnical}>{tr("实拍核对")}</button>
     ) : null;
   const commands = health.commands
     ? {
-        title: "命令与同步：可以使用",
-        detail: `${health.online}/${health.servers} 台服务器在线 · 执行器 v${snapshot?.version} 运行中`,
+        title: tr("命令与同步：可以使用"),
+        detail: tr(
+          "{0}/{1} 台服务器在线 · 执行器 v{2} 运行中",
+          health.online,
+          health.servers,
+          snapshot?.version,
+        ),
         action: null,
       }
     : app?.worker_starting
       ? {
-          title: "命令与同步：正在启动",
-          detail: "如 macOS 请求访问钥匙串，请在系统窗口中允许。",
+          title: tr("命令与同步：正在启动"),
+          detail: tr("如 macOS 请求访问钥匙串，请在系统窗口中允许。"),
           action: null,
         }
       : !app?.settings.server
         ? {
-            title: "命令与同步：尚未配对",
-            detail: "在服务器上生成邀请，再粘贴到这里。",
+            title: tr("命令与同步：尚未配对"),
+            detail: tr("在服务器上生成邀请，再粘贴到这里。"),
             action: (
               <button className="primary" onClick={() => onPair()}>
-                配对服务器
+                {tr("配对服务器")}
               </button>
             ),
           }
         : !app.worker_running
           ? {
-              title: "命令与同步：执行器未运行",
-              detail: "启动后连接所有已保存的服务器。",
+              title: tr("命令与同步：执行器未运行"),
+              detail: tr("启动后连接所有已保存的服务器。"),
               action: (
                 <button
                   className="primary"
                   disabled={connectionBusy || app.legacy_running}
-                  onClick={() => act("start_worker", {}, "已请求启动执行器")}
+                  onClick={() =>
+                    act("start_worker", {}, tr("已请求启动执行器"))
+                  }
                 >
-                  启动并连接
+                  {tr("启动并连接")}
                 </button>
               ),
             }
           : {
-              title: "命令与同步：正在连接",
-              detail: snapshot?.connection.error || "正在连接服务器…",
+              title: tr("命令与同步：正在连接"),
+              detail: snapshot?.connection.error || tr("正在连接服务器…"),
               action: null,
             };
   const desktop = !health.desktopEnabled
     ? {
-        title: "桌面：已关闭",
-        detail: "命令和文件不受影响；Agent 的桌面请求会被拒绝。",
+        title: tr("桌面：已关闭"),
+        detail: tr("命令和文件不受影响；Agent 的桌面请求会被拒绝。"),
       }
     : missing.length
       ? {
-          title: `桌面：还差 ${missing.length} 步`,
+          title: tr("桌面：还差 {0} 步", missing.length),
           detail: missing[0].detail,
         }
-      : { title: "桌面：可以使用", detail: "后端已实测可用，图形会话正常。" };
+      : {
+          title: tr("桌面：可以使用"),
+          detail: tr("后端已实测可用，图形会话正常。"),
+        };
   return (
     <div className="v4-mac">
       <div className="v4-ready">
@@ -267,17 +281,17 @@ export function ThisMac({
       <div className="v4-cols even">
         <div>
           <div className="v4-sh">
-            <h2>服务器</h2>
+            <h2>{tr("服务器")}</h2>
             <span className="grow" />
             <button
               disabled={connectionBusy || servers.length >= 16}
               onClick={() => onPair(true)}
             >
               <Plus size={13} />
-              添加服务器
+              {tr("添加服务器")}
             </button>
           </div>
-          <div className="v4-group" aria-label="服务器列表">
+          <div className="v4-group" aria-label={tr("服务器列表")}>
             {servers.map((s) => (
               <ServerRow
                 key={s.id}
@@ -293,20 +307,22 @@ export function ThisMac({
               <div className="v4-server">
                 <span className="dot cancelled" />
                 <div className="grow">
-                  <b>尚未配对服务器</b>
-                  <p>配对后，服务器上的 Agent 才能在这台 Mac 上执行任务。</p>
+                  <b>{tr("尚未配对服务器")}</b>
+                  <p>
+                    {tr("配对后，服务器上的 Agent 才能在这台 Mac 上执行任务。")}
+                  </p>
                 </div>
                 <button className="primary" onClick={() => onPair()}>
-                  配对服务器
+                  {tr("配对服务器")}
                 </button>
               </div>
             )}
           </div>
           <div className="v4-sh">
-            <h2>Agent 操作桌面时</h2>
+            <h2>{tr("Agent 操作桌面时")}</h2>
           </div>
           <div className="v4-group">
-            {prefs.map(([key, text, detail]) => (
+            {prefs().map(([key, text, detail]) => (
               <label className="v4-perm" key={key}>
                 <div className="grow">
                   <b>{text}</b>
@@ -333,10 +349,10 @@ export function ThisMac({
         </div>
         <div>
           <div className="v4-sh">
-            <h2>桌面控制检查</h2>
-            <small>按顺序完成即可</small>
+            <h2>{tr("桌面控制检查")}</h2>
+            <small>{tr("按顺序完成即可")}</small>
           </div>
-          <div className="v4-group" aria-label="桌面控制检查">
+          <div className="v4-group" aria-label={tr("桌面控制检查")}>
             {health.desktop.map((c) => (
               <div className="v4-check" key={c.key}>
                 <Mark ok={c.key === "enabled" ? c.ok : c.ok} />
@@ -348,7 +364,7 @@ export function ThisMac({
                   <input
                     className="switch"
                     type="checkbox"
-                    aria-label="允许 Agent 操作桌面"
+                    aria-label={tr("允许 Agent 操作桌面")}
                     checked={!!snapshot?.policy.desktop_enabled}
                     disabled={!available || desktopPending}
                     aria-busy={desktopPending}
@@ -361,14 +377,17 @@ export function ThisMac({
             ))}
             {!available && (
               <p className="v4-note pad">
-                <CircleAlert size={13} /> 执行器未连接，以上状态可能已过期。
+                <CircleAlert size={13} />{" "}
+                {tr(" 执行器未连接，以上状态可能已过期。")}
               </p>
             )}
           </div>
           <details className="v4-technical" ref={details}>
             <summary>
               <ChevronRight size={14} className="v4-disclosure" />
-              技术详情：后端进程与工具、实拍核对、Macrun 自身权限、最近桌面操作
+              {tr(
+                "技术详情：后端进程与工具、实拍核对、Macrun 自身权限、最近桌面操作",
+              )}
             </summary>
             <div className="v4-technical-body">{technical}</div>
           </details>

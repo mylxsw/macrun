@@ -1,4 +1,5 @@
 //! Filesystem portion of legacy migration. The original worker state is never modified.
+use crate::localization::{interpolate as tr_format, text as tr};
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::{
@@ -21,13 +22,17 @@ fn regular(path: &Path) -> Result<fs::Metadata> {
     let metadata = fs::symlink_metadata(path)?;
     ensure!(
         !metadata.file_type().is_symlink(),
-        "迁移状态不能包含符号链接：{}",
-        path.display()
+        tr_format(
+            "迁移状态不能包含符号链接：{0}",
+            &[path.display().to_string()]
+        )
     );
     ensure!(
         metadata.is_dir() || metadata.is_file(),
-        "迁移状态包含不支持的文件：{}",
-        path.display()
+        tr_format(
+            "迁移状态包含不支持的文件：{0}",
+            &[path.display().to_string()]
+        )
     );
     Ok(metadata)
 }
@@ -44,23 +49,23 @@ fn validate_tree(path: &Path) -> Result<()> {
 }
 
 pub fn validate_source(source: &Path) -> Result<()> {
-    ensure!(regular(source)?.is_dir(), "旧执行器数据目录不存在");
+    ensure!(regular(source)?.is_dir(), tr("旧执行器数据目录不存在"));
     let tasks = source.join("tasks");
     let mut needs_key = false;
     if tasks.exists() {
-        ensure!(regular(&tasks)?.is_dir(), "旧任务记录不是目录");
+        ensure!(regular(&tasks)?.is_dir(), tr("旧任务记录不是目录"));
         for entry in fs::read_dir(&tasks)? {
             let directory = entry?.path();
-            ensure!(regular(&directory)?.is_dir(), "旧任务目录格式不正确");
+            ensure!(regular(&directory)?.is_dir(), tr("旧任务目录格式不正确"));
             let path = directory.join("result.json");
-            ensure!(regular(&path)?.is_file(), "旧任务记录缺失");
+            ensure!(regular(&path)?.is_file(), tr("旧任务记录缺失"));
             let value: Value =
-                serde_json::from_slice(&fs::read(&path)?).context("旧任务记录无法解析")?;
-            let id = value["task_id"].as_str().context("旧任务缺少编号")?;
-            uuid::Uuid::parse_str(id).context("旧任务编号格式不正确")?;
+                serde_json::from_slice(&fs::read(&path)?).context(tr("旧任务记录无法解析"))?;
+            let id = value["task_id"].as_str().context(tr("旧任务缺少编号"))?;
+            uuid::Uuid::parse_str(id).context(tr("旧任务编号格式不正确"))?;
             ensure!(
                 directory.file_name().and_then(|n| n.to_str()) == Some(id),
-                "旧任务编号与目录不一致"
+                tr("旧任务编号与目录不一致")
             );
             ensure!(
                 value["ended_at"].as_u64().is_some()
@@ -73,7 +78,7 @@ pub fn validate_source(source: &Path) -> Result<()> {
                         "denied"
                     ]
                     .contains(&value["status"].as_str().unwrap_or("")),
-                "旧执行器有未结束任务，请先停止任务再迁移"
+                tr("旧执行器有未结束任务，请先停止任务再迁移")
             );
             needs_key |= value.get("request_fingerprint").is_some();
         }
@@ -81,40 +86,40 @@ pub fn validate_source(source: &Path) -> Result<()> {
     if source.join("dedup").exists() {
         ensure!(
             regular(&source.join("dedup"))?.is_dir(),
-            "旧去重记录不是目录"
+            tr("旧去重记录不是目录")
         );
         needs_key |= fs::read_dir(source.join("dedup"))?.next().is_some();
     }
     if needs_key {
         ensure!(
             source.join("request-key").is_file(),
-            "旧任务去重密钥缺失，无法安全迁移"
+            tr("旧任务去重密钥缺失，无法安全迁移")
         );
     }
     if source.join("request-key").try_exists()? {
         ensure!(
             regular(&source.join("request-key"))?.is_file(),
-            "旧任务去重密钥格式不正确"
+            tr("旧任务去重密钥格式不正确")
         );
         ensure!(
             fs::metadata(source.join("request-key"))?.len() == 32,
-            "旧任务去重密钥长度不正确"
+            tr("旧任务去重密钥长度不正确")
         );
     }
     for name in ["safety.json", "desktop-policy.json", "workspaces.json"] {
         let path = source.join(name);
         if path.try_exists()? {
-            ensure!(regular(&path)?.is_file(), "旧状态文件格式不正确");
+            ensure!(regular(&path)?.is_file(), tr("旧状态文件格式不正确"));
             let bytes = fs::read(path)?;
             if name == "safety.json" {
                 let _: macrun::safety::Safety =
-                    serde_json::from_slice(&bytes).context("旧安全策略无法解析")?;
+                    serde_json::from_slice(&bytes).context(tr("旧安全策略无法解析"))?;
             } else if name == "desktop-policy.json" {
                 let _: macrun::engine::Policy =
-                    serde_json::from_slice(&bytes).context("旧桌面策略无法解析")?;
+                    serde_json::from_slice(&bytes).context(tr("旧桌面策略无法解析"))?;
             } else {
                 let _: std::collections::BTreeMap<String, Value> =
-                    serde_json::from_slice(&bytes).context("旧工作区记录无法解析")?;
+                    serde_json::from_slice(&bytes).context(tr("旧工作区记录无法解析"))?;
             }
         }
     }
@@ -162,12 +167,12 @@ impl MigrationFiles {
         let target = fs::canonicalize(data)?.join("worker");
         ensure!(
             !source.starts_with(&target) && !target.starts_with(&source),
-            "新旧执行器数据目录不能重叠"
+            tr("新旧执行器数据目录不能重叠")
         );
         if destination.exists() {
             ensure!(
                 regular(&destination)?.is_dir() && fs::read_dir(&destination)?.next().is_none(),
-                "新版执行器数据目录非空，已保留现有数据；请先检查再迁移"
+                tr("新版执行器数据目录非空，已保留现有数据；请先检查再迁移")
             );
         }
         let stage = data.join(format!("migration-{}", uuid::Uuid::new_v4()));

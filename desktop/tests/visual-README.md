@@ -12,6 +12,8 @@
 
 在 `desktop/` 运行 `npm run dev` 后打开：
 
+- 在 URL 中增加 `&language=en` 或 `&language=zh-CN` 可以检查对应语言的真实页面；语言设置仍可在页面中切换。省略时跟随浏览器语言。
+
 - `http://127.0.0.1:1420/tests/visual.html`：已有桌面配置且已连接，应进入“概览”。建议视口 1280×900。
 - `http://127.0.0.1:1420/tests/visual.html?scenario=v4`：v4 设计评审数据：两台服务器、两个进行中的项目、桌面操作、待确认请求、退出码非零的命令和一次旧的同步超时。加 `&page=tasks|access|desktop|settings` 打开对应页面，加 `&tray=1` 查看网页版菜单栏面板。
 - `http://127.0.0.1:1420/tests/visual.html?legacy=running`：桌面配置为空、检测到正在运行的旧版，应进入设置页，顶部显示迁移入口。

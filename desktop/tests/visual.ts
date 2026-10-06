@@ -428,6 +428,12 @@ const app: AppState & { legacy_detected: boolean } = {
       : "",
   },
   preferences: {
+    language:
+      query.get("language") === "zh-CN"
+        ? "zh-CN"
+        : query.get("language") === "en"
+          ? "en"
+          : "system",
     show_overlay: true,
     yield_input: false,
     notifications: false,
