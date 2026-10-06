@@ -267,7 +267,9 @@ function App() {
     [toolsServer, setToolsServer] = useState(""),
     [notice, setNotice] = useState(""),
     [openSessions, setOpenSessions] = useState<Record<string, boolean>>({});
-  const busy = pending.some((key) => !key.startsWith("control:"));
+  const busy = pending.some(
+    (key) => !key.startsWith("control:") && key !== "grant_cua_permissions",
+  );
   useLayoutEffect(() => {
     if (content.current)
       content.current.scrollTop = positions.current.get(page) || 0;

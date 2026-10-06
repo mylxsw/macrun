@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import tomllib
 
 
@@ -140,6 +141,25 @@ def assert_draft(record, sha):
         )
 
 
+def refreshed_draft(tag, sha, expected_assets=None):
+    # GitHub's release list can briefly lag successful create/upload requests.
+    # Retry only missing state; API failures and ownership changes remain fatal.
+    for delay in [0, 1, 2, 4, 8]:
+        if delay:
+            time.sleep(delay)
+        record = release_record(tag)
+        assert_draft(record, sha)
+        if record is not None:
+            if expected_assets is None:
+                return record
+            names = {a["name"] for a in record["assets"]}
+            if names - expected_assets:
+                raise ValueError("Draft contains unexpected attachments")
+            if names == expected_assets:
+                return record
+    return record
+
+
 def publish(directory, tag, sha, make_public=False):
     # Re-resolve immediately before writes; moved tags must not publish stale binaries.
     if resolve(tag) != sha:
@@ -190,7 +210,7 @@ def publish(directory, tag, sha, make_public=False):
                 "--notes-file",
                 str(notes),
             )
-        record = release_record(tag)
+        record = refreshed_draft(tag, sha)
     assert_draft(record, sha)
     if record is None:
         raise ValueError("Draft was not created")
@@ -206,7 +226,7 @@ def publish(directory, tag, sha, make_public=False):
         *[str(directory / name) for name in sorted(expected)],
         "--clobber",
     )
-    record = release_record(tag)
+    record = refreshed_draft(tag, sha, expected)
     assert_draft(record, sha)
     if record is None or {a["name"] for a in record["assets"]} != expected:
         raise ValueError("Uploaded attachment set is incomplete")

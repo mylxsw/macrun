@@ -48,7 +48,7 @@ macrun invite --data /path/to/server-state --server server.example:7443
 
 桌面控制步骤和桌面控制页会检测 Cua Driver。macOS 14+ 可点击“一键安装 Cua Driver”，从固定的 [官方安装入口](https://cua.ai/driver/install.sh) 下载并运行安装程序；界面显示安装中和失败原因，可重试，不修改 shell 的 PATH。已安装时可直接接入；接入会在执行器空闲时断开、保留现有 MCP 配置并添加 Cua，再恢复连接。有任务运行时不会断开。macOS 12/13 可跳过桌面控制并继续使用命令和文件能力。
 
-“授权 CuaDriver 截图与控制”使用官方 `permissions grant` 流程，让系统将授权归到 **CuaDriver**；启用它的辅助功能和屏幕录制，按提示重新打开应用，然后通过 Macrun 后端实拍验证。Macrun 自身权限按钮会先实际发起授权请求再打开系统设置；两者的授权互不替代。
+“授权 CuaDriver 截图与控制”使用官方 `permissions grant` 流程，让系统将授权归到 **CuaDriver**；启用它的辅助功能和屏幕录制，按提示重新打开应用，然后通过 Macrun 后端实拍验证。授权等待期间可继续其他操作，也可点击“重新检测”；卡片在返回窗口、恢复可见及可见期间每 5 秒通过只读 `permissions status --json` 检查 CuaDriver 自身的权限。重启中或无法读取时显示“暂无法确认”，不会把已安装或 Macrun 自身的权限当作后端已授权。Macrun 自身权限按钮会先实际发起授权请求再打开系统设置；两者的授权互不替代。
 
 也可手动填写服务器、证书和令牌文件。保存时复制并固定证书，将凭据导入钥匙串；原文件不会被删除。后端配置在“本机 → 技术详情”中编辑，保存前断开连接，重新连接生效。
 

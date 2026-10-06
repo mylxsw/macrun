@@ -215,6 +215,7 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>';
   bridge.invoke.mockImplementation(async (command, args) => {
     if (command === "app_state") return structuredClone(app);
+    if (command === "cua_status") return { state: "missing" };
     if (command === "control" && args.action === "task_list")
       return historyPage(args.args);
     if (command === "control" && args.action === "task_detail") {
@@ -789,6 +790,47 @@ test("pending actions only disable their own controls and keep emergency stop av
     finishStop();
   });
   expect(pause.hasAttribute("disabled")).toBe(false);
+});
+
+test("waiting for CuaDriver permissions keeps other app actions available", async () => {
+  const original = bridge.invoke.getMockImplementation()!;
+  let finish!: () => void;
+  bridge.invoke.mockImplementation((command, args) => {
+    if (command === "cua_status")
+      return Promise.resolve({
+        state: "ready",
+        configured: true,
+        permissions: { accessibility: false, screen_recording: false },
+      });
+    if (command === "grant_cua_permissions")
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    return original(command, args);
+  });
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "本机" }));
+  await user.click(screen.getByText(/技术详情/));
+  await user.click(
+    await screen.findByRole("button", { name: "授权 CuaDriver 截图与控制" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "重新检测" }).hasAttribute("disabled"),
+  ).toBe(false);
+  await user.click(screen.getByRole("button", { name: "设置", exact: true }));
+  const notifications = screen.getByRole("checkbox", {
+    name: /^需要确认、失败或结果未知时发送通知/,
+  });
+  expect(notifications.hasAttribute("disabled")).toBe(false);
+  await user.click(notifications);
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "save_preferences",
+    expect.anything(),
+  );
+  await act(async () => {
+    finish();
+  });
 });
 
 test("main tools dialog merges paginated tools by name and stops at the last page", async () => {

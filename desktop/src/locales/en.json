@@ -947,5 +947,15 @@
   "旧工作区记录无法解析": "Cannot parse old workspace record",
   "新旧执行器数据目录不能重叠": "Old and new worker data directories must not overlap",
   "新版执行器数据目录非空，已保留现有数据；请先检查再迁移": "The new worker data directory is not empty. Existing data was retained; check it before migrating.",
-  "pairing.connect::连接": "Connect"
+  "pairing.connect::连接": "Connect",
+  "已授权": "Granted",
+  "未授权": "Not granted",
+  "暂无法确认": "Unknown",
+  "CuaDriver 授权流程已结束。请通过 Macrun 后端实拍验证。": "The CuaDriver permission flow has finished. Verify a screenshot through the Macrun backend.",
+  "系统设置中请启用 CuaDriver 的「辅助功能」和「屏幕与系统音频录制」。按系统提示重新打开 CuaDriver 后，返回此页会自动重新检测，也可点击「重新检测」。Macrun 自身的权限不代表后端已授权。": "Enable CuaDriver under Accessibility and Screen & System Audio Recording in System Settings. Reopen CuaDriver when prompted. Returning to this page checks permissions automatically, or you can click Check again. Macrun’s permissions do not grant access to the backend.",
+  "CuaDriver 权限：辅助功能{0}；屏幕录制{1}。": "CuaDriver permissions: Accessibility: {0}; Screen Recording: {1}.",
+  "CuaDriver 两项权限已授权。可继续通过 Macrun 后端实拍验证。": "Both CuaDriver permissions are granted. Verify a screenshot through the Macrun backend.",
+  "等待 CuaDriver 授权与重启；此页会自动检测，可继续其他操作。": "Waiting for CuaDriver permissions and restart. This page checks automatically; you can continue other actions.",
+  "暂无法读取 CuaDriver 权限，重启后将自动重新检测。": "CuaDriver permissions are unavailable. They will be checked again automatically after restart.",
+  "CuaDriver 授权操作正在进行": "CuaDriver permission request in progress"
 }
