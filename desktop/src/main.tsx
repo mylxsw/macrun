@@ -1,3 +1,5 @@
+import { tr, getLocale, setLanguage, refreshSystemLanguage } from "./i18n.mjs";
+import { useLanguage } from "./useLanguage";
 import {
   Approvals,
   Pairing,
@@ -66,11 +68,11 @@ const tray = new URLSearchParams(location.search).has("tray");
 const label = (s: string) => (statuses as Record<string, string>)[s] || s;
 const kindLabel = (t: Task) =>
   ["exec", "exec.start"].includes(t.kind)
-    ? "命令"
+    ? tr("命令")
     : t.kind === "sync"
-      ? "同步"
+      ? tr("同步")
       : t.kind === "mcp.call"
-        ? `桌面 · ${t.arguments.tool || "操作"}`
+        ? tr("桌面 · {0}", t.arguments.tool || tr("操作"))
         : t.kind;
 const duration = (t: Task) => {
   if (t.status === "unknown") return "—";
@@ -81,7 +83,7 @@ const duration = (t: Task) => {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 };
 const time = (t: Task) =>
-  new Date(t.started_at).toLocaleTimeString("zh-CN", { hour12: false });
+  new Date(t.started_at).toLocaleTimeString(getLocale(), { hour12: false });
 type ToolPage = {
   session: string;
   result: {
@@ -187,6 +189,7 @@ const RetainedPage = React.memo(
     children,
   }: {
     active: boolean;
+    locale: string;
     children: React.ReactNode;
   }) {
     return (
@@ -195,10 +198,18 @@ const RetainedPage = React.memo(
       </section>
     );
   },
-  (previous, next) => !previous.active && !next.active,
+  (previous, next) =>
+    previous.locale === next.locale && !previous.active && !next.active,
 );
 
 function App() {
+  const locale = useLanguage();
+  useEffect(() => {
+    document.documentElement.lang = getLocale();
+    window.addEventListener("languagechange", refreshSystemLanguage);
+    return () =>
+      window.removeEventListener("languagechange", refreshSystemLanguage);
+  }, []);
   const firstLoad = useRef(true);
   const pendingActions = useRef(new Set<string>());
   const [pending, setPending] = useState<string[]>([]);
@@ -269,11 +280,20 @@ function App() {
     paused = snapshot?.policy.paused || false;
   const connectionSummary =
     (snapshot?.connections?.length || 0) > 1
-      ? `${available ? snapshot!.connections!.filter((c) => c.connection.state === "connected").length : 0}/${snapshot!.connections!.length} 台服务器在线`
+      ? tr(
+          "{0}/{1} 台服务器在线",
+          available
+            ? snapshot!.connections!.filter(
+                (c) => c.connection.state === "connected",
+              ).length
+            : 0,
+          snapshot!.connections!.length,
+        )
       : "";
   const refresh = async () => {
     if (!isTauri) return;
     const a = await invoke<AppState>("app_state");
+    setLanguage(a.preferences.language || "system", a.locale);
     setRefreshWarning("");
     setApp(a);
     if (firstLoad.current) {
@@ -317,7 +337,7 @@ function App() {
         await refresh();
       } catch (e) {
         setRefreshWarning(
-          `操作已完成，但界面状态刷新失败，请勿重复操作。${String(e)}`,
+          tr("操作已完成，但界面状态刷新失败，请勿重复操作。{0}", String(e)),
         );
       }
       return r ?? true;
@@ -333,12 +353,12 @@ function App() {
       "control",
       { action, args },
       {
-        cancel: "已请求取消任务，等待执行器返回结果",
-        stop_all: "已请求停止所有任务，暂停接收并关闭桌面控制",
-        pause: args.paused ? "已暂停接收新任务" : "已恢复接收新任务",
+        cancel: tr("已请求取消任务，等待执行器返回结果"),
+        stop_all: tr("已请求停止所有任务，暂停接收并关闭桌面控制"),
+        pause: args.paused ? tr("已暂停接收新任务") : tr("已恢复接收新任务"),
         desktop: args.enabled
-          ? "已允许桌面控制，实际能力请通过后端验证"
-          : "已关闭桌面控制",
+          ? tr("已允许桌面控制，实际能力请通过后端验证")
+          : tr("已关闭桌面控制"),
       }[action],
     );
   useEffect(() => {
@@ -383,6 +403,14 @@ function App() {
       setQuit(true);
     });
     on<string>("control-error", setError);
+    on<AppState>("preferences-changed", (a) => {
+      setLanguage(a.preferences.language || "system", a.locale);
+      setApp((current) =>
+        current
+          ? { ...current, preferences: a.preferences, locale: a.locale }
+          : current,
+      );
+    });
     const foregroundRefresh = () => {
       if (document.visibilityState !== "hidden") refresh().catch(() => {});
     };
@@ -498,19 +526,19 @@ function App() {
       await navigator.clipboard.writeText(text);
       setNotice(done);
     } catch {
-      setError("复制失败，请手动选择文本");
+      setError(tr("复制失败，请手动选择文本"));
     }
   };
-  const copy = (id: string) => copyText(id, "已复制任务编号");
+  const copy = (id: string) => copyText(id, tr("已复制任务编号"));
   const stateText = !available
-    ? "执行器未连接"
+    ? tr("执行器未连接")
     : !connected
-      ? "与服务器断开"
+      ? tr("与服务器断开")
       : paused
-        ? "已暂停接收"
+        ? tr("已暂停接收")
         : running.length
-          ? "Agent 正在工作"
-          : "已连接，空闲";
+          ? tr("Agent 正在工作")
+          : tr("已连接，空闲");
   const stateClass = !available
     ? "cancelled"
     : !connected
@@ -569,11 +597,11 @@ function App() {
         ""
       : "";
   const nav = [
-    ["live", "概览", Activity],
-    ["tasks", "活动", History],
-    ["performance", "性能", Activity],
-    ["access", "权限", Shield],
-    ["desktop", "本机", Laptop],
+    ["live", tr("概览"), Activity],
+    ["tasks", tr("活动"), History],
+    ["performance", tr("性能"), Activity],
+    ["access", tr("权限"), Shield],
+    ["desktop", tr("本机"), Laptop],
   ] as const;
   const feedback = (
     <>
@@ -581,7 +609,7 @@ function App() {
         <div className="alert error action-feedback" role="alert">
           <Info size={16} />
           <span>{error}</span>
-          <button onClick={() => setError("")} aria-label="关闭错误提示">
+          <button onClick={() => setError("")} aria-label={tr("关闭错误提示")}>
             ×
           </button>
         </div>
@@ -601,8 +629,9 @@ function App() {
         <div className="alert startup-feedback" role="status">
           <RefreshCw size={16} className="loading-icon" />
           <span>
-            正在启动执行器。如 macOS 弹出钥匙串授权，请在系统窗口中完成允许。
-            等待期间仍可查看其他页面。
+            {tr(
+              "正在启动执行器。如 macOS 弹出钥匙串授权，请在系统窗口中完成允许。 等待期间仍可查看其他页面。",
+            )}
           </span>
         </div>
       )}
@@ -618,23 +647,28 @@ function App() {
         aria-modal="true"
         aria-labelledby="exit-title"
       >
-        <h2 id="exit-title">退出 Macrun？</h2>
+        <h2 id="exit-title">{tr("退出 Macrun？")}</h2>
         <p>
           {running.length
-            ? `仍有 ${running.length} 个任务进行中。退出会停止任务及本机执行程序。`
-            : "退出后，本机将不再接收任务。"}
+            ? tr(
+                "仍有 {0} 个任务进行中。退出会停止任务及本机执行程序。",
+                running.length,
+              )
+            : tr("退出后，本机将不再接收任务。")}
         </p>
-        <p className="muted">尚未确认的桌面操作可能已经生效，不会自动重放。</p>
+        <p className="muted">
+          {tr("尚未确认的桌面操作可能已经生效，不会自动重放。")}
+        </p>
         <div className="actions">
           <button autoFocus onClick={() => setQuit(false)}>
-            继续运行
+            {tr("继续运行")}
           </button>
           <button
             className="danger"
             disabled={busy}
             onClick={() => act("exit_app", { force: true })}
           >
-            停止并退出
+            {tr("停止并退出")}
           </button>
         </div>
         {feedback}
@@ -651,17 +685,17 @@ function App() {
         <div className="overlay-bar">
           <span className="dot" />
           <span className="overlay-action">
-            <b>Agent 正在操作这台 Mac</b>
+            <b>{tr("Agent 正在操作这台 Mac")}</b>
             <span>
               {" "}
               ·{" "}
               {running.find((t) => t.kind === "mcp.call")?.arguments.tool ||
-                "桌面操作"}
+                tr("桌面操作")}
             </span>
           </span>
           <span className="mono overlay-key">⌃⌥⌘.</span>
           <button disabled={busy || !available} onClick={stop}>
-            停止
+            {tr("停止")}
           </button>
         </div>
         {feedback}
@@ -674,35 +708,35 @@ function App() {
     ) as ReturnType<typeof groupSessions>;
     const codeProjects = trayProjects.filter((p: any) => !p.project.desktop);
     const headline = approvals.length
-      ? `需要你确认 ${approvals.length} 个请求`
+      ? tr("需要你确认 {0} 个请求", approvals.length)
       : !available
-        ? "执行器未运行"
+        ? tr("执行器未运行")
         : !connected
-          ? "未连接服务器"
+          ? tr("未连接服务器")
           : paused
-            ? "已暂停接收新任务"
+            ? tr("已暂停接收新任务")
             : codeProjects.length > 1
-              ? `正在 ${codeProjects.length} 个项目上工作`
+              ? tr("正在 {0} 个项目上工作", codeProjects.length)
               : codeProjects.length === 1
-                ? `正在处理 ${codeProjects[0].project.name}`
+                ? tr("正在处理 {0}", codeProjects[0].project.name)
                 : desktopBusy
-                  ? "Agent 正在操作桌面"
-                  : "就绪，等待 Agent";
+                  ? tr("Agent 正在操作桌面")
+                  : tr("就绪，等待 Agent");
     const problems = attentionCount(summary);
     const sub =
       !available || !connected
         ? snapshot?.connection.error || ""
         : [
             approvals.length && working.length
-              ? `${trayProjects.length} 个项目进行中`
+              ? tr("{0} 个项目进行中", trayProjects.length)
               : codeProjects.length && desktopBusy
-                ? "另有桌面操作"
+                ? tr("另有桌面操作")
                 : "",
             status.servers > 1
-              ? `${status.online}/${status.servers} 台服务器在线`
+              ? tr("{0}/{1} 台服务器在线", status.online, status.servers)
               : snapshot?.connection.rtt_ms != null
-                ? `已连接 · ${snapshot.connection.rtt_ms} ms`
-                : "已连接",
+                ? tr("已连接 · {0} ms", snapshot.connection.rtt_ms)
+                : tr("已连接"),
           ]
             .filter(Boolean)
             .join(" · ");
@@ -734,20 +768,20 @@ function App() {
                 className="stop-all"
                 disabled={!available || busy}
                 onClick={stop}
-                title="取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）"
+                title={tr("取消所有任务、暂停接收并关闭桌面控制（⌃⌥⌘.）")}
               >
                 <Square size={11} />
-                停止
+                {tr("停止")}
               </button>
             )}
             {!available && (
               <button className="primary" onClick={() => jump("desktop")}>
-                检查连接
+                {tr("检查连接")}
               </button>
             )}
             {paused && available && !running.length && (
               <button disabled={busy} onClick={pause}>
-                恢复
+                {tr("恢复")}
               </button>
             )}
           </header>
@@ -760,7 +794,7 @@ function App() {
             compact
           />
           {working.length > 0 && (
-            <section className="tray-section" aria-label="正在进行">
+            <section className="tray-section" aria-label={tr("正在进行")}>
               {trayProjects.slice(0, 3).map((p: any) => {
                 const t: Task = p.tasks.find(
                   (x: Task) => active(x) && x.status !== "awaiting_approval",
@@ -784,7 +818,7 @@ function App() {
                     <span className="grow">
                       <span className="row">
                         <b className="ellipsis">
-                          {desktop ? "桌面操作" : p.project.name}
+                          {desktop ? tr("桌面操作") : p.project.name}
                         </b>
                         {p.project.tag && <small>{p.project.tag}</small>}
                         <span className="grow" />
@@ -796,7 +830,11 @@ function App() {
                       {!desktop && lastLine(t.output_tail) && (
                         <small className="mono ellipsis tray-tail">
                           {t.progress
-                            ? `已收到 ${t.progress.received} / ${t.progress.total} 个文件`
+                            ? tr(
+                                "已收到 {0} / {1} 个文件",
+                                t.progress.received,
+                                t.progress.total,
+                              )
                             : lastLine(t.output_tail)}
                         </small>
                       )}
@@ -806,14 +844,14 @@ function App() {
               })}
               {trayProjects.length > 3 && (
                 <button className="link tray-more" onClick={() => jump("live")}>
-                  还有 {trayProjects.length - 3} 个项目
+                  {tr("还有 {0} 个项目", trayProjects.length - 3)}
                 </button>
               )}
             </section>
           )}
           {recentProjects.length > 0 && (
-            <section className="tray-section" aria-label="最近">
-              <small className="tray-label">最近</small>
+            <section className="tray-section" aria-label={tr("最近")}>
+              <small className="tray-label">{tr("最近")}</small>
               {recentProjects.map((p: any) => (
                 <button
                   className="tray-task recent"
@@ -822,7 +860,7 @@ function App() {
                 >
                   <span className="grow ellipsis">
                     <b>{p.project.name}</b>{" "}
-                    <small>{p.tasks.length} 个任务</small>
+                    <small>{tr("{0} 个任务", p.tasks.length)}</small>
                   </span>
                   <small>{clock(p.end)}</small>
                 </button>
@@ -831,18 +869,21 @@ function App() {
           )}
           {available && connected && !approvals.length && (
             <button className="tray-today" onClick={() => jump("tasks")}>
-              今天 {summary.total || 0} 个任务 ·{" "}
-              {problems ? `${problems} 个问题` : "没有问题"}
+              {tr(
+                "今天 {0} 个任务 · {1}",
+                summary.total || 0,
+                problems ? tr("{0} 个问题", problems) : tr("没有问题"),
+              )}
               <span className="push">›</span>
             </button>
           )}
           <section className="tray-section tray-switches">
             <label className="tray-switch">
-              <span className="grow">接收新任务</span>
+              <span className="grow">{tr("接收新任务")}</span>
               <input
                 className="switch"
                 type="checkbox"
-                aria-label="接收新任务"
+                aria-label={tr("接收新任务")}
                 checked={!paused}
                 disabled={!available || isPending("pause")}
                 aria-busy={isPending("pause")}
@@ -850,11 +891,11 @@ function App() {
               />
             </label>
             <label className="tray-switch">
-              <span className="grow">允许 Agent 操作桌面</span>
+              <span className="grow">{tr("允许 Agent 操作桌面")}</span>
               <input
                 className="switch"
                 type="checkbox"
-                aria-label="允许 Agent 操作桌面"
+                aria-label={tr("允许 Agent 操作桌面")}
                 checked={snapshot?.policy.desktop_enabled || false}
                 disabled={!available || isPending("desktop")}
                 aria-busy={isPending("desktop")}
@@ -864,13 +905,16 @@ function App() {
           </section>
           <footer className="tray-menu">
             <button onClick={() => jump("live")}>
-              打开 Macrun<small>⌘O</small>
+              {tr("打开 Macrun")}
+              <small>⌘O</small>
             </button>
             <button onClick={() => jump("settings")}>
-              设置…<small>⌘,</small>
+              {tr("设置…")}
+              <small>⌘,</small>
             </button>
             <button onClick={() => act("request_quit")}>
-              退出 Macrun<small>⌘Q</small>
+              {tr("退出 Macrun")}
+              <small>⌘Q</small>
             </button>
           </footer>
           {feedback}
@@ -925,11 +969,11 @@ function App() {
           <div>
             <b data-tauri-drag-region>Macrun</b>
             <small data-tauri-drag-region>
-              {snapshot ? `v${snapshot.version}` : "执行器未启动"}
+              {snapshot ? `v${snapshot.version}` : tr("执行器未启动")}
             </small>
           </div>
         </div>
-        <nav aria-label="主导航">
+        <nav aria-label={tr("主导航")}>
           {nav.map(([id, text, Icon]) => {
             // Badges only count things that need the person.
             const badge =
@@ -940,7 +984,7 @@ function App() {
                   : id === "desktop" &&
                       status.desktopEnabled &&
                       status.desktopMissing
-                    ? { text: `${status.desktopMissing} 项`, warn: false }
+                    ? { text: tr("{0} 项", status.desktopMissing), warn: false }
                     : null;
             return (
               <button
@@ -956,7 +1000,7 @@ function App() {
                     className={badge.warn ? "warn" : ""}
                     aria-label={
                       id === "live" && badge.warn
-                        ? `${badge.text} 个请求等你确认`
+                        ? tr("{0} 个请求等你确认", badge.text)
                         : undefined
                     }
                   >
@@ -967,12 +1011,12 @@ function App() {
             );
           })}
         </nav>
-        <div className="v4-side-foot" aria-label="服务器状态">
+        <div className="v4-side-foot" aria-label={tr("服务器状态")}>
           {servers.map((s) => (
             <button
               key={s.id}
               className="v4-side-server"
-              title={`${s.label} · 在“本机”中查看`}
+              title={tr("{0} · 在“本机”中查看", s.label)}
               onClick={() => setPage("desktop")}
             >
               <span
@@ -986,10 +1030,10 @@ function App() {
                   : s.connection?.state === "connected"
                     ? ""
                     : app?.worker_starting
-                      ? "启动中"
+                      ? tr("启动中")
                       : app?.worker_running
-                        ? "重连中"
-                        : "未连接"}
+                        ? tr("重连中")
+                        : tr("未连接")}
               </span>
             </button>
           ))}
@@ -999,7 +1043,7 @@ function App() {
               onClick={() => setPage("desktop")}
             >
               <span className="dot cancelled" />
-              <span className="grow">尚未配对服务器</span>
+              <span className="grow">{tr("尚未配对服务器")}</span>
             </button>
           )}
           <button
@@ -1008,7 +1052,7 @@ function App() {
             onClick={() => setPage("settings")}
           >
             <SettingsIcon size={15} />
-            <span className="grow">设置</span>
+            <span className="grow">{tr("设置")}</span>
           </button>
         </div>
       </aside>
@@ -1016,8 +1060,9 @@ function App() {
         <div className="drag title-drag" data-tauri-drag-region />
         {!isTauri && (
           <div className="alert">
-            请在 Tauri
-            桌面应用中打开。浏览器仅显示空状态布局，不连接本机执行器。
+            {tr(
+              "请在 Tauri 桌面应用中打开。浏览器仅显示空状态布局，不连接本机执行器。",
+            )}
           </div>
         )}
         {feedback}
@@ -1025,21 +1070,23 @@ function App() {
           <div className="alert" role="status">
             <Info size={16} />
             <span>
-              执行器暂时不可用。以下保留上次收到的记录，任务状态可能已变化。
+              {tr(
+                "执行器暂时不可用。以下保留上次收到的记录，任务状态可能已变化。",
+              )}
             </span>
           </div>
         )}
         {visited.includes("live") && (
-          <RetainedPage active={page === "live"}>
+          <RetainedPage locale={locale} active={page === "live"}>
             <header className="page-header v4-toolbar">
-              <h1>概览</h1>
+              <h1>{tr("概览")}</h1>
               <span className="grow" />
               <label className="v4-receive">
-                接收新任务
+                {tr("接收新任务")}
                 <input
                   className="switch"
                   type="checkbox"
-                  aria-label="接收新任务"
+                  aria-label={tr("接收新任务")}
                   checked={!paused}
                   disabled={!available || isPending("pause")}
                   aria-busy={isPending("pause")}
@@ -1050,11 +1097,12 @@ function App() {
                 className="v4-stop"
                 disabled={!available || isPending("stop_all")}
                 aria-busy={isPending("stop_all")}
-                title="取消所有任务、暂停接收并关闭桌面控制"
+                title={tr("取消所有任务、暂停接收并关闭桌面控制")}
                 onClick={stop}
               >
                 <Square size={13} />
-                停止全部 <small>⌃⌥⌘.</small>
+                {tr("停止全部 ")}
+                <small>⌃⌥⌘.</small>
               </button>
             </header>
             <Overview
@@ -1072,29 +1120,29 @@ function App() {
           </RetainedPage>
         )}
         {visited.includes("performance") && (
-          <RetainedPage active={page === "performance"}>
+          <RetainedPage locale={locale} active={page === "performance"}>
             <Performance active={page === "performance"} app={app} />
           </RetainedPage>
         )}
         {visited.includes("tasks") && (
-          <RetainedPage active={page === "tasks"}>
+          <RetainedPage locale={locale} active={page === "tasks"}>
             <header className="page-header v4-toolbar">
-              <h1>活动</h1>
-              <div className="v4-seg" role="group" aria-label="快速筛选">
+              <h1>{tr("活动")}</h1>
+              <div className="v4-seg" role="group" aria-label={tr("快速筛选")}>
                 {(
                   [
-                    ["all", "全部", ""],
-                    ["attention", "需要关注", ""],
-                    ["all", "桌面", "mcp.call"],
+                    ["all", tr("全部"), ""],
+                    ["attention", tr("需要关注"), ""],
+                    ["all", tr("桌面"), "mcp.call"],
                   ] as const
                 ).map(([f, text, k]) => {
                   const on = filter === f && kind === k;
                   const count =
-                    text === "全部"
+                    text === tr("全部")
                       ? Object.entries(history.counts)
                           .filter(([key]) => key !== "exited")
                           .reduce((sum, [, n]) => sum + n, 0)
-                      : text === "需要关注"
+                      : text === tr("需要关注")
                         ? attentionCount(history.counts)
                         : null;
                   return (
@@ -1115,26 +1163,32 @@ function App() {
                 })}
               </div>
               {servers.length > 1 && (
-                <div className="v4-seg" role="group" aria-label="按服务器筛选">
-                  {[{ id: "", label: "所有服务器" }, ...servers].map((c) => (
-                    <button
-                      key={c.id || "all-servers"}
-                      aria-pressed={connectionFilter === c.id}
-                      className={connectionFilter === c.id ? "on" : ""}
-                      onClick={() => {
-                        setConnectionFilter(c.id);
-                        setSelected("");
-                      }}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
+                <div
+                  className="v4-seg"
+                  role="group"
+                  aria-label={tr("按服务器筛选")}
+                >
+                  {[{ id: "", label: tr("所有服务器") }, ...servers].map(
+                    (c) => (
+                      <button
+                        key={c.id || "all-servers"}
+                        aria-pressed={connectionFilter === c.id}
+                        className={connectionFilter === c.id ? "on" : ""}
+                        onClick={() => {
+                          setConnectionFilter(c.id);
+                          setSelected("");
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    ),
+                  )}
                 </div>
               )}
               <label className="v4-more">
-                <span className="sr-only">更多筛选</span>
+                <span className="sr-only">{tr("更多筛选")}</span>
                 <select
-                  aria-label="更多筛选"
+                  aria-label={tr("更多筛选")}
                   value={
                     !["all", "attention"].includes(filter)
                       ? filter
@@ -1154,17 +1208,17 @@ function App() {
                     setSelected("");
                   }}
                 >
-                  <option value="">更多筛选</option>
-                  <optgroup label="状态">
+                  <option value="">{tr("更多筛选")}</option>
+                  <optgroup label={tr("状态")}>
                     {Object.entries(statuses).map(([k, v]) => (
                       <option key={k} value={k}>
                         {v} {history.counts[k] || 0}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="类型">
-                    <option value="kind:exec.start">命令</option>
-                    <option value="kind:sync">同步</option>
+                  <optgroup label={tr("类型")}>
+                    <option value="kind:exec.start">{tr("命令")}</option>
+                    <option value="kind:sync">{tr("同步")}</option>
                   </optgroup>
                 </select>
               </label>
@@ -1172,8 +1226,8 @@ function App() {
               <label className="search">
                 <Search size={15} />
                 <input
-                  aria-label="搜索任务"
-                  placeholder="项目、命令、目录或任务编号"
+                  aria-label={tr("搜索任务")}
+                  placeholder={tr("项目、命令、目录或任务编号")}
                   value={query}
                   onChange={(e) => {
                     setQuery(e.target.value);
@@ -1186,18 +1240,20 @@ function App() {
               <div className="task-history-list">
                 {!available && (
                   <p className="task-history-status">
-                    执行器未连接，仅显示已缓存的近期任务。
+                    {tr("执行器未连接，仅显示已缓存的近期任务。")}
                   </p>
                 )}
                 {history.error && (
                   <div className="task-history-error" role="alert">
-                    历史记录读取失败：{history.error}{" "}
-                    <button onClick={history.reload}>重新加载历史</button>
+                    {tr("历史记录读取失败：{0} ", history.error)}
+                    <button onClick={history.reload}>
+                      {tr("重新加载历史")}
+                    </button>
                   </div>
                 )}
                 <section
                   className="v4-task-list"
-                  aria-label="任务列表"
+                  aria-label={tr("任务列表")}
                   ref={history.list}
                   aria-busy={history.loading}
                   data-updating={history.stale || undefined}
@@ -1265,7 +1321,7 @@ function App() {
                             if (window.innerWidth <= 1000)
                               document
                                 .querySelector<HTMLElement>(
-                                  '[aria-label="任务详情"]',
+                                  tr('[aria-label="任务详情"]'),
                                 )
                                 ?.scrollIntoView?.({
                                   block: "nearest",
@@ -1349,14 +1405,20 @@ function App() {
                                     </span>
                                   )}
                                   <small>
-                                    {clock(session.start)} –{" "}
-                                    {session.active
-                                      ? "现在"
-                                      : clock(session.end)}{" "}
-                                    · {session.tasks.length} 个任务
-                                    {session.exited
-                                      ? ` · ${session.exited} 个非零退出`
-                                      : ""}
+                                    {tr(
+                                      "{0} – {1} · {2} 个任务{3}",
+                                      clock(session.start),
+                                      session.active
+                                        ? tr("现在")
+                                        : clock(session.end),
+                                      session.tasks.length,
+                                      session.exited
+                                        ? tr(
+                                            " · {0} 个非零退出",
+                                            session.exited,
+                                          )
+                                        : "",
+                                    )}
                                   </small>
                                 </span>
                                 {session.active ? (
@@ -1364,8 +1426,8 @@ function App() {
                                     className={`v4-chip ${session.project.desktop ? "act" : "run"}`}
                                   >
                                     {session.project.desktop
-                                      ? "操作中"
-                                      : "进行中"}
+                                      ? tr("操作中")
+                                      : tr("进行中")}
                                   </span>
                                 ) : session.problems ? (
                                   <span className="v4-chip warn">
@@ -1374,7 +1436,9 @@ function App() {
                                     )}
                                   </span>
                                 ) : (
-                                  <span className="v4-faint small">完成</span>
+                                  <span className="v4-faint small">
+                                    {tr("完成")}
+                                  </span>
                                 )}
                               </div>
                               {open && session.tasks.map(row)}
@@ -1388,15 +1452,21 @@ function App() {
                   })()}
                   {!filtered.length && (
                     <div className="empty">
-                      {history.loading ? "正在读取任务…" : "没有匹配的任务"}
+                      {history.loading
+                        ? tr("正在读取任务…")
+                        : tr("没有匹配的任务")}
                     </div>
                   )}
                 </section>
-                <nav className="task-pagination" aria-label="任务分页">
+                <nav className="task-pagination" aria-label={tr("任务分页")}>
                   <span role="status">
                     {history.loading
-                      ? "正在读取…"
-                      : `共 ${history.filtered_total} 条 · 第 ${history.pageNumber} 页`}
+                      ? tr("正在读取…")
+                      : tr(
+                          "共 {0} 条 · 第 {1} 页",
+                          history.filtered_total,
+                          history.pageNumber,
+                        )}
                   </span>
                   <button
                     disabled={!history.previous || history.loading}
@@ -1405,7 +1475,7 @@ function App() {
                       history.previous?.();
                     }}
                   >
-                    较新
+                    {tr("较新")}
                   </button>
                   <button
                     disabled={!history.next || history.loading}
@@ -1414,15 +1484,17 @@ function App() {
                       history.next?.();
                     }}
                   >
-                    更早
+                    {tr("更早")}
                   </button>
                 </nav>
               </div>
-              <section className="v4-detail" aria-label="任务详情">
+              <section className="v4-detail" aria-label={tr("任务详情")}>
                 {history.detailError && (
                   <div className="task-history-error" role="alert">
-                    任务详情读取失败：{history.detailError}{" "}
-                    <button onClick={history.reload}>重试读取详情</button>
+                    {tr("任务详情读取失败：{0} ", history.detailError)}
+                    <button onClick={history.reload}>
+                      {tr("重试读取详情")}
+                    </button>
                   </div>
                 )}
                 {sel ? (
@@ -1440,15 +1512,27 @@ function App() {
                             className={`v4-result ${needsAttention(sel) ? "warn" : agentExit(sel) ? "" : sel.status}`}
                           >
                             {agentExit(sel)
-                              ? `退出码 ${sel.result?.exit_code}`
+                              ? tr("退出码 {0}", sel.result?.exit_code)
                               : sel.status === "succeeded"
-                                ? `✓ 成功${sel.result?.exit_code != null ? ` · 退出码 ${sel.result.exit_code}` : ""}`
+                                ? tr(
+                                    "✓ 成功{0}",
+                                    sel.result?.exit_code != null
+                                      ? tr(
+                                          " · 退出码 {0}",
+                                          sel.result.exit_code,
+                                        )
+                                      : "",
+                                  )
                                 : problemLabel(sel)}
                           </span>
                           <span className="grow" />
                           <small>
-                            {dayLabel(sel.started_at)} {time(sel)} · 用时{" "}
-                            {taskDuration(sel)}
+                            {tr(
+                              "{0}  {1} · 用时 {2}",
+                              dayLabel(sel.started_at),
+                              time(sel),
+                              taskDuration(sel),
+                            )}
                           </small>
                         </div>
                         {command ? (
@@ -1461,7 +1545,7 @@ function App() {
                           </h3>
                         )}
                         <dl>
-                          <dt>项目</dt>
+                          <dt>{tr("项目")}</dt>
                           <dd>
                             {project.name}
                             {project.tag && (
@@ -1470,19 +1554,19 @@ function App() {
                           </dd>
                           {directory && (
                             <>
-                              <dt>目录</dt>
+                              <dt>{tr("目录")}</dt>
                               <dd className="mono">{directory}</dd>
                             </>
                           )}
                           {sel.arguments.path && (
                             <>
-                              <dt>文件</dt>
+                              <dt>{tr("文件")}</dt>
                               <dd className="mono">{sel.arguments.path}</dd>
                             </>
                           )}
                           {serverLabel(sel) && (
                             <>
-                              <dt>来自</dt>
+                              <dt>{tr("来自")}</dt>
                               <dd className="task-source">
                                 {serverLabel(sel)}
                               </dd>
@@ -1490,19 +1574,19 @@ function App() {
                           )}
                           {sel.desktop_tier && (
                             <>
-                              <dt>桌面分级</dt>
+                              <dt>{tr("桌面分级")}</dt>
                               <dd>{tierLabels[sel.desktop_tier]}</dd>
                             </>
                           )}
                           {sel.approved_by_rule && (
                             <>
-                              <dt>确认方式</dt>
-                              <dd>按临时允许规则自动放行</dd>
+                              <dt>{tr("确认方式")}</dt>
+                              <dd>{tr("按临时允许规则自动放行")}</dd>
                             </>
                           )}
                           {sel.arguments.env && (
                             <>
-                              <dt>环境变量</dt>
+                              <dt>{tr("环境变量")}</dt>
                               <dd className="mono">
                                 {Object.keys(sel.arguments.env)
                                   .map((k) => `${k}=••••`)
@@ -1510,7 +1594,7 @@ function App() {
                               </dd>
                             </>
                           )}
-                          <dt>任务编号</dt>
+                          <dt>{tr("任务编号")}</dt>
                           <dd className="mono">
                             {sel.task_id}{" "}
                             <button
@@ -1518,7 +1602,7 @@ function App() {
                               onClick={() => copy(sel.task_id)}
                             >
                               <Copy size={12} />
-                              复制任务编号
+                              {tr("复制任务编号")}
                             </button>
                           </dd>
                         </dl>
@@ -1529,30 +1613,32 @@ function App() {
                         {explanation && !explanation.agentExit && (
                           <div className="v4-explain" role="note">
                             <div>
-                              <b>发生了什么</b>
+                              <b>{tr("发生了什么")}</b>
                               {explanation.what}
                             </div>
                             <div>
-                              <b>Agent 收到了什么</b>
+                              <b>{tr("Agent 收到了什么")}</b>
                               {explanation.agent}
                             </div>
                             <div>
-                              <b>你可以做什么</b>
+                              <b>{tr("你可以做什么")}</b>
                               {explanation.you}
                             </div>
                           </div>
                         )}
                         {explanation?.agentExit && (
                           <p className="v4-note">
-                            {explanation.what}
-                            {explanation.agent}这是命令自己的结果，不计入 Macrun
-                            问题。
+                            {tr(
+                              "{0}{1}这是命令自己的结果，不计入 Macrun 问题。",
+                              explanation.what,
+                              explanation.agent,
+                            )}
                           </p>
                         )}
                         <div className="v4-sh">
-                          <h2>输出</h2>
+                          <h2>{tr("输出")}</h2>
                           <span className="grow" />
-                          <small>最后 8 KB</small>
+                          <small>{tr("最后 8 KB")}</small>
                         </div>
                         <pre
                           className="term"
@@ -1560,18 +1646,20 @@ function App() {
                           onKeyDown={selectLogText}
                         >
                           {history.detailLoading && !history.detailRefreshing
-                            ? "正在读取输出…"
+                            ? tr("正在读取输出…")
                             : sel.output_tail ||
                               sel.error?.message ||
-                              "暂无文本输出"}
+                              tr("暂无文本输出")}
                         </pre>
                         <div className="actions">
                           {command && (
                             <button
-                              onClick={() => copyText(command, "已复制命令")}
+                              onClick={() =>
+                                copyText(command, tr("已复制命令"))
+                              }
                             >
                               <Copy size={14} />
-                              复制命令
+                              {tr("复制命令")}
                             </button>
                           )}
                           <button
@@ -1579,7 +1667,7 @@ function App() {
                               act("open_log", { taskId: sel.task_id })
                             }
                           >
-                            打开完整日志
+                            {tr("打开完整日志")}
                           </button>
                           {directory && (
                             <button
@@ -1591,12 +1679,12 @@ function App() {
                                 })
                               }
                             >
-                              在终端打开目录
+                              {tr("在终端打开目录")}
                             </button>
                           )}
                           {sel.status === "unknown" && (
                             <button onClick={() => setPage("desktop")}>
-                              前往本机核对
+                              {tr("前往本机核对")}
                             </button>
                           )}
                           {active(sel) && (
@@ -1610,7 +1698,7 @@ function App() {
                                 control("cancel", { task_id: sel.task_id })
                               }
                             >
-                              取消任务
+                              {tr("取消任务")}
                             </button>
                           )}
                         </div>
@@ -1618,18 +1706,18 @@ function App() {
                     );
                   })()
                 ) : (
-                  <div className="empty">选择任务查看结果和输出。</div>
+                  <div className="empty">{tr("选择任务查看结果和输出。")}</div>
                 )}
               </section>
             </div>
           </RetainedPage>
         )}
         {visited.includes("access") && (
-          <RetainedPage active={page === "access"}>
+          <RetainedPage locale={locale} active={page === "access"}>
             <header className="page-header v4-toolbar">
-              <h1>权限</h1>
+              <h1>{tr("权限")}</h1>
               <span className="v4-muted">
-                远程 Agent 在这台 Mac 上能做什么。对所有服务器生效。
+                {tr("远程 Agent 在这台 Mac 上能做什么。对所有服务器生效。")}
               </span>
             </header>
             <Access
@@ -1641,10 +1729,12 @@ function App() {
           </RetainedPage>
         )}
         {visited.includes("desktop") && (
-          <RetainedPage active={page === "desktop"}>
+          <RetainedPage locale={locale} active={page === "desktop"}>
             <header className="page-header v4-toolbar">
-              <h1>本机</h1>
-              <span className="v4-muted">这台 Mac 是否准备好替 Agent 干活</span>
+              <h1>{tr("本机")}</h1>
+              <span className="v4-muted">
+                {tr("这台 Mac 是否准备好替 Agent 干活")}
+              </span>
             </header>
             <ThisMac
               snapshot={snapshot}
@@ -1660,7 +1750,7 @@ function App() {
               desktopPending={isPending("desktop")}
               technical={
                 <>
-                  <h2 className="v4-sub">后端</h2>
+                  <h2 className="v4-sub">{tr("后端")}</h2>
                   {snapshot?.backends.map((b) => (
                     <article className="card backend" key={b.name}>
                       <div className="row">
@@ -1668,27 +1758,27 @@ function App() {
                         <h3>{b.display_name || b.name}</h3>
                         <span className="tag push">
                           {{
-                            ready: "已启动",
-                            running: "运行中",
-                            busy: "正在使用",
-                            not_started: "未启动",
+                            ready: tr("已启动"),
+                            running: tr("运行中"),
+                            busy: tr("正在使用"),
+                            not_started: tr("未启动"),
                           }[b.state] || b.state}
                         </span>
                       </div>
                       <p className="mono wrap">{b.command}</p>
                       <div className="backend-stats">
                         <div className="soft">
-                          <small>会话</small>
+                          <small>{tr("会话")}</small>
                           <div className="mono ellipsis" title={b.session}>
-                            {b.session || "尚未生成"}
+                            {b.session || tr("尚未生成")}
                           </div>
                         </div>
                         <div className="soft">
-                          <small>工具</small>
-                          <div>{b.tool_count ?? "未读取"}</div>
+                          <small>{tr("工具")}</small>
+                          <div>{b.tool_count ?? tr("未读取")}</div>
                         </div>
                         <div className="soft">
-                          <small>近期调用</small>
+                          <small>{tr("近期调用")}</small>
                           <div>
                             {
                               tasks.filter(
@@ -1712,7 +1802,7 @@ function App() {
                           const r = await control("tools", { server: b.name });
                           if (!r || request !== toolsRequest.current) return;
                           if (!isToolPage(r)) {
-                            setError("后端未返回有效工具列表，请重试。");
+                            setError(tr("后端未返回有效工具列表，请重试。"));
                             return;
                           }
                           toolsReturnFocus.current = trigger;
@@ -1720,7 +1810,7 @@ function App() {
                           setTools(r);
                         }}
                       >
-                        查看工具列表
+                        {tr("查看工具列表")}
                       </button>
                       <button
                         className="ghost"
@@ -1732,23 +1822,26 @@ function App() {
                           control("restart_backend", { server: b.name })
                         }
                       >
-                        重启后端
+                        {tr("重启后端")}
                       </button>
                       <small className="backend-note">
-                        重启会更换会话编号，Agent 需要重新发现工具并重新截图。
+                        {tr(
+                          "重启会更换会话编号，Agent 需要重新发现工具并重新截图。",
+                        )}
                       </small>
                     </article>
                   ))}
                   {!snapshot?.backends.length && (
                     <div className="card empty">
                       <Monitor />
-                      <h3>尚未配置桌面后端</h3>
+                      <h3>{tr("尚未配置桌面后端")}</h3>
                       <p>
-                        在设置中选择已有的
-                        worker.toml。仅声明配置不代表权限已获授权。
+                        {tr(
+                          "在设置中选择已有的 worker.toml。仅声明配置不代表权限已获授权。",
+                        )}
                       </p>
                       <button onClick={() => setPage("settings")}>
-                        前往设置
+                        {tr("前往设置")}
                       </button>
                     </div>
                   )}
@@ -1768,7 +1861,7 @@ function App() {
                   />
                   {replayHistory.error && (
                     <p className="task-history-error" role="alert">
-                      最近操作读取失败：{replayHistory.error}
+                      {tr("最近操作读取失败：{0}", replayHistory.error)}
                     </p>
                   )}
                   <Replay
@@ -1786,7 +1879,7 @@ function App() {
           </RetainedPage>
         )}
         {visited.includes("settings") && (
-          <RetainedPage active={page === "settings"}>
+          <RetainedPage locale={locale} active={page === "settings"}>
             <SettingsPage
               app={app}
               snapshot={snapshot}
@@ -1810,14 +1903,16 @@ function App() {
             tabIndex={-1}
             role="dialog"
             aria-modal="true"
-            aria-label="后端工具列表"
+            aria-label={tr("后端工具列表")}
           >
-            <h2>后端工具列表</h2>
+            <h2>{tr("后端工具列表")}</h2>
             <pre className="term" tabIndex={0} onKeyDown={selectLogText}>
               {JSON.stringify(tools, null, 2)}
             </pre>
             <div className="row between">
-              <small>已读取 {tools.result?.tools?.length || 0} 个工具</small>
+              <small>
+                {tr("已读取 {0} 个工具", tools.result?.tools?.length || 0)}
+              </small>
               <div className="actions">
                 {tools.result?.nextCursor && (
                   <button
@@ -1831,12 +1926,12 @@ function App() {
                       });
                       if (!next || request !== toolsRequest.current) return;
                       if (!isToolPage(next)) {
-                        setError("后端未返回有效工具列表，请重试。");
+                        setError(tr("后端未返回有效工具列表，请重试。"));
                         return;
                       }
                       if (next.session !== tools.session) {
                         closeTools();
-                        setError("后端会话已变化，请重新打开工具列表。");
+                        setError(tr("后端会话已变化，请重新打开工具列表。"));
                         return;
                       }
                       const merged = new Map<
@@ -1855,12 +1950,12 @@ function App() {
                     }}
                   >
                     {isPending("tools", toolsServer)
-                      ? "读取中…"
-                      : "读取更多工具"}
+                      ? tr("读取中…")
+                      : tr("读取更多工具")}
                   </button>
                 )}
                 <button autoFocus onClick={closeTools}>
-                  关闭
+                  {tr("关闭")}
                 </button>
               </div>
             </div>
@@ -1883,24 +1978,33 @@ function App() {
             aria-labelledby="pair-request-title"
           >
             <h2 id="pair-request-title">
-              {pairRequest ? "添加服务器" : "重新配对"}
+              {pairRequest ? tr("添加服务器") : tr("重新配对")}
             </h2>
             <p>
-              需要先断开当前所有服务器，才能修改连接配置。已有连接和任务记录会保留。
+              {tr(
+                "需要先断开当前所有服务器，才能修改连接配置。已有连接和任务记录会保留。",
+              )}
             </p>
             <p className="muted" role="status">
               {snapshot?.active_count
-                ? `还有 ${snapshot.active_count} 个任务正在运行，请等待任务结束后继续。`
+                ? tr(
+                    "还有 {0} 个任务正在运行，请等待任务结束后继续。",
+                    snapshot.active_count,
+                  )
                 : available
-                  ? "当前没有任务运行，断开后会进入配对页面。配对完成后可重新连接全部服务器。"
-                  : "正在确认任务状态，请稍候；暂时无法确认时请取消并检查连接。"}
+                  ? tr(
+                      "当前没有任务运行，断开后会进入配对页面。配对完成后可重新连接全部服务器。",
+                    )
+                  : tr(
+                      "正在确认任务状态，请稍候；暂时无法确认时请取消并检查连接。",
+                    )}
             </p>
             <div className="actions">
               <button
                 disabled={disconnectingForPair}
                 onClick={() => setPairRequest(null)}
               >
-                取消
+                {tr("取消")}
               </button>
               <button
                 disabled={
@@ -1912,10 +2016,10 @@ function App() {
                 onClick={disconnectAndPair}
               >
                 {disconnectingForPair
-                  ? "正在断开…"
+                  ? tr("正在断开…")
                   : pairRequest
-                    ? "断开并添加"
-                    : "断开并配对"}
+                    ? tr("断开并添加")
+                    : tr("断开并配对")}
               </button>
             </div>
             {error && (

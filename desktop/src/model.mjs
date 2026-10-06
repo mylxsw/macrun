@@ -1,13 +1,32 @@
+import { tr } from "./i18n.mjs";
 export const statuses = {
-  awaiting_approval: "待确认",
-  denied: "已拒绝",
-  accepted: "已接收",
-  running: "运行中",
-  succeeded: "成功",
-  failed: "失败",
-  cancelled: "已取消",
-  timed_out: "超时",
-  unknown: "未知",
+  get awaiting_approval() {
+    return tr("待确认");
+  },
+  get denied() {
+    return tr("已拒绝");
+  },
+  get accepted() {
+    return tr("已接收");
+  },
+  get running() {
+    return tr("运行中");
+  },
+  get succeeded() {
+    return tr("成功");
+  },
+  get failed() {
+    return tr("失败");
+  },
+  get cancelled() {
+    return tr("已取消");
+  },
+  get timed_out() {
+    return tr("超时");
+  },
+  get unknown() {
+    return tr("未知");
+  },
 };
 export const active = (t) =>
   ["accepted", "running", "awaiting_approval"].includes(t.status);
@@ -18,20 +37,46 @@ export const statusGroups = {
 };
 export const statusMatches = (filter, status) =>
   filter === "all" ||
-  (statusGroups[filter] ? statusGroups[filter].includes(status) : status === filter);
+  (statusGroups[filter]
+    ? statusGroups[filter].includes(status)
+    : status === filter);
 export const tierLabels = {
-  observe: "看屏幕",
-  control: "点击和输入",
-  high: "不可撤回的操作",
+  get observe() {
+    return tr("看屏幕");
+  },
+  get control() {
+    return tr("点击和输入");
+  },
+  get high() {
+    return tr("不可撤回的操作");
+  },
 };
 export const tierPolicyLabels = {
-  allow: "允许",
-  confirm: "先问",
-  deny: "禁止",
+  get allow() {
+    return tr("允许");
+  },
+  get confirm() {
+    return tr("先问");
+  },
+  get deny() {
+    return tr("禁止");
+  },
 };
 const readOnlyPrograms = [
-  "pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "which", "whoami",
-  "uname", "date", "echo", "printf",
+  "pwd",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file",
+  "which",
+  "whoami",
+  "uname",
+  "date",
+  "echo",
+  "printf",
 ];
 export const program = (command = "") => {
   const first = command.trim().split(/\s+/)[0] || "";
@@ -40,19 +85,19 @@ export const program = (command = "") => {
 // Mirrors the worker's risk filter so the prompt can say why it asked.
 export function riskReasons(command = "") {
   const reasons = [];
-  if (/[|]/.test(command)) reasons.push("管道");
-  if (/[><]/.test(command)) reasons.push("重定向");
-  if (/[;&\n]/.test(command)) reasons.push("组合命令");
-  if (/[`$()]/.test(command)) reasons.push("命令替换");
+  if (/[|]/.test(command)) reasons.push(tr("管道"));
+  if (/[><]/.test(command)) reasons.push(tr("重定向"));
+  if (/[;&\n]/.test(command)) reasons.push(tr("组合命令"));
+  if (/[`$()]/.test(command)) reasons.push(tr("命令替换"));
   const first = command.trim().split(/\s+/)[0] || "";
   if (first && !readOnlyPrograms.includes(first))
-    reasons.push(`未知程序 ${program(command)}`);
+    reasons.push(tr("未知程序 {0}", program(command)));
   return reasons;
 }
 export const title = (t) =>
   t.arguments?.command ||
   (t.kind === "sync"
-    ? `同步 → ${t.arguments?.remote_root || "工作区"}`
+    ? tr("同步 → {0}", t.arguments?.remote_root || tr("工作区"))
     : t.arguments?.tool || t.arguments?.path || t.kind);
 export function selectTasks(tasks, filter, query) {
   const q = query.toLowerCase();
@@ -252,12 +297,12 @@ export function stepSummary(command = "") {
 
 /** One-line name for any task kind, used in lists and the menu bar. */
 export function taskHeadline(t) {
-  if (t.kind === "sync") return "同步文件";
+  if (t.kind === "sync") return tr("同步文件");
   if (t.kind === "mcp.call")
     return (
       [t.arguments?.tool, describeDesktopArgs(t.arguments?.arguments)]
         .filter(Boolean)
-        .join(" · ") || "桌面操作"
+        .join(" · ") || tr("桌面操作")
     );
   return stepSummary(t.arguments?.command || title(t)).text;
 }
@@ -310,7 +355,7 @@ export function projectOf(t, workspaces = []) {
   if (t.kind === "mcp.call")
     return {
       key: `${connection}|desktop`,
-      name: "桌面操作",
+      name: tr("桌面操作"),
       tag: "",
       root: "",
       desktop: true,
@@ -329,7 +374,7 @@ export function projectOf(t, workspaces = []) {
     }
   }
   const parts = root.split("/").filter(Boolean);
-  const name = parts.at(-1) || root || "未知目录";
+  const name = parts.at(-1) || root || tr("未知目录");
   let tag = parts.at(-2) || "";
   if (genericParents.has(tag.toLowerCase())) tag = "";
   // "typeflux-gul206/typeflux-api" → "gul206": drop the shared word.
@@ -391,64 +436,65 @@ export function explainTask(t) {
   if (agentExit(t))
     return {
       agentExit: true,
-      what: `命令以退出码 ${t.result.exit_code} 结束。`,
-      agent: "Agent 会读取退出码和输出，自行决定下一步。",
-      you: "这是命令自己的结果，不是 Macrun 的问题，通常无需处理。",
+      what: tr("命令以退出码 {0} 结束。", t.result.exit_code),
+      agent: tr("Agent 会读取退出码和输出，自行决定下一步。"),
+      you: tr("这是命令自己的结果，不是 Macrun 的问题，通常无需处理。"),
     };
   const code = t.error?.code;
   const message = t.error?.message || "";
   if (code === "approval_expired")
     return {
-      what: "60 秒内没有人处理这个确认请求，命令没有执行。",
-      agent: "收到 approval_expired，可以稍后重试或换个做法。",
-      you: "需要时及时在菜单栏或通知中确认；也可以在权限页放宽规则。",
+      what: tr("60 秒内没有人处理这个确认请求，命令没有执行。"),
+      agent: tr("收到 approval_expired，可以稍后重试或换个做法。"),
+      you: tr("需要时及时在菜单栏或通知中确认；也可以在权限页放宽规则。"),
     };
   if (code === "approval_rejected")
     return {
-      what: "你拒绝了这个请求，没有执行。",
-      agent: "收到 approval_rejected，知道是你拒绝的。",
-      you: "无需处理。",
+      what: tr("你拒绝了这个请求，没有执行。"),
+      agent: tr("收到 approval_rejected，知道是你拒绝的。"),
+      you: tr("无需处理。"),
     };
   if (code === "approval_interrupted")
     return {
-      what: "执行器重启时请求仍在等待确认，已自动拒绝。",
-      agent: "收到 approval_interrupted，可以重新发起。",
-      you: "无需处理。",
+      what: tr("执行器重启时请求仍在等待确认，已自动拒绝。"),
+      agent: tr("收到 approval_interrupted，可以重新发起。"),
+      you: tr("无需处理。"),
     };
   switch (t.status) {
     case "denied":
       return {
-        what: message || "请求被安全规则拒绝，没有执行。",
-        agent: "收到 denied，知道这项操作当前不被允许。",
-        you: "如需允许，在权限页调整对应规则。",
+        what: message || tr("请求被安全规则拒绝，没有执行。"),
+        agent: tr("收到 denied，知道这项操作当前不被允许。"),
+        you: tr("如需允许，在权限页调整对应规则。"),
       };
     case "timed_out":
       return {
         what:
           message && message !== "timed_out"
-            ? `超过时限后被停止：${message}`
-            : "超过时限后被停止。",
-        agent:
+            ? tr("超过时限后被停止：{0}", message)
+            : tr("超过时限后被停止。"),
+        agent: tr(
           "收到 timed_out，可以缩小范围或延长时限后重试；Macrun 不会自动重放。",
-        you: "通常无需处理。频繁出现时检查网络或任务规模。",
+        ),
+        you: tr("通常无需处理。频繁出现时检查网络或任务规模。"),
       };
     case "unknown":
       return {
-        what: "执行中断，操作可能已经生效，也可能没有。",
-        agent: "收到 unknown；Macrun 不会自动重放。",
-        you: "先核对本机状态再决定下一步；桌面操作可在本机页实拍核对。",
+        what: tr("执行中断，操作可能已经生效，也可能没有。"),
+        agent: tr("收到 unknown；Macrun 不会自动重放。"),
+        you: tr("先核对本机状态再决定下一步；桌面操作可在本机页实拍核对。"),
       };
     case "failed":
       return {
-        what: message || "任务没有正常完成。",
-        agent: "收到 failed 和上面的错误信息。",
-        you: "查看下方输出；反复出现时在设置中导出诊断包。",
+        what: message || tr("任务没有正常完成。"),
+        agent: tr("收到 failed 和上面的错误信息。"),
+        you: tr("查看下方输出；反复出现时在设置中导出诊断包。"),
       };
     case "cancelled":
       return {
-        what: "任务被取消。",
-        agent: "收到 cancelled。",
-        you: "无需处理。",
+        what: tr("任务被取消。"),
+        agent: tr("收到 cancelled。"),
+        you: tr("无需处理。"),
       };
   }
   return null;
@@ -456,31 +502,44 @@ export function explainTask(t) {
 /** Short label for a problem, e.g. in a one-line list. */
 export const problemLabel = (t) =>
   t.error?.code === "approval_expired"
-    ? "确认已过期"
+    ? tr("确认已过期")
     : t.error?.code === "approval_rejected"
-      ? "已拒绝"
+      ? tr("已拒绝")
       : t.kind === "sync" && t.status !== "succeeded"
-        ? `同步${statuses[t.status] || t.status}`
+        ? tr("同步{0}", statuses[t.status] || t.status)
         : statuses[t.status] || t.status;
 
 /** Permission presets on the access page. Directory limits are separate. */
 export const presets = {
   open: {
-    label: "放手",
-    detail:
-      "命令和桌面操作都直接执行，操作桌面时显示屏幕提示。适合专门给 Agent 用的 Mac。",
+    get label() {
+      return tr("放手");
+    },
+    get detail() {
+      return tr(
+        "命令和桌面操作都直接执行，操作桌面时显示屏幕提示。适合专门给 Agent 用的 Mac。",
+      );
+    },
     approval: "direct",
     desktop: { observe: "allow", control: "allow", high: "allow" },
   },
   balanced: {
-    label: "平衡",
-    detail: "风险命令和不可撤回的桌面操作先问你，其余直接执行。",
+    get label() {
+      return tr("平衡");
+    },
+    get detail() {
+      return tr("风险命令和不可撤回的桌面操作先问你，其余直接执行。");
+    },
     approval: "risk",
     desktop: { observe: "allow", control: "allow", high: "confirm" },
   },
   careful: {
-    label: "谨慎",
-    detail: "每条命令、每次桌面操作都先问你。适合日常使用的主力机。",
+    get label() {
+      return tr("谨慎");
+    },
+    get detail() {
+      return tr("每条命令、每次桌面操作都先问你。适合日常使用的主力机。");
+    },
     approval: "all",
     desktop: { observe: "confirm", control: "confirm", high: "confirm" },
   },

@@ -1,8 +1,9 @@
+import { tr, getLocale } from "./i18n.mjs";
 import type { SavedConnection, Snapshot, Task } from "./types";
 
 /** "13:06" in 24-hour local time. */
 export const clock = (ms: number) =>
-  new Date(ms).toLocaleTimeString("zh-CN", {
+  new Date(ms).toLocaleTimeString(getLocale(), {
     hour12: false,
     hour: "2-digit",
     minute: "2-digit",
@@ -23,19 +24,23 @@ export const taskDuration = (t: Task, now = Date.now()) =>
 /** "18 分钟", "2 小时" for how long something has been going. */
 export function span(ms: number) {
   const min = Math.max(0, Math.floor(ms / 60000));
-  if (min < 1) return "不到 1 分钟";
-  if (min < 60) return `${min} 分钟`;
+  if (min < 1) return tr("不到 1 分钟");
+  if (min < 60) return tr("{0} 分钟", min);
   const h = Math.floor(min / 60);
-  return h < 24 ? `${h} 小时` : `${Math.floor(h / 24)} 天`;
+  return h < 24 ? tr("{0} 小时", h) : tr("{0} 天", Math.floor(h / 24));
 }
 
 /** "今天", "昨天" or "10月3日" for list group headings. */
 export function dayLabel(ms: number, now = Date.now()) {
   const day = (v: number) => new Date(v).toDateString();
-  if (day(ms) === day(now)) return "今天";
-  if (day(ms) === day(now - 86_400_000)) return "昨天";
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (day(ms) === day(now)) return tr("今天");
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day(ms) === yesterday.toDateString()) return tr("昨天");
+  return new Date(ms).toLocaleDateString(getLocale(), {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 /** Last non-empty output line, for a one-line progress hint. */
@@ -86,8 +91,8 @@ export function serverViews(
       id: c.id,
       label: looksLikeAddress(c.name)
         ? i === 0
-          ? "主服务器"
-          : `服务器 ${i + 1}`
+          ? tr("主服务器")
+          : tr("服务器 {0}", i + 1)
         : c.name,
       address: c.server,
       connection,

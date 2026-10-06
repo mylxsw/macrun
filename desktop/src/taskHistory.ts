@@ -1,3 +1,4 @@
+import { tr } from "./i18n.mjs";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { active, selectTasks } from "./model.mjs";
@@ -63,7 +64,7 @@ export const readTaskPage = (args: {
           !count(page.next_cursor.started_at) ||
           typeof page.next_cursor.task_id !== "string"))
     ) {
-      throw new Error("任务历史返回格式无效，请重新读取。");
+      throw new Error(tr("任务历史返回格式无效，请重新读取。"));
     }
     return page;
   });
@@ -263,7 +264,7 @@ export function useTaskHistory({
           error:
             record.error ||
             (toolResult?.isError
-              ? { message: "工具返回执行错误，请查看输出。" }
+              ? { message: tr("工具返回执行错误，请查看输出。") }
               : undefined),
           progress: record.progress,
           metrics: record.metrics,

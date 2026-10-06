@@ -1,3 +1,4 @@
+use crate::localization::{interpolate as tr_format, text as tr};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::{future::Future, time::Duration};
@@ -16,8 +17,8 @@ fn summarize(state: &Value, target: Option<&str>) -> Value {
     };
     let ready = !connections.is_empty() && connections.iter().all(|c| c["state"] == "connected");
     let checks: Vec<Value> = [
-        ("UDP / QUIC 可达", "transport"), ("证书校验", "certificate"),
-        ("凭据认证", "authentication"), ("协议一致", "protocol"),
+        (tr("UDP / QUIC 可达"), "transport"), (tr("证书校验"), "certificate"),
+        (tr("凭据认证"), "authentication"), (tr("协议一致"), "protocol"),
     ].into_iter().map(|(name, key)| json!({"name":name,"ok":ready && connections.iter().all(|c| c["checks"][key] == true)})).collect();
     let connected = ready && checks.iter().all(|c| c["ok"] == true);
     let error = connections
@@ -59,9 +60,9 @@ where
         tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
     }
     result["phase"] = json!("timed_out");
-    result["error"] = json!(format!(
-        "配对已保存，连接尚未就绪，请重试连接。{}",
-        result["error"].as_str().unwrap_or_default()
+    result["error"] = json!(tr_format(
+        "配对已保存，连接尚未就绪，请重试连接。{0}",
+        &[result["error"].as_str().unwrap_or_default().to_string()]
     ));
     result
 }

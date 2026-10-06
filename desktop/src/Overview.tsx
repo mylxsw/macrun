@@ -1,3 +1,4 @@
+import { tr } from "./i18n.mjs";
 import { useState } from "react";
 import {
   Activity,
@@ -40,13 +41,18 @@ const RECENT_PROBLEM_MS = 60 * 60 * 1000;
 /** Small status mark used in step lists: neutral for the agent's own exits. */
 export function StepMark({ task }: { task: Task }) {
   if (task.status === "awaiting_approval")
-    return <span className="v4-exit warn">待确认</span>;
+    return <span className="v4-exit warn">{tr("待确认")}</span>;
   if (active(task))
-    return <LoaderCircle size={13} className="v4-spin" aria-label="进行中" />;
+    return (
+      <LoaderCircle size={13} className="v4-spin" aria-label={tr("进行中")} />
+    );
   if (agentExit(task))
     return (
-      <span className="v4-exit" title="命令以非零退出码结束，由 Agent 处理">
-        退出 {task.result?.exit_code}
+      <span
+        className="v4-exit"
+        title={tr("命令以非零退出码结束，由 Agent 处理")}
+      >
+        {tr("退出 {0}", task.result?.exit_code)}
       </span>
     );
   if (needsAttention(task))
@@ -58,7 +64,7 @@ export function StepMark({ task }: { task: Task }) {
       />
     );
   if (task.status === "succeeded")
-    return <Check size={13} className="v4-faint" aria-label="成功" />;
+    return <Check size={13} className="v4-faint" aria-label={tr("成功")} />;
   return <span className="v4-exit">{problemLabel(task)}</span>;
 }
 
@@ -100,7 +106,7 @@ function ProjectCard({
   return (
     <article
       className={`v4-project ${desktop ? "desktop" : ""}`}
-      aria-label={`${session.project.name} 进行中`}
+      aria-label={tr("{0} 进行中", session.project.name)}
     >
       <header>
         {desktop ? (
@@ -112,12 +118,15 @@ function ProjectCard({
         {session.project.tag && (
           <span className="v4-chip">{session.project.tag}</span>
         )}
-        {desktop && <span className="v4-chip act">操作中</span>}
+        {desktop && <span className="v4-chip act">{tr("操作中")}</span>}
         {server && <span className="v4-chip">{server}</span>}
         <span className="grow" />
         <small>
-          已工作 {span(Date.now() - session.start)} · {session.tasks.length}{" "}
-          个任务
+          {tr(
+            "已工作 {0} · {1} 个任务",
+            span(Date.now() - session.start),
+            session.tasks.length,
+          )}
         </small>
       </header>
       <div className="v4-now">
@@ -132,15 +141,17 @@ function ProjectCard({
               {desktop
                 ? taskHeadline(current)
                 : sync
-                  ? "同步文件"
+                  ? tr("同步文件")
                   : summary.text}
             </h3>
             {summary.helpers > 0 && (
               <span
                 className="v4-chip"
-                title="ls、cp、grep、tail 等辅助命令已折叠，详情中可看完整命令"
+                title={tr(
+                  "ls、cp、grep、tail 等辅助命令已折叠，详情中可看完整命令",
+                )}
               >
-                + {summary.helpers} 个辅助命令
+                {tr("+ {0} 个辅助命令", summary.helpers)}
               </span>
             )}
             <span className="grow" />
@@ -152,24 +163,31 @@ function ProjectCard({
             </small>
           ) : sync ? (
             <small className="v4-tail">
-              {current.progress
-                ? `${current.progress.total} 个文件中已收到 ${current.progress.received} 个 · ${Math.round(current.progress.bytes / 1024)} KB`
-                : "正在比对文件"}
-              {" · "}同步只更新文件，不会自动触发构建
+              {tr(
+                "{0} · 同步只更新文件，不会自动触发构建",
+                current.progress
+                  ? tr(
+                      "{0} 个文件中已收到 {1} 个 · {2} KB",
+                      current.progress.total,
+                      current.progress.received,
+                      Math.round(current.progress.bytes / 1024),
+                    )
+                  : tr("正在比对文件"),
+              )}
             </small>
           ) : (
             tail && <small className="mono v4-tail">{tail}</small>
           )}
           <div className="v4-now-actions">
             <button className="v4-link" onClick={() => onTask(current)}>
-              查看任务详情
+              {tr("查看任务详情")}
             </button>
             {directory && !desktop && (
               <button
                 className="v4-link"
                 onClick={() => onOpenDirectory(current)}
               >
-                在终端打开目录
+                {tr("在终端打开目录")}
               </button>
             )}
             {active(current) && (
@@ -179,7 +197,7 @@ function ProjectCard({
                 aria-busy={cancelPending(current)}
                 onClick={() => onCancel(current)}
               >
-                {desktop ? "让 Agent 停下" : "取消任务"}
+                {desktop ? tr("让 Agent 停下") : tr("取消任务")}
               </button>
             )}
           </div>
@@ -287,29 +305,29 @@ export function Overview({
   const codeProjects = working.filter((s: Session) => !s.project.desktop);
   const title = !available
     ? app?.worker_starting
-      ? "正在启动执行器"
+      ? tr("正在启动执行器")
       : snapshot
-        ? "执行器暂时不可用"
-        : "执行器未运行"
+        ? tr("执行器暂时不可用")
+        : tr("执行器未运行")
     : !health.commands
-      ? "未连接服务器"
+      ? tr("未连接服务器")
       : working.length
         ? codeProjects.length === 0
-          ? "Agent 正在操作桌面"
+          ? tr("Agent 正在操作桌面")
           : codeProjects.length === 1
-            ? `Agent 正在处理 ${codeProjects[0].project.name}`
-            : `Agent 正在 ${codeProjects.length} 个项目上工作`
+            ? tr("Agent 正在处理 {0}", codeProjects[0].project.name)
+            : tr("Agent 正在 {0} 个项目上工作", codeProjects.length)
         : approvals.length
-          ? `有 ${approvals.length} 个请求等你确认`
+          ? tr("有 {0} 个请求等你确认", approvals.length)
           : paused
-            ? "已暂停接收新任务"
-            : "就绪，等待 Agent";
+            ? tr("已暂停接收新任务")
+            : tr("就绪，等待 Agent");
   const subtitle = [
-    snapshot ? `今天 ${summary.total || 0} 个任务` : "",
+    snapshot ? tr("今天 {0} 个任务", summary.total || 0) : "",
     health.servers > 1
-      ? `${health.online}/${health.servers} 台服务器在线`
+      ? tr("{0}/{1} 台服务器在线", health.online, health.servers)
       : health.commands
-        ? "服务器已连接"
+        ? tr("服务器已连接")
         : "",
   ]
     .filter(Boolean)
@@ -337,9 +355,9 @@ export function Overview({
       <div className="v4-cols">
         <div>
           {(approvals.length > 0 || issues.length > 0 || paused) && (
-            <section aria-label="需要你">
+            <section aria-label={tr("需要你")}>
               <div className="v4-sh">
-                <h2>需要你</h2>
+                <h2>{tr("需要你")}</h2>
               </div>
               <Approvals
                 tasks={tasks}
@@ -353,14 +371,14 @@ export function Overview({
                 <div className="v4-issue">
                   <span className="v4-ico">⏸</span>
                   <div className="grow">
-                    <b>已暂停接收新任务</b>
-                    <p>正在运行的任务继续完成；新请求返回 busy。</p>
+                    <b>{tr("已暂停接收新任务")}</b>
+                    <p>{tr("正在运行的任务继续完成；新请求返回 busy。")}</p>
                   </div>
                   <button
                     disabled={!available || isPending("pause")}
                     onClick={() => control("pause", { paused: false })}
                   >
-                    恢复接收
+                    {tr("恢复接收")}
                   </button>
                 </div>
               )}
@@ -374,21 +392,21 @@ export function Overview({
                     </b>
                     <p>{explainTask(t)?.what}</p>
                   </div>
-                  <button onClick={() => onTask(t)}>查看</button>
+                  <button onClick={() => onTask(t)}>{tr("查看")}</button>
                   <button
                     className="v4-link"
                     onClick={() => dismiss(t.task_id)}
                   >
-                    知道了
+                    {tr("知道了")}
                   </button>
                 </div>
               ))}
             </section>
           )}
-          <section aria-label="正在进行">
+          <section aria-label={tr("正在进行")}>
             <div className="v4-sh">
-              <h2>进行中</h2>
-              <small>按项目归组，每个项目只突出正在做的一步</small>
+              <h2>{tr("进行中")}</h2>
+              <small>{tr("按项目归组，每个项目只突出正在做的一步")}</small>
             </div>
             {working.map((s: Session) => (
               <ProjectCard
@@ -419,23 +437,27 @@ export function Overview({
                 )}
                 <h3>
                   {available && approvals.length
-                    ? "请先处理上方的确认请求"
+                    ? tr("请先处理上方的确认请求")
                     : available
-                      ? "等待 Agent 发起任务"
+                      ? tr("等待 Agent 发起任务")
                       : app?.worker_starting
-                        ? "正在启动执行器"
-                        : "连接你的服务器"}
+                        ? tr("正在启动执行器")
+                        : tr("连接你的服务器")}
                 </h3>
                 <p>
                   {available
-                    ? "Agent 开始工作后，这里按项目显示它正在做的事和最近几步。"
+                    ? tr(
+                        "Agent 开始工作后，这里按项目显示它正在做的事和最近几步。",
+                      )
                     : app?.worker_starting
-                      ? "如有钥匙串授权窗口，请完成系统确认。连接成功后，任务会自动显示。"
-                      : "启动执行器后，在这里查看这台电脑上的执行情况。"}
+                      ? tr(
+                          "如有钥匙串授权窗口，请完成系统确认。连接成功后，任务会自动显示。",
+                        )
+                      : tr("启动执行器后，在这里查看这台电脑上的执行情况。")}
                 </p>
                 {!available && !app?.worker_starting && (
                   <button className="primary" onClick={() => onPage("desktop")}>
-                    检查连接
+                    {tr("检查连接")}
                   </button>
                 )}
               </div>
@@ -444,37 +466,39 @@ export function Overview({
         </div>
         <aside className="v4-side">
           <div className="v4-sh">
-            <h2>今天</h2>
+            <h2>{tr("今天")}</h2>
             <button className="v4-link" onClick={() => onPage("tasks")}>
-              查看活动 ›
+              {tr("查看活动 ›")}
             </button>
           </div>
           <div className="v4-stats">
             <div>
               <b>{summary.total || 0}</b>
-              <span>个任务</span>
+              <span>{tr("个任务")}</span>
             </div>
             <div>
               <b>{todayProjects}</b>
-              <span>个项目</span>
+              <span>{tr("个项目")}</span>
             </div>
             <div>
               <b className={problems ? "v4-warn" : "v4-faint"}>{problems}</b>
-              <span>个 Macrun 问题</span>
+              <span>{tr("个 Macrun 问题")}</span>
             </div>
             <div>
               <b>{desktopToday}</b>
-              <span>次桌面操作</span>
+              <span>{tr("次桌面操作")}</span>
             </div>
           </div>
           {(summary.exited || 0) > 0 && (
             <p className="v4-note">
-              另有 {summary.exited} 条命令退出码非零，由 Agent
-              自行处理，不计入问题。
+              {tr(
+                "另有 {0} 条命令退出码非零，由 Agent 自行处理，不计入问题。",
+                summary.exited,
+              )}
             </p>
           )}
           <div className="v4-sh">
-            <h2>最近完成</h2>
+            <h2>{tr("最近完成")}</h2>
           </div>
           <div className="v4-list">
             {finished.map((s: Session) => {
@@ -493,7 +517,7 @@ export function Overview({
                       ·{" "}
                       {problem
                         ? problemLabel(problem)
-                        : s.project.tag || `${s.tasks.length} 个任务`}
+                        : s.project.tag || tr("{0} 个任务", s.tasks.length)}
                     </span>
                   </span>
                   <span className="v4-time">{clock(s.end)}</span>
@@ -501,13 +525,13 @@ export function Overview({
               );
             })}
             {!finished.length && (
-              <p className="v4-note">任务结束后显示在这里。</p>
+              <p className="v4-note">{tr("任务结束后显示在这里。")}</p>
             )}
           </div>
           <div className="v4-sh">
-            <h2>这台 Mac</h2>
+            <h2>{tr("这台 Mac")}</h2>
             <button className="v4-link" onClick={() => onPage("desktop")}>
-              本机 ›
+              {tr("本机 ›")}
             </button>
           </div>
           <div className="v4-list static">
@@ -519,10 +543,10 @@ export function Overview({
               )}
               <span className="grow">
                 {health.servers > 1
-                  ? `${health.online}/${health.servers} 台服务器在线`
+                  ? tr("{0}/{1} 台服务器在线", health.online, health.servers)
                   : health.commands
-                    ? "服务器已连接"
-                    : "服务器未连接"}
+                    ? tr("服务器已连接")
+                    : tr("服务器未连接")}
               </span>
             </div>
             <div>
@@ -532,7 +556,9 @@ export function Overview({
                 <TriangleAlert size={13} className="v4-warn-icon" />
               )}
               <span className="grow">
-                {health.keepAwake ? "防止自动休眠已开启" : "Mac 可能自动休眠"}
+                {health.keepAwake
+                  ? tr("防止自动休眠已开启")
+                  : tr("Mac 可能自动休眠")}
               </span>
             </div>
             {health.desktopEnabled ? (
@@ -545,13 +571,13 @@ export function Overview({
             ) : (
               <div>
                 <span className="v4-ico small">—</span>
-                <span className="grow">桌面控制已关闭</span>
+                <span className="grow">{tr("桌面控制已关闭")}</span>
               </div>
             )}
           </div>
           {(snapshot?.total_tasks || 0) > 200 && (
             <p className="v4-note">
-              完整历史在活动页，可按项目、命令和目录查找。
+              {tr("完整历史在活动页，可按项目、命令和目录查找。")}
             </p>
           )}
         </aside>

@@ -12,8 +12,10 @@ import {
 import userEvent from "@testing-library/user-event";
 import { CuaSetup } from "../src/CuaSetup";
 import { Pairing } from "../src/Features";
+import { setLanguage } from "../src/i18n.mjs";
 afterEach(() => {
   cleanup();
+  setLanguage("zh-CN");
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -203,6 +205,67 @@ test("grant waiting does not block detection or configuration, and restart statu
     finish();
   });
   expect(grant.hasAttribute("disabled")).toBe(false);
+});
+
+test("permission recovery remains translated when language changes during a grant", async () => {
+  let finish!: () => void;
+  const read = vi.fn().mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: false, screen_recording: null },
+  });
+  const act = vi.fn(async () => {
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return true;
+  });
+  setLanguage("en");
+  const view = render(<CuaSetup act={act} read={read} />);
+  await screen.findByText(
+    "CuaDriver permissions: Accessibility: Not granted; Screen Recording: Unknown.",
+  );
+  await userEvent
+    .setup()
+    .click(
+      screen.getByRole("button", {
+        name: "Grant CuaDriver screenshot and control permissions",
+      }),
+    );
+  expect(
+    screen.getByText(/Waiting for CuaDriver permissions and restart/),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Check again" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  setLanguage("zh-CN");
+  view.rerender(<CuaSetup act={act} read={read} />);
+  expect(screen.getByText(/等待 CuaDriver 授权与重启/)).toBeTruthy();
+  read.mockResolvedValue({
+    ...ready,
+    permissions: { accessibility: true, screen_recording: true },
+  });
+  fireEvent.focus(window);
+  await screen.findByText(/两项权限已授权/);
+  setLanguage("en");
+  view.rerender(<CuaSetup act={act} read={read} />);
+  expect(
+    screen.getByText(/Both CuaDriver permissions are granted/),
+  ).toBeTruthy();
+  expect(act).toHaveBeenCalledTimes(1);
+  await reactAct(async () => {
+    finish();
+  });
+  await screen.findByText(/The CuaDriver permission flow has finished/);
+  expect(screen.queryByText(/Waiting for CuaDriver/)).toBeNull();
+  expect(
+    screen
+      .getByRole("button", {
+        name: "Grant CuaDriver screenshot and control permissions",
+      })
+      .hasAttribute("disabled"),
+  ).toBe(false);
 });
 
 test("visible polling refreshes after a restart without overlapping reads and cleans up", async () => {

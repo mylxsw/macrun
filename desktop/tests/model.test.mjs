@@ -1,3 +1,5 @@
+import { setLanguage } from "../src/i18n.mjs";
+setLanguage("zh-CN");
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

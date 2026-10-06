@@ -1,4 +1,5 @@
 use super::*;
+use crate::localization::{interpolate as tr_format, text as tr};
 
 pub fn set_application_icon() {
     // Embed the same multi-resolution image shipped in Contents/Resources so
@@ -15,14 +16,14 @@ unsafe extern "C" {
 }
 #[tauri::command]
 pub fn permissions() -> Value {
-    json!({"accessibility":unsafe {AXIsProcessTrusted()},"screen_recording":unsafe{CGPreflightScreenCaptureAccess()},"graphical_session":unsafe{macrun_graphical_session()},"keep_awake":unsafe{macrun_awake_active()},"scope":"desktop_app","note":"后端有独立权限；请通过后端实拍验证。"})
+    json!({"accessibility":unsafe {AXIsProcessTrusted()},"screen_recording":unsafe{CGPreflightScreenCaptureAccess()},"graphical_session":unsafe{macrun_graphical_session()},"keep_awake":unsafe{macrun_awake_active()},"scope":"desktop_app","note":tr("后端有独立权限；请通过后端实拍验证。")})
 }
 fn permission_url(kind: &str) -> std::result::Result<String, String> {
     let pane = match kind {
         "accessibility" => "Privacy_Accessibility",
         "screen" => "Privacy_ScreenCapture",
         "input" => "Privacy_ListenEvent",
-        _ => return Err("未知权限".into()),
+        _ => return Err(tr("未知权限").into()),
     };
     Ok(format!(
         "x-apple.systempreferences:com.apple.preference.security?{pane}"
@@ -53,25 +54,25 @@ pub async fn open_permission(
         .await
         .map_err(|e| e.to_string())?;
     if !status.success() {
-        return Err("无法打开系统权限设置，请在系统设置中手动打开“隐私与安全性”".into());
+        return Err(tr("无法打开系统权限设置，请在系统设置中手动打开“隐私与安全性”").into());
     }
     Ok(())
 }
 fn task_workspace(task: &Value, task_id: &str, root: &str) -> std::result::Result<PathBuf, String> {
     if task["task_id"] != task_id {
-        return Err("任务记录不匹配".into());
+        return Err(tr("任务记录不匹配").into());
     }
     let key = match task["kind"].as_str() {
         Some("exec.start") => "cwd",
         Some("sync") => "remote_root",
-        _ => return Err("该任务没有可打开的工作目录".into()),
+        _ => return Err(tr("该任务没有可打开的工作目录").into()),
     };
     let stored = task["arguments"][key]
         .as_str()
         .filter(|v| !v.is_empty())
-        .ok_or("任务工作目录不可用")?;
+        .ok_or(tr("任务工作目录不可用"))?;
     if stored != root {
-        return Err("目录与任务记录不匹配".into());
+        return Err(tr("目录与任务记录不匹配").into());
     }
     Ok(macrun::config::expand(stored))
 }
@@ -95,12 +96,12 @@ pub async fn open_workspace(
             .as_array()
             .is_some_and(|w| w.iter().any(|w| w["root"] == root))
         {
-            return Err("未知工作区".into());
+            return Err(tr("未知工作区").into());
         }
         macrun::config::expand(&root)
     };
     if !p.is_dir() {
-        return Err("工作区目录不存在".into());
+        return Err(tr("工作区目录不存在").into());
     }
     let mut cmd = tokio::process::Command::new("open");
     if terminal {
@@ -113,7 +114,7 @@ pub async fn open_workspace(
         .map_err(|e| e.to_string())?
         .success()
     {
-        return Err("无法打开工作目录，请检查目录访问权限".into());
+        return Err(tr("无法打开工作目录，请检查目录访问权限").into());
     }
     Ok(())
 }
@@ -121,7 +122,7 @@ pub async fn open_workspace(
 pub fn backend_config(rt: tauri::State<Runtime>) -> std::result::Result<String, String> {
     let cfg = rt.settings.lock().unwrap().clone();
     if cfg.backend_config.is_empty() {
-        return Ok("# 添加本机 MCP 后端\n# [mcp.example]\n# command = \"/absolute/path/backend\"\n# args = []\n".into());
+        return Ok(tr("# 添加本机 MCP 后端\n# [mcp.example]\n# command = \"/absolute/path/backend\"\n# args = []\n").into());
     }
     std::fs::read_to_string(cfg.backend_config).map_err(|e| e.to_string())
 }
@@ -134,21 +135,21 @@ pub(crate) fn save_backend_text(text: &str, rt: &Runtime) -> std::result::Result
         let mut child = rt.child.lock().unwrap();
         anyhow::ensure!(
             !rt.starting.load(Ordering::SeqCst),
-            "执行器正在启动，请等待后再修改配置"
+            tr("执行器正在启动，请等待后再修改配置")
         );
         anyhow::ensure!(
             !rt.migrating.load(Ordering::SeqCst),
-            "正在迁移旧执行器，请稍后修改配置"
+            tr("正在迁移旧执行器，请稍后修改配置")
         );
         anyhow::ensure!(
             !child
                 .as_mut()
                 .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
-            "请先断开连接，再修改后端配置"
+            tr("请先断开连接，再修改后端配置")
         );
         let config: macrun::config::WorkerConfig = toml::from_str(text)?;
         for backend in config.mcp.values() {
-            anyhow::ensure!(!backend.command.trim().is_empty(), "后端命令不能为空");
+            anyhow::ensure!(!backend.command.trim().is_empty(), tr("后端命令不能为空"));
         }
         let path = rt.data.join("worker.toml");
         if path.exists() {
@@ -202,7 +203,7 @@ pub async fn connection_check(
 fn legacy_argument(value: &Value, key: &str) -> Result<String> {
     let args = value["ProgramArguments"]
         .as_array()
-        .context("缺少启动参数")?;
+        .context(tr("缺少启动参数"))?;
     let mut found = Vec::new();
     for (i, a) in args.iter().enumerate() {
         if a == key {
@@ -210,14 +211,17 @@ fn legacy_argument(value: &Value, key: &str) -> Result<String> {
                 args.get(i + 1)
                     .and_then(Value::as_str)
                     .filter(|v| !v.starts_with("--"))
-                    .context("参数缺少值")?
+                    .context(tr("参数缺少值"))?
                     .to_owned(),
             );
         } else if let Some(v) = a.as_str().and_then(|a| a.strip_prefix(&format!("{key}="))) {
             found.push(v.to_owned());
         }
     }
-    anyhow::ensure!(found.len() == 1, "缺少或重复参数 {key}");
+    anyhow::ensure!(
+        found.len() == 1,
+        tr_format("缺少或重复参数 {0}", &[key.into()])
+    );
     Ok(found.remove(0))
 }
 
@@ -225,10 +229,10 @@ fn legacy_worker_path(value: &Value) -> Result<String> {
     match &value["EnvironmentVariables"]["PATH"] {
         Value::Null => Ok(String::new()),
         Value::String(path) => {
-            anyhow::ensure!(!path.contains('\0'), "旧 PATH 配置无效");
+            anyhow::ensure!(!path.contains('\0'), tr("旧 PATH 配置无效"));
             Ok(path.clone())
         }
-        _ => anyhow::bail!("旧 PATH 配置必须为字符串"),
+        _ => anyhow::bail!(tr("旧 PATH 配置必须为字符串")),
     }
 }
 #[tauri::command]
@@ -239,20 +243,20 @@ pub async fn migrate_legacy(app: tauri::AppHandle) -> std::result::Result<Value,
             // Share the short lifecycle lock with worker start and final exit.
             let mut child = rt.child.lock().unwrap();
             if rt.exiting.load(Ordering::SeqCst) {
-                return Err("应用正在退出，未开始迁移".into());
+                return Err(tr("应用正在退出，未开始迁移").into());
             }
             if child
                 .as_mut()
                 .is_some_and(|c| c.try_wait().ok().flatten().is_none())
             {
-                return Err("请先停止桌面执行器".into());
+                return Err(tr("请先停止桌面执行器").into());
             }
             if rt
                 .migrating
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
             {
-                return Err("迁移正在进行，请等待完成".into());
+                return Err(tr("迁移正在进行，请等待完成").into());
             }
         }
         struct Guard<'a>(&'a AtomicBool);
@@ -267,7 +271,7 @@ pub async fn migrate_legacy(app: tauri::AppHandle) -> std::result::Result<Value,
         result
     })
     .await
-    .map_err(|_| "迁移任务异常中断，请检查保留的备份".to_owned())?
+    .map_err(|_| tr("迁移任务异常中断，请检查保留的备份").to_owned())?
 }
 
 fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
@@ -278,26 +282,26 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
             .unwrap()
             .as_mut()
             .is_some_and(|c| c.try_wait().ok().flatten().is_none()),
-        "请先停止桌面执行器"
+        tr("请先停止桌面执行器")
     );
     let home = std::env::var("HOME")?;
     let plist = PathBuf::from(home).join("Library/LaunchAgents/dev.macrun.worker.plist");
-    anyhow::ensure!(plist.is_file(), "未找到旧 LaunchAgent 配置");
+    anyhow::ensure!(plist.is_file(), tr("未找到旧 LaunchAgent 配置"));
     let disabled = plist.with_extension("plist.macrun-disabled");
-    anyhow::ensure!(!disabled.exists(), "存在旧迁移文件，请先检查它再迁移");
+    anyhow::ensure!(!disabled.exists(), tr("存在旧迁移文件，请先检查它再迁移"));
     let out = Command::new("plutil")
         .args(["-convert", "json", "-o", "-"])
         .arg(&plist)
         .output()?;
-    anyhow::ensure!(out.status.success(), "无法解析 LaunchAgent");
+    anyhow::ensure!(out.status.success(), tr("无法解析 LaunchAgent"));
     let value: Value = serde_json::from_slice(&out.stdout)?;
     anyhow::ensure!(
         value["Label"] == "dev.macrun.worker",
-        "LaunchAgent 标签不匹配"
+        tr("LaunchAgent 标签不匹配")
     );
     anyhow::ensure!(
         value["ProgramArguments"][1] == "worker",
-        "暂不支持经 shell 包装的旧执行器，请先检查启动配置"
+        tr("暂不支持经 shell 包装的旧执行器，请先检查启动配置")
     );
     let arg = |key: &str| legacy_argument(&value, key);
     let server = arg("--server")?;
@@ -307,7 +311,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
     let worker_path = legacy_worker_path(&value)?;
     anyhow::ensure!(
         cert.is_absolute() && token_path.is_absolute() && old_data.is_absolute(),
-        "旧配置的证书、令牌和数据目录必须为绝对路径"
+        tr("旧配置的证书、令牌和数据目录必须为绝对路径")
     );
     let has_config = value["ProgramArguments"].as_array().is_some_and(|args| {
         args.iter()
@@ -315,17 +319,17 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
     });
     let backend_text = if has_config {
         let path = PathBuf::from(arg("--config")?);
-        anyhow::ensure!(path.is_absolute(), "旧后端配置必须为绝对路径");
-        let text = std::fs::read_to_string(path).context("无法读取旧后端配置")?;
+        anyhow::ensure!(path.is_absolute(), tr("旧后端配置必须为绝对路径"));
+        let text = std::fs::read_to_string(path).context(tr("无法读取旧后端配置"))?;
         let _: macrun::config::WorkerConfig = toml::from_str(&text)
-            .map_err(|_| anyhow::anyhow!("旧后端配置格式不兼容，请检查 worker.toml"))?;
+            .map_err(|_| anyhow::anyhow!(tr("旧后端配置格式不兼容，请检查 worker.toml")))?;
         Some(text)
     } else {
         None
     };
-    let cert_bytes = std::fs::read(&cert).context("无法读取旧服务器证书")?;
-    let token = std::fs::read_to_string(token_path).context("无法读取旧令牌文件")?;
-    anyhow::ensure!(!token.trim().is_empty(), "旧令牌为空");
+    let cert_bytes = std::fs::read(&cert).context(tr("无法读取旧服务器证书"))?;
+    let token = std::fs::read_to_string(token_path).context(tr("无法读取旧令牌文件"))?;
+    anyhow::ensure!(!token.trim().is_empty(), tr("旧令牌为空"));
     let mut files = MigrationFiles::prepare(&rt.data, &old_data)?;
     let backup = files.stage.join("launchagent.plist.bak");
     wire::private_write(&backup, &std::fs::read(&plist)?)?;
@@ -344,7 +348,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
         &account,
         token.trim().as_bytes(),
     )
-    .map_err(|_| anyhow::anyhow!("无法将旧连接凭据保存到钥匙串；旧服务未停止"))?;
+    .map_err(|_| anyhow::anyhow!(tr("无法将旧连接凭据保存到钥匙串；旧服务未停止")))?;
     let settings = Settings {
         connections: rt.settings.lock().unwrap().connections.clone(),
         server,
@@ -357,7 +361,7 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
     };
     wire::atomic_json(&files.stage.join("connection.json"), &settings)?;
     let uid = Command::new("id").arg("-u").output()?;
-    anyhow::ensure!(uid.status.success(), "无法确定当前用户，旧服务未停止");
+    anyhow::ensure!(uid.status.success(), tr("无法确定当前用户，旧服务未停止"));
     let domain = format!("gui/{}", String::from_utf8_lossy(&uid.stdout).trim());
     let was_running = legacy_running();
     let mut source_lock = None;
@@ -370,9 +374,9 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
                     .arg(&plist)
                     .status()?
                     .success(),
-                "无法停止旧服务"
+                tr("无法停止旧服务")
             );
-            anyhow::ensure!(!legacy_running(), "旧服务尚未卸载");
+            anyhow::ensure!(!legacy_running(), tr("旧服务尚未卸载"));
         }
         // Holding the original worker lock prevents another instance from changing
         // task results between the second task check and the completed copy.
@@ -382,7 +386,9 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
                     source_lock = Some(lock);
                     break;
                 }
-                Err(error) if attempt == 49 => return Err(error.context("旧执行器仍占用数据目录")),
+                Err(error) if attempt == 49 => {
+                    return Err(error.context(tr("旧执行器仍占用数据目录")));
+                }
                 Err(_) => std::thread::sleep(Duration::from_millis(100)),
             }
         }
@@ -394,13 +400,13 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
     if let Err(error) = result {
         let mut failures = Vec::new();
         if let Err(e) = files.rollback() {
-            failures.push(format!("恢复桌面数据失败：{e}"));
+            failures.push(tr_format("恢复桌面数据失败：{0}", &[format!("{e}")]));
         }
         if disabled.exists() {
             if plist.exists() {
-                failures.push("原服务入口已变化，未覆盖".into());
+                failures.push(tr("原服务入口已变化，未覆盖").into());
             } else if let Err(e) = std::fs::rename(&disabled, &plist) {
-                failures.push(format!("恢复旧服务入口失败：{e}"));
+                failures.push(tr_format("恢复旧服务入口失败：{0}", &[format!("{e}")]));
             }
         }
         drop(source_lock.take());
@@ -412,21 +418,27 @@ fn migrate_legacy_inner(rt: &Runtime) -> Result<Value> {
                 .status()
             {
                 Ok(status) if status.success() && legacy_running() => {}
-                _ => failures.push("旧服务恢复启动失败，请使用保留的备份恢复".into()),
+                _ => failures.push(tr("旧服务恢复启动失败，请使用保留的备份恢复").into()),
             }
         }
         if failures.is_empty() {
-            anyhow::bail!("迁移未完成，原配置已保留，旧服务已恢复原状态：{error}");
+            anyhow::bail!(tr_format(
+                "迁移未完成，原配置已保留，旧服务已恢复原状态：{0}",
+                &[error.to_string()]
+            ));
         }
-        anyhow::bail!(
-            "迁移失败：{error}；{}。备份：{}",
-            failures.join("；"),
-            backup.display()
-        );
+        anyhow::bail!(tr_format(
+            "迁移失败：{0}；{1}。备份：{2}",
+            &[
+                error.to_string(),
+                failures.join("; "),
+                backup.display().to_string()
+            ]
+        ));
     }
     *rt.settings.lock().unwrap() = settings;
     Ok(
-        json!({"backup":backup,"disabled":disabled,"note":"连接、任务去重与同步状态已复制到新版；旧数据目录保持原样。"}),
+        json!({"backup":backup,"disabled":disabled,"note":tr("连接、任务去重与同步状态已复制到新版；旧数据目录保持原样。")}),
     )
 }
 
@@ -448,10 +460,10 @@ pub fn input_status() -> Value {
 pub fn notify_task(status: String, app: tauri::AppHandle) -> std::result::Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     let title = match status.as_str() {
-        "failed" => "任务执行失败",
-        "timed_out" => "任务已超时",
-        "unknown" => "任务结果需要核对",
-        "awaiting_approval" => "有请求等待你确认，60 秒内未处理将过期",
+        "failed" => tr("任务执行失败"),
+        "timed_out" => tr("任务已超时"),
+        "unknown" => tr("任务结果需要核对"),
+        "awaiting_approval" => tr("有请求等待你确认，60 秒内未处理将过期"),
         _ => return Ok(()),
     };
     app.notification()
