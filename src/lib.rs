@@ -23,6 +23,7 @@ pub mod pairing;
 pub mod retention;
 pub mod safety;
 pub mod scheduler;
+pub mod screenshot;
 pub mod snapshot;
 pub mod sync_transfer;
 pub mod transfer;

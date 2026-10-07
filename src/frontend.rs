@@ -137,14 +137,14 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "mcp_call",
-            "Start a local MCP tool call. Optional wait_ms (up to 1000) waits briefly for completion. Requires session from mcp_tools. Poll task_get. Calls to one backend execute serially. No Cua-specific changes to arguments.",
-            json!({"server":string,"tool":string,"arguments":{"type":"object"},"session":string,"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
+            "Start a local MCP tool call. Optional wait_ms (up to 1000) waits briefly for completion. Requires session from mcp_tools. Poll task_get. Calls to one backend execute serially. CuaDriver screenshots fit the worker bounds by default; pixel actions use the latest returned screenshot for that session/target. screenshot_mode original bypasses optimization; jpeg opts into lossy compression. coordinate_task_id rejects superseded screenshot coordinates.",
+            json!({"screenshot_mode":{"type":"string","enum":["auto","png","jpeg","original"]},"coordinate_task_id":string,"server":string,"tool":string,"arguments":{"type":"object"},"session":string,"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
             &["server", "tool", "session", "request_id"],
         ),
         tool(
             "desktop_sequence",
             "Execute up to 16 ordered backend steps with a shared resource lease, per-step approval and stop-on-error/condition. Never replay after unknown. Returns a task ID.",
-            json!({"server":string,"session":string,"request_id":string,"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"tool":string,"arguments":{"type":"object"},"expect":{"type":"object","properties":{"pointer":string,"equals":{}}}},"required":["tool"]}},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600},"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
+            json!({"server":string,"session":string,"request_id":string,"steps":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","properties":{"screenshot_mode":{"type":"string","enum":["auto","png","jpeg","original"]},"coordinate_task_id":string,"tool":string,"arguments":{"type":"object"},"expect":{"type":"object","properties":{"pointer":string,"equals":{}}}},"required":["tool"]}},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600},"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
             &["server", "session", "request_id", "steps"],
         ),
         tool(

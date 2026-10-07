@@ -12,6 +12,7 @@ blake3 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 fs2 = "0.4"
 globset = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 libc = "0.2"
 notify = "8.2"
 flate2 = "1"
