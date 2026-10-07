@@ -58,6 +58,7 @@ pub struct Backend {
 #[serde(default, deny_unknown_fields)]
 pub struct WorkerConfig {
     pub mcp: BTreeMap<String, Backend>,
+    pub screenshots: crate::screenshot::Config,
     /// Backends default to the shared physical desktop. Equal names serialize.
     pub resource_groups: BTreeMap<String, String>,
 }

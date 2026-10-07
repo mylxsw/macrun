@@ -231,6 +231,8 @@ command = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
 args = ["mcp"]
 ```
 
+CuaDriver embedded screenshots fit within 1920 × 1080 by default, with PNG compression for readable UI text. Use `screenshot_mode` for JPEG or original images; pixel input coordinates are mapped automatically. See [screenshot optimization and coordinates](docs/screenshots.md).
+
 Restart the worker from step 3 with `--config /absolute/path/to/worker.toml` appended. The backend needs its own macOS permissions and a usable graphical session; [the operations guide](docs/operations.md#computer-use-backend) explains the checks.
 
 Then ask your agent:

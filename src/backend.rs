@@ -13,6 +13,7 @@ pub struct Client {
     output: BufReader<ChildStdout>,
     sequence: u64,
     pub generation: String,
+    pub screenshots: crate::screenshot::Session,
 }
 impl Client {
     pub async fn connect(config: &Backend) -> Result<Self> {
@@ -33,6 +34,7 @@ impl Client {
             child,
             sequence: 0,
             generation: id(),
+            screenshots: Default::default(),
         };
         let r=c.rpc("initialize",json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"macrun","version":env!("CARGO_PKG_VERSION")}})).await?;
         if !["2024-11-05", "2025-03-26", "2025-06-18"]

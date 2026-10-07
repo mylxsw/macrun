@@ -231,6 +231,8 @@ command = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver"
 args = ["mcp"]
 ```
 
+CuaDriver 内嵌截图默认等比缩放至宽 ≤1920、高 ≤1080，并使用 PNG 压缩保留文字清晰度。可通过 `screenshot_mode` 选择 JPEG 或原图；像素点击坐标会自动转换。详见[截图优化与坐标说明](docs/screenshots.md)。
+
 在第 3 步的 worker 启动命令末尾追加 `--config /absolute/path/to/worker.toml`，然后重启 worker。桌面工具需要自己的 macOS 权限和可用的图形登录会话，检查方法见 [运维手册](docs/operations.md#computer-use-backend)。
 
 然后告诉 Agent：

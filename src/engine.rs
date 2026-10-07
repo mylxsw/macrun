@@ -94,6 +94,15 @@ fn redact_arguments(a: &Value) -> Value {
 }
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
+        config.screenshots.validate()?;
+        anyhow::ensure!(
+            config
+                .screenshots
+                .cua_backends
+                .iter()
+                .all(|name| config.mcp.contains_key(name)),
+            "unknown screenshot backend"
+        );
         for (backend, group) in &config.resource_groups {
             anyhow::ensure!(
                 config.mcp.contains_key(backend) && !group.is_empty() && group.len() <= 128,
@@ -859,7 +868,7 @@ impl Engine {
             "mcp.servers" => Ok(json!({"servers":self.config.mcp.keys().collect::<Vec<_>>()})),
             "mcp.tools" => {
                 let v = self
-                    .backend_request(&a, "tools/list", &CancellationToken::new(), None)
+                    .backend_request(&a, "tools/list", &CancellationToken::new(), None, None)
                     .await?;
                 self.changed();
                 Ok(v)
@@ -988,6 +997,11 @@ impl Engine {
                 string(&a, "session")?;
                 for step in steps {
                     string(step, "tool")?;
+                    crate::screenshot::mode(step)?;
+                    anyhow::ensure!(
+                        step.get("arguments").is_none_or(Value::is_object),
+                        "backend arguments must be an object"
+                    );
                     if let Some(expect) = step.get("expect") {
                         string(expect, "pointer")?;
                         anyhow::ensure!(expect.get("equals").is_some(), "expect.equals required");
@@ -995,6 +1009,17 @@ impl Engine {
                 }
             } else {
                 string(&a, "tool")?;
+                crate::screenshot::mode(&a)?;
+                anyhow::ensure!(
+                    a.get("arguments").is_none_or(Value::is_object),
+                    "backend arguments must be an object"
+                );
+                if let Some(task) = a.get("coordinate_task_id") {
+                    anyhow::ensure!(
+                        task.as_str().is_some(),
+                        "coordinate_task_id must be a string"
+                    );
+                }
             }
             if !self.backends.contains_key(server) {
                 bail!("unknown MCP server");
@@ -1128,7 +1153,7 @@ impl Engine {
                 } else if kind=="desktop.sequence" {
                     engine.clone().run_sequence(a.clone(),ident.clone(),cancel.clone()).await
                 } else {
-                    engine.backend_request(&a, "tools/call", &cancel, reservation.as_ref()).await
+                    engine.backend_request(&a, "tools/call", &cancel, reservation.as_ref(), Some(&ident)).await
                 }
             }).await;
             match outcome {
@@ -1388,7 +1413,12 @@ impl Engine {
                 }
                 let hash = blake3::hash(format!("sequence:{parent}:{index}").as_bytes());
                 let request = uuid::Uuid::from_slice(&hash.as_bytes()[..16])?.to_string();
-                let child_args = json!({"server":server,"session":args["session"],"tool":step["tool"],"arguments":step.get("arguments").cloned().unwrap_or(json!({})),"request_id":request,"timeout_seconds":deadline.saturating_duration_since(tokio::time::Instant::now()).as_secs().max(1)});
+                let mut child_args = json!({"server":server,"session":args["session"],"tool":step["tool"],"arguments":step.get("arguments").cloned().unwrap_or(json!({})),"request_id":request,"timeout_seconds":deadline.saturating_duration_since(tokio::time::Instant::now()).as_secs().max(1)});
+                for key in ["screenshot_mode", "coordinate_task_id"] {
+                    if let Some(value) = step.get(key) {
+                        child_args[key] = value.clone();
+                    }
+                }
                 let child = self
                     .submit("mcp.call", child_args, false, Some(reserved.clone()))
                     .await?;
@@ -1444,6 +1474,7 @@ impl Engine {
         method: &str,
         cancel: &CancellationToken,
         reservation: Option<&Arc<crate::scheduler::Reservation>>,
+        task_id: Option<&str>,
     ) -> Result<Value> {
         let stop_all = self.backend_stop.lock().await.clone();
         let name = string(a, "server")?;
@@ -1504,8 +1535,46 @@ impl Engine {
                 *guard = Some(Client::connect(&self.config.mcp[name]).await?);
             }
             let c = guard.as_mut().unwrap();
+            let adapter = self
+                .config
+                .screenshots
+                .applies(name, &self.config.mcp[name].command);
+            let tool = a["tool"].as_str().unwrap_or("");
+            let mode = crate::screenshot::mode(a)?;
+            let original_args = a.get("arguments").cloned().unwrap_or(json!({}));
             let params = if method == "tools/call" {
-                json!({"name":string(a,"tool")?,"arguments":a.get("arguments").cloned().unwrap_or(json!({}))})
+                let mut args = if adapter {
+                    c.screenshots.arguments(
+                        tool,
+                        &original_args,
+                        a["coordinate_task_id"].as_str(),
+                    )?
+                } else {
+                    anyhow::ensure!(
+                        a.get("coordinate_task_id").is_none(),
+                        "coordinate_task_id requires the CuaDriver screenshot adapter"
+                    );
+                    original_args.clone()
+                };
+                // Let CuaDriver do the first reduction and cache its own frame.
+                // Our final fit enforces both edges (long-edge alone is insufficient).
+                if adapter
+                    && tool == "get_window_state"
+                    && mode != crate::screenshot::Mode::Original
+                    && args.get("screenshot_out_file").is_none()
+                {
+                    let ceiling =
+                        self.config
+                            .screenshots
+                            .max_width
+                            .max(self.config.screenshots.max_height) as u64;
+                    if args.get("max_dimension").is_none() {
+                        args["max_dimension"] = json!(ceiling);
+                    } else if let Some(n) = args["max_dimension"].as_u64() {
+                        args["max_dimension"] = json!(n.min(ceiling));
+                    }
+                }
+                json!({"name":string(a,"tool")?,"arguments":args})
             } else {
                 json!({"cursor":a.get("cursor").cloned().unwrap_or(Value::Null)})
             };
@@ -1515,8 +1584,39 @@ impl Engine {
                 params
             };
             let call = crate::metrics::phase("backend_call");
-            let result = c.rpc(method, params).await?;
+            let mut result = c.rpc(method, params).await?;
             drop(call);
+            if adapter && method == "tools/call" {
+                if crate::screenshot::is_capture(tool) {
+                    let config = self.config.screenshots.clone();
+                    let ident = task_id.unwrap_or("").to_owned();
+                    let optimized = crate::wire::blocking(move || {
+                        let _phase = crate::metrics::phase("screenshot_optimize");
+                        crate::screenshot::optimize(result, &config, mode, &ident)
+                    })
+                    .await??;
+                    c.screenshots
+                        .record(tool, &original_args, optimized.frame)?;
+                    result = optimized.result;
+                } else if matches!(tool, "set_config" | "end_session") {
+                    c.screenshots.clear();
+                }
+            }
+            if adapter
+                && method == "tools/list"
+                && let Some(tools) = result["tools"].as_array_mut()
+            {
+                for tool in tools {
+                    if !crate::screenshot::is_capture(tool["name"].as_str().unwrap_or("")) {
+                        continue;
+                    }
+                    let description = tool["description"].as_str().unwrap_or("");
+                    tool["description"] = json!(format!(
+                        "{description}\nMacrun: window/desktop images fit {}x{} by default. Pixel actions use the latest returned image for the same session and target; Macrun maps coordinates back automatically. Optional mcp_call.coordinate_task_id rejects a superseded image. mcp_call.screenshot_mode original bypasses optimization; jpeg opts into lossy compression; default auto preserves text with PNG. zoom crops and from_zoom input are unchanged.",
+                        self.config.screenshots.max_width, self.config.screenshots.max_height
+                    ));
+                }
+            }
             if method == "tools/list" {
                 // Keep counting under the backend lock so a late page cannot
                 // overwrite a restarted session or a newer first-page refresh.
