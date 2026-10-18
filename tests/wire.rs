@@ -42,3 +42,32 @@ async fn oversized_frames_are_rejected_before_allocating_payload() {
             .contains("frame limit")
     );
 }
+
+#[test]
+fn atomic_json_does_not_follow_existing_temp_links_and_cleans_failed_writes() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let root = tempfile::tempdir().unwrap();
+    let outside = root.path().join("keep");
+    fs::write(&outside, "unchanged").unwrap();
+    std::os::unix::fs::symlink(&outside, root.path().join("result.tmp")).unwrap();
+    let path = root.path().join("result.json");
+    wire::atomic_json(&path, &json!({"state":"saved"})).unwrap();
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "unchanged");
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["state"],
+        "saved"
+    );
+    let invalid = root.path().join("directory.json");
+    fs::create_dir(&invalid).unwrap();
+    assert!(wire::atomic_json(&invalid, &json!({})).is_err());
+    let leftovers = fs::read_dir(root.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .filter(|n| n.to_string_lossy().ends_with(".tmp"))
+        .collect::<Vec<_>>();
+    assert_eq!(leftovers, ["result.tmp"]);
+}

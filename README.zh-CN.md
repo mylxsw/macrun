@@ -141,6 +141,8 @@ macrun task TASK_UUID
 
 命令结束、超时或取消后，Worker 会清理能够确认归属的子进程，包括独立进程组中的测试辅助进程。详见[清理边界与恢复机制](docs/operations.md#command-descendants-and-stalled-tests)。
 
+任务生成的执行快照默认保留 1 天，每台服务器的任务存储预算默认为 10 GiB。可在桌面应用设置中调整保留策略、查看占用及清理结果；受保护的数据与不纳入清理的项目目录见[自动清理说明](docs/operations.md#automatic-task-storage-cleanup)。
+
 ## 接入 Claude Code 或 Codex
 
 在 **运行 Agent 的 Linux 服务器上** 注册工具。按你使用的客户端选择：

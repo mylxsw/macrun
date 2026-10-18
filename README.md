@@ -141,6 +141,8 @@ You now have a working remote connection. To keep it running after you close you
 
 Command completion, timeout and cancellation clean up attributed child processes, including test helpers in separate process groups. See [cleanup limits and recovery](docs/operations.md#command-descendants-and-stalled-tests) for details.
 
+Task-owned execution snapshots now expire after one day by default, with a 10 GiB task storage budget per server profile. Configure retention and inspect cleanup results in Desktop Settings; see [automatic task storage cleanup](docs/operations.md#automatic-task-storage-cleanup) for protected data and excluded project directories.
+
 ## Give Claude Code or Codex access
 
 Register Macrun **on the Linux server where your agent runs**. Choose your client:

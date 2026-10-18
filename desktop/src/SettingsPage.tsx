@@ -3,6 +3,7 @@ import { useLanguage } from "./useLanguage";
 import { useEffect, useRef, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import { PruneButton, type Act } from "./Features";
+import { bytes } from "./Performance";
 import type { AppState, Settings, Snapshot } from "./types";
 const emptySettings: Settings = {
   server: "",
@@ -514,7 +515,9 @@ export function SettingsPage({
             <div className="grow">
               <b>{tr("任务记录保留")}</b>
               <small>
-                {tr("超过期限的输出和截图会被清理，去重编号另保留 90 天。")}
+                {tr(
+                  "超过期限的输出和截图会被清理；容量不足时可能提前清理，去重编号持续保留。",
+                )}
               </small>
             </div>
             <div
@@ -544,10 +547,109 @@ export function SettingsPage({
               ))}
             </div>
           </div>
+          <label className="feature-line">
+            <div className="grow">
+              <b>{tr("执行快照保留")}</b>
+              <small>
+                {tr("仅清理任务生成的执行副本；原项目和同步目录需自行管理。")}
+              </small>
+            </div>
+            <select
+              aria-label={tr("执行快照保留")}
+              value={snapshot?.safety.snapshot_retention_days ?? 1}
+              disabled={busy || !available || !snapshot?.safety}
+              onChange={(e) =>
+                act(
+                  "control",
+                  {
+                    action: "safety",
+                    args: {
+                      ...snapshot?.safety,
+                      snapshot_retention_days: Number(e.target.value),
+                    },
+                  },
+                  tr("存储策略已保存"),
+                )
+              }
+            >
+              {[1, 7, 30].map((n) => (
+                <option key={n} value={n}>
+                  {tr("{0} 天", n)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="feature-line">
+            <div className="grow">
+              <b>{tr("每台服务器的任务存储上限")}</b>
+              <small>
+                {tr(
+                  "优先清理最旧的执行快照，再清理任务记录；运行中和最近一小时的数据会保留，可能暂时超限。",
+                )}
+              </small>
+            </div>
+            <select
+              aria-label={tr("每台服务器的任务存储上限")}
+              value={snapshot?.safety.storage_limit_gb ?? 10}
+              disabled={busy || !available || !snapshot?.safety}
+              onChange={(e) =>
+                act(
+                  "control",
+                  {
+                    action: "safety",
+                    args: {
+                      ...snapshot?.safety,
+                      storage_limit_gb: Number(e.target.value),
+                    },
+                  },
+                  tr("存储策略已保存"),
+                )
+              }
+            >
+              {[1, 5, 10, 20, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n} GiB
+                </option>
+              ))}
+            </select>
+          </label>
+          {snapshot?.storage && (
+            <div className="feature-line">
+              <div className="grow" aria-live="polite">
+                <b>
+                  {tr(
+                    "任务数据 {0}，其中执行快照 {1}",
+                    bytes(snapshot.storage.task_bytes),
+                    bytes(snapshot.storage.workspace_bytes),
+                  )}
+                </b>
+                <small>
+                  {tr(
+                    "最近检查：{0}；上次回收 {1}",
+                    new Date(snapshot.storage.scanned_at).toLocaleString(),
+                    bytes(snapshot.storage.reclaimed_bytes),
+                  )}
+                </small>
+                {snapshot.storage.over_limit && (
+                  <small>
+                    {tr("仍超出容量上限；受保护的数据将在后续清理中重试。")}
+                  </small>
+                )}
+                {snapshot.storage.errors > 0 && (
+                  <small role="alert">
+                    {tr(
+                      "有 {0} 项未能清理，占用统计可能不完整；请检查目录权限后重试。",
+                      snapshot.storage.errors,
+                    )}
+                  </small>
+                )}
+              </div>
+            </div>
+          )}
           <div className="feature-line feature-shaded">
             <small className="grow">
               {tr(
-                "启动时和每小时自动清理过期记录；也可以现在清理。去重编号会保留，过期任务不会再次执行。",
+                "启动时、每小时及任务结束后自动检查（每分钟最多一次）；也可以现在清理。过期任务不会再次执行。",
               )}
             </small>
             <PruneButton act={act} disabled={busy || !available} />

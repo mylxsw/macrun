@@ -90,9 +90,29 @@ pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p)?;
     }
-    let temp = path.with_extension("tmp");
-    private_write(&temp, &serde_json::to_vec_pretty(value)?)?;
-    std::fs::rename(temp, path)?;
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let bytes = serde_json::to_vec_pretty(value)?;
+    // Cleanup writes must not follow a pre-existing result.tmp symlink or hard link.
+    let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&temp)?;
+    let result = (|| -> Result<()> {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result?;
     if path.file_name().is_some_and(|n| n == "result.json") {
         let record = serde_json::to_value(value)?;
         crate::history::record_written(path, &record);

@@ -122,7 +122,25 @@ To test autostart, schedule an authorized login/reboot test and repeat these che
 | Source not updating | Watch process lifecycle, workspace/config/exclusions, last successful sync and source changes during scanning |
 | Old behavior after build | Distribution file may differ from installed executable; check service arguments and restart matching binaries |
 
-Network reconnect retains worker tasks and backend sessions, but worker restart does not promise process continuation. Completed results remain in the worker data directory. Logs and task results have no automatic retention policy.
+Network reconnect retains worker tasks and backend sessions, but worker restart does not promise process continuation. Completed results remain in the worker data directory until the automatic storage policy expires them (see below). Service stdout/stderr logs still require external rotation.
+
+## Automatic task storage cleanup
+
+Each worker profile cleans its own `tasks/` directory at startup, hourly, and after task completion (completion sweeps are coalesced to once per minute). Desktop **Settings → Records** offers the same cleanup immediately and shows sampled task/snapshot bytes, the last check, reclaimed bytes, partial failures and remaining capacity pressure.
+
+Defaults and controls in the private local `safety` policy:
+
+| Setting | Default | Accepted values |
+| --- | --- | --- |
+| `retention_days` (task output, screenshots, results) | 30 days | 7, 30, 90 |
+| `snapshot_retention_days` (task-owned `workspace/` copies) | 1 day | 1, 7, 30 |
+| `storage_limit_gb` (logical task file bytes per server profile) | 10 GiB | 1, 5, 10, 20, 50, 100 |
+
+Existing `safety.json` files pick up these defaults; no migration is needed. Local settings apply to all configured profiles, with a separate budget per profile. The usage display sums all profiles. Cleanup first removes expired execution snapshots, then reclaims the oldest snapshots when over budget, then expires task directories by age or capacity. A task whose snapshot has been reclaimed remains queryable and carries `workspace_expired: true`. Full expiry leaves a small durable deduplication record, so retrying a request ID cannot repeat its effects, even after restarting.
+
+This is a soft budget: active tasks, data in use by commands or downloads, unresolved process recovery journals, and results from the past hour are protected. Cleanup retries on later sweeps; protected data can temporarily exceed the budget. Usage and reclaimed bytes are logical file sizes sampled during the sweep, not physical filesystem free space. Malformed or mismatched records are left intact and reported as errors; symlinked task directories are skipped. Inspect ownership/permissions before manually repairing these entries. Partial directory deletion is retried using its durable deduplication record.
+
+Only real UUID-named directories under the worker's `tasks/` with matching terminal records are eligible. Original command working directories, synchronized project roots, mirror metadata, credentials, application/service logs and unrelated files are outside this policy. Keep build-cache and log rotation policies for those locations. Resumable upload staging files keep their existing 24-hour inactivity cutoff and destination lease protection; their task ownership journal remains until cleanup can safely handle the staging files. Sync incoming staging files are checked on subsequent sync, and server sync-job records retain their separate 30-day cleanup.
 
 ## Command descendants and stalled tests
 
