@@ -110,13 +110,11 @@ pub async fn serve_observed<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         m.parent_task_id = artifact.then(|| args["task_id"].as_str().unwrap_or("").to_owned());
     });
     let operation = async {
-        let _lease = if kind == "file.upload" {
-            Some(Arc::new(crate::workspace::Lease::acquire(
-                std::slice::from_ref(&path),
-            )?))
+        let _lease = Arc::new(if kind == "file.upload" {
+            crate::workspace::Lease::acquire(std::slice::from_ref(&path))?
         } else {
-            None
-        };
+            crate::workspace::Lease::pin(std::slice::from_ref(&path))?
+        });
         if kind == "file.upload" {
             let size = args["size"]
                 .as_u64()

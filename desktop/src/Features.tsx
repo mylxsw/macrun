@@ -1038,11 +1038,11 @@ export function PruneButton({
         act(
           "control",
           { action: "prune", args: {} },
-          tr("过期记录已清理，去重编号已保留"),
+          tr("存储清理已检查，回收结果见设置页"),
         )
       }
     >
-      {tr("清理过期记录")}
+      {tr("立即清理")}
     </button>
   );
 }

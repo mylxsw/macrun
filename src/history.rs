@@ -138,6 +138,7 @@ fn summary(task: &Value) -> Value {
         "desktop_tier",
         "approved_by_rule",
         "metrics_version",
+        "workspace_expired",
     ] {
         if let Some(value) = task.get(field) {
             row[field] = value.clone();

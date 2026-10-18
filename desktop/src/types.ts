@@ -36,6 +36,7 @@ export type Task = {
   approval_deadline?: number;
   desktop_tier?: DesktopTier;
   approved_by_rule?: string;
+  workspace_expired?: boolean;
   progress?: { received: number; total: number; bytes: number };
 };
 export type DesktopTier = "observe" | "control" | "high";
@@ -83,9 +84,22 @@ export type Snapshot = {
     roots: string[];
     approval: string;
     retention_days: number;
+    snapshot_retention_days?: number;
+    storage_limit_gb?: number;
     yield_until: number;
     desktop?: Record<DesktopTier, TierPolicy>;
   };
+  storage?: {
+    scanned_at: number;
+    task_bytes: number;
+    workspace_bytes: number;
+    limit_bytes: number;
+    over_limit: boolean;
+    removed: number;
+    workspaces_removed: number;
+    reclaimed_bytes: number;
+    errors: number;
+  } | null;
   allow_rules?: AllowRule[];
   workspaces: {
     connection_id?: string;

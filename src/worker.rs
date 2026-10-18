@@ -178,7 +178,7 @@ pub async fn worker_profiles(
     }
     let cleanup = engines.clone();
     let stop = shutdown.clone();
-    tasks.spawn(async move {loop{tokio::select!{_=stop.cancelled()=>break,_=tokio::time::sleep(Duration::from_secs(3600))=>{for engine in &cleanup{let _=engine.prune_history().await;}}}}Ok(())});
+    tasks.spawn(async move {loop{tokio::select!{_=stop.cancelled()=>break,_=tokio::time::sleep(Duration::from_secs(3600))=>{for engine in &cleanup{if engine.prune_history().await.is_err(){crate::logging::event("worker","storage_cleanup_failed",json!({}));}}}}}Ok(())});
     let mut outcome = tokio::select! {
         _=shutdown.cancelled()=>Ok(()),
         result=tokio::signal::ctrl_c()=>result.map_err(anyhow::Error::from),

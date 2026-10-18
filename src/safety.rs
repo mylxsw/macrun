@@ -39,6 +39,10 @@ pub struct Safety {
     pub roots: Vec<PathBuf>,
     pub approval: String,
     pub retention_days: u32,
+    /// Task-owned execution snapshots; never user projects or sync destinations.
+    pub snapshot_retention_days: u32,
+    /// Soft budget for task directories, in GiB, per server profile.
+    pub storage_limit_gb: u32,
     pub yield_until: u64,
     pub desktop: DesktopTiers,
 }
@@ -49,6 +53,8 @@ impl Default for Safety {
             roots: vec![],
             approval: "direct".into(),
             retention_days: 30,
+            snapshot_retention_days: 1,
+            storage_limit_gb: 10,
             yield_until: 0,
             desktop: DesktopTiers::default(),
         }
@@ -69,6 +75,14 @@ impl Safety {
         ensure!(
             [7, 30, 90].contains(&self.retention_days),
             "invalid retention period"
+        );
+        ensure!(
+            [1, 7, 30].contains(&self.snapshot_retention_days),
+            "invalid snapshot retention period"
+        );
+        ensure!(
+            [1, 5, 10, 20, 50, 100].contains(&self.storage_limit_gb),
+            "invalid task storage limit"
         );
         for root in &mut self.roots {
             ensure!(root.is_absolute(), "allowed directories must be absolute");

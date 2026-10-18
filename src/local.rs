@@ -169,6 +169,29 @@ async fn snapshot(connections: &[LocalConnection]) -> Result<Value> {
         }
         value[field] = json!(rows);
     }
+    let mut storage = json!({});
+    for field in [
+        "task_bytes",
+        "workspace_bytes",
+        "limit_bytes",
+        "reclaimed_bytes",
+        "errors",
+        "removed",
+        "workspaces_removed",
+    ] {
+        storage[field] = json!(
+            all.iter()
+                .map(|v| v["storage"][field].as_u64().unwrap_or(0))
+                .sum::<u64>()
+        );
+    }
+    storage["scanned_at"] = json!(
+        all.iter()
+            .filter_map(|v| v["storage"]["scanned_at"].as_u64())
+            .min()
+    );
+    storage["over_limit"] = json!(all.iter().any(|v| v["storage"]["over_limit"] == true));
+    value["storage"] = storage;
     for field in ["total_tasks", "active_count"] {
         value[field] = json!(
             all.iter()
@@ -373,17 +396,38 @@ async fn dispatch(
     }
     let mut result = json!({});
     let mut errors = Vec::new();
+    let mut prune_results = Vec::new();
     for c in targets {
         match dispatch_one(&c.engine, action, &args, shutdown).await {
             Ok(value) => {
                 result = value;
                 result["connection_id"] = json!(c.id);
                 result["connection_name"] = json!(c.name);
+                if action == "prune" {
+                    prune_results.push(result.clone());
+                }
             }
             Err(e) => errors.push(format!("{}: {e}", c.name)),
         }
     }
     anyhow::ensure!(errors.is_empty(), "{}", errors.join("; "));
+    if action == "prune" {
+        for field in [
+            "removed",
+            "workspaces_removed",
+            "reclaimed_bytes",
+            "transfers_removed",
+            "metrics_attempts_removed",
+        ] {
+            result[field] = json!(
+                prune_results
+                    .iter()
+                    .map(|v| v[field].as_u64().unwrap_or(0))
+                    .sum::<u64>()
+            );
+        }
+        result["profiles"] = json!(prune_results);
+    }
     Ok(result)
 }
 async fn dispatch_one(
@@ -461,6 +505,42 @@ async fn dispatch_one(
 #[cfg(test)]
 mod multi_tests {
     use super::*;
+    #[tokio::test]
+    async fn cleanup_and_usage_aggregate_all_profiles() {
+        let root = tempfile::tempdir().unwrap();
+        let mut connections = Vec::new();
+        for source in ["primary", "secondary"] {
+            let data = root.path().join(source);
+            let engine =
+                Engine::open(data.clone(), crate::config::WorkerConfig::default()).unwrap();
+            let ident = crate::model::id();
+            let dir = data.join("tasks").join(&ident);
+            crate::wire::atomic_json(
+                &dir.join("result.json"),
+                &json!({"task_id":ident,"kind":"exec.start","status":"succeeded","ended_at":1}),
+            )
+            .unwrap();
+            std::fs::write(dir.join("output.log"), "old output").unwrap();
+            let (_, rx) = watch::channel(ConnectionState::initial(source.into()));
+            connections.push(LocalConnection {
+                id: source.into(),
+                name: source.into(),
+                engine,
+                connection: rx,
+            });
+        }
+        let result = dispatch(&connections, "prune", json!({}), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result["removed"], 2);
+        assert_eq!(result["profiles"].as_array().unwrap().len(), 2);
+        assert!(result["reclaimed_bytes"].as_u64().unwrap() > 20);
+        let snapshot = snapshot(&connections).await.unwrap();
+        assert_eq!(snapshot["storage"]["removed"], 2);
+        assert_eq!(snapshot["storage"]["task_bytes"], 0);
+        assert_eq!(snapshot["storage"]["limit_bytes"], 20 * 1024_u64.pow(3));
+        assert_eq!(snapshot["total_tasks"], 0);
+    }
     #[tokio::test]
     async fn idle_shutdown_checks_every_profile_and_does_not_interrupt_busy_tasks() {
         let root = tempfile::tempdir().unwrap();

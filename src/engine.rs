@@ -25,7 +25,7 @@ pub struct Engine {
     history: crate::history::TaskHistory,
     metrics_store: Option<crate::metrics::Store>,
     config: WorkerConfig,
-    submissions: Mutex<()>,
+    submissions: Arc<Mutex<()>>,
     tasks: Mutex<BTreeMap<String, CancellationToken>>,
     backends: BTreeMap<String, Slot>,
     policy: Mutex<Policy>,
@@ -36,6 +36,8 @@ pub struct Engine {
     tool_counts: Mutex<BTreeMap<String, DiscoveredTools>>,
     changes: watch::Sender<u64>,
     fingerprint_key: [u8; 32],
+    storage: Mutex<Option<crate::retention::TaskStorage>>,
+    last_auto_prune: std::sync::Mutex<Option<std::time::Instant>>,
 }
 /// Holds admission closed while all profiles are checked before an idle-only shutdown.
 pub(crate) struct IdleShutdownGuard<'a> {
@@ -186,7 +188,7 @@ impl Engine {
                 .ok(),
             data,
             config,
-            submissions: Mutex::new(()),
+            submissions: Arc::new(Mutex::new(())),
             tasks: Mutex::new(BTreeMap::new()),
             backends,
             policy: Mutex::new(policy),
@@ -197,6 +199,8 @@ impl Engine {
             tool_counts: Mutex::new(BTreeMap::new()),
             changes,
             fingerprint_key,
+            storage: Mutex::new(None),
+            last_auto_prune: std::sync::Mutex::new(None),
         }))
     }
     fn fingerprint(&self, a: &Value) -> Result<String> {
@@ -474,6 +478,9 @@ impl Engine {
             }
         }
         let result = wire::persist(&p, &v).await;
+        if result.is_ok() {
+            self.prune_after_task(ident).await;
+        }
         self.tasks.lock().await.remove(ident);
         self.changed();
         result
@@ -535,50 +542,51 @@ impl Engine {
         )
         .await
     }
-    pub async fn prune_history(&self) -> Result<Value> {
-        let _guard = self.submissions.lock().await;
-        let days = self.safety.lock().await.retention_days as u64;
-        let cutoff = now().saturating_sub(days * 86_400_000);
-        let mut removed = 0;
-        let mut transfers_removed = 0;
-        for record in self.history.records().await? {
-            let Some(ident) = record["task_id"].as_str() else {
-                continue;
-            };
-            let dir = self.directory(ident)?;
-            if record["kind"] == "file.upload" {
-                let path = dir.clone();
-                transfers_removed += crate::wire::blocking(move || {
-                    crate::retention::transfers(&path, now().saturating_sub(86_400_000))
-                })
-                .await?? as usize;
+    /// Completion sweeps are coalesced to at most once a minute. The finishing task
+    /// stays registered until the sweep ends, so shutdown waits for its filesystem work.
+    async fn prune_after_task(&self, completed: &str) {
+        {
+            let mut last = self.last_auto_prune.lock().unwrap();
+            if last.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+                return;
             }
-            if record["ended_at"].as_u64().is_some_and(|end| end < cutoff) {
-                let v: Value =
-                    serde_json::from_slice(&tokio::fs::read(dir.join("result.json")).await?)?;
-                let tombstone = json!({"task_id":ident,"kind":v["kind"],"request_fingerprint":v["request_fingerprint"],"status":v["status"],"started_at":v["started_at"],"ended_at":v["ended_at"],"history_expired":true});
-                wire::persist(
-                    &self.data.join("dedup").join(format!("{ident}.json")),
-                    &tombstone,
-                )
-                .await?;
-                tokio::fs::remove_dir_all(dir).await?;
-                self.history.removed(ident);
-                if let Some(store) = &self.metrics_store {
-                    let _ = store.remove(ident);
-                }
-                removed += 1;
-            } else if record["ended_at"]
-                .as_u64()
-                .is_some_and(|at| at < now().saturating_sub(7 * 86_400_000))
-            {
-                let path = dir.join("result.json");
-                let mut value: Value = serde_json::from_slice(&tokio::fs::read(&path).await?)?;
-                if crate::metrics::prune_samples(&mut value, now().saturating_sub(7 * 86_400_000)) {
-                    wire::persist(&path, &value).await?;
-                }
+            *last = Some(std::time::Instant::now());
+        }
+        if self.prune_history_inner(Some(completed)).await.is_err() {
+            crate::logging::event("worker", "storage_cleanup_failed", json!({}));
+        }
+    }
+    pub async fn prune_history(&self) -> Result<Value> {
+        self.prune_history_inner(None).await
+    }
+    async fn prune_history_inner(&self, completed: Option<&str>) -> Result<Value> {
+        let admission = self.submissions.clone().lock_owned().await;
+        let safety = self.safety.lock().await.clone();
+        let cutoff = now().saturating_sub(u64::from(safety.retention_days) * 86_400_000);
+        let mut active: BTreeSet<String> = self.tasks.lock().await.keys().cloned().collect();
+        if let Some(completed) = completed {
+            active.remove(completed);
+        }
+        let data = self.data.clone();
+        // A dropped caller must not reopen admission while blocking deletion continues.
+        let (_guard, storage) = wire::blocking(move || {
+            let result = crate::retention::task_storage(&data, &safety, &active, now());
+            (admission, result)
+        })
+        .await?;
+        let storage = storage?;
+        for ident in &storage.removed_ids {
+            self.history.removed(ident);
+            if let Some(store) = &self.metrics_store {
+                let _ = store.remove(ident);
             }
         }
+        crate::logging::event(
+            "worker",
+            "storage_cleanup",
+            json!({"removed":storage.removed,"workspaces_removed":storage.workspaces_removed,"reclaimed_bytes":storage.reclaimed_bytes,"errors":storage.errors,"over_limit":storage.over_limit}),
+        );
+        *self.storage.lock().await = Some(storage.clone());
         let attempts = self.data.join("metrics-attempts");
         let store = self.metrics_store.clone();
         let attempts_removed = wire::blocking(move || -> Result<usize> {
@@ -616,7 +624,7 @@ impl Engine {
         .await??;
         self.changed();
         Ok(
-            json!({"removed":removed,"transfers_removed":transfers_removed,"metrics_attempts_removed":attempts_removed,"dedup_preserved":true}),
+            json!({"removed":storage.removed,"workspaces_removed":storage.workspaces_removed,"reclaimed_bytes":storage.reclaimed_bytes,"storage":storage,"transfers_removed":storage.transfers_removed,"metrics_attempts_removed":attempts_removed,"dedup_preserved":true}),
         )
     }
     pub async fn local_snapshot(&self) -> Result<Value> {
@@ -718,7 +726,7 @@ impl Engine {
             backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":tool_count,"tiers":tiers}));
         }
         Ok(
-            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"allow_rules":self.allow_rules().await,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"storage":self.storage.lock().await.clone(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"allow_rules":self.allow_rules().await,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
         )
     }
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
@@ -901,14 +909,16 @@ impl Engine {
             }
             _ if kind.starts_with("file.") => {
                 let (ident, cancel) = self.begin_external(kind, a.clone()).await?;
-                let lease = if matches!(kind, "file.write" | "file.move") {
+                let lease = {
                     let mut paths = vec![expand(string(&a, "path")?)];
                     if kind == "file.move" {
                         paths.push(expand(string(&a, "destination")?));
                     }
-                    crate::workspace::Lease::acquire(&paths).map(Some)
-                } else {
-                    Ok(None)
+                    if matches!(kind, "file.write" | "file.move") {
+                        crate::workspace::Lease::acquire(&paths)
+                    } else {
+                        crate::workspace::Lease::pin(&paths)
+                    }
                 };
                 let r = if let Err(e) = lease {
                     Err(e)
@@ -1233,6 +1243,7 @@ impl Engine {
                     "exit_code":result.pointer("/result/exit_code")
                 }),
             );
+            engine.prune_after_task(&ident).await;
             engine.approvals.lock().await.remove(&ident);
             engine.tasks.lock().await.remove(&ident);
             engine.changed();
