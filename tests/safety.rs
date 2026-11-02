@@ -33,6 +33,56 @@ fn allowlist_checks_nonexistent_paths_symlinks_and_parent_traversal() {
     assert!(p.check(&d.path().join("link/new")).is_err());
 }
 #[tokio::test]
+async fn empty_restricted_roots_cannot_replace_saved_policy() {
+    let d = tempfile::tempdir().unwrap();
+    let e = Engine::open(d.path().into(), WorkerConfig::default()).unwrap();
+    e.set_safety(Safety::default()).await.unwrap();
+    let before = std::fs::read(d.path().join("safety.json")).unwrap();
+    let invalid = Safety {
+        restrict_paths: true,
+        ..Default::default()
+    };
+    assert!(
+        invalid
+            .check(d.path())
+            .unwrap_err()
+            .to_string()
+            .contains("no allowed directories")
+    );
+    assert!(
+        e.set_safety(invalid)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("at least one allowed directory")
+    );
+    assert_eq!(std::fs::read(d.path().join("safety.json")).unwrap(), before);
+    assert_eq!(
+        e.local_snapshot().await.unwrap()["safety"]["restrict_paths"],
+        false
+    );
+    // Legacy files remain restricted on restart until explicitly corrected.
+    std::fs::write(
+        d.path().join("safety.json"),
+        br#"{"restrict_paths":true,"roots":[]}"#,
+    )
+    .unwrap();
+    let reopened = Engine::open(d.path().into(), WorkerConfig::default()).unwrap();
+    let error = reopened
+        .handle("file.list", json!({"path":d.path()}))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("no allowed directories"));
+    reopened.set_safety(Safety::default()).await.unwrap();
+    assert!(
+        reopened
+            .handle("file.list", json!({"path":d.path()}))
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
 async fn approvals_block_execution_and_rejection_is_durable() {
     let d = tempfile::tempdir().unwrap();
     let e = Engine::open(d.path().into(), WorkerConfig::default()).unwrap();

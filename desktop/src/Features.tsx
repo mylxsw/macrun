@@ -801,6 +801,8 @@ export function SafetyPanel({
     setPath("");
     setAdding(false);
   };
+  const missingRoots =
+    !!draft?.restrict_paths && !draft.roots.some((root) => root.trim());
   return (
     <div className="safety-card">
       <div className="v4-perm">
@@ -925,6 +927,13 @@ export function SafetyPanel({
           />
         </label>
       </div>
+      {missingRoots && (
+        <p role="alert">
+          {tr(
+            "请至少添加一个允许目录，或关闭目录限制；当前设置会阻止所有命令、文件操作和同步。",
+          )}
+        </p>
+      )}
       {includeExtras && (
         <>
           <div className="v4-perm">
@@ -978,7 +987,7 @@ export function SafetyPanel({
           </button>
           <button
             className="primary"
-            disabled={disabled}
+            disabled={disabled || missingRoots}
             onClick={async () => {
               const saved = await act(
                 "control",

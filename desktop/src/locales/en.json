@@ -968,5 +968,6 @@
   "有 {0} 项未能清理，占用统计可能不完整；请检查目录权限后重试。": "{0} items could not be cleaned. Usage may be incomplete; check directory permissions and retry.",
   "启动时、每小时及任务结束后自动检查（每分钟最多一次）；也可以现在清理。过期任务不会再次执行。": "Checked at startup, hourly, and after tasks finish (at most once per minute). You can also clean now. Expired tasks will not execute again.",
   "存储清理已检查，回收结果见设置页": "Storage checked. See Settings for cleanup results.",
-  "立即清理": "Clean now"
+  "立即清理": "Clean now",
+  "请至少添加一个允许目录，或关闭目录限制；当前设置会阻止所有命令、文件操作和同步。": "Add at least one allowed directory or turn off directory restrictions. The current settings block all commands, file operations, and sync."
 }

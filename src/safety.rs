@@ -63,6 +63,10 @@ impl Default for Safety {
 impl Safety {
     pub fn validate(&mut self) -> Result<()> {
         ensure!(
+            !self.restrict_paths || !self.roots.is_empty(),
+            "path restrictions require at least one allowed directory"
+        );
+        ensure!(
             ["direct", "risk", "all"].contains(&self.approval.as_str()),
             "invalid approval mode"
         );
@@ -95,6 +99,10 @@ impl Safety {
         if !self.restrict_paths {
             return Ok(());
         }
+        ensure!(
+            !self.roots.is_empty(),
+            "path_denied: path restrictions enabled with no allowed directories; add an allowed directory or disable path restrictions in Macrun Desktop settings"
+        );
         ensure!(path.is_absolute(), "path_denied: absolute path required");
         // Reject parent components even when the path does not exist yet.
         ensure!(

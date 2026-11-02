@@ -100,6 +100,51 @@ test("approval buttons only send the selected task decision", async () => {
   );
 });
 
+test("empty restricted directories show a warning and cannot be saved", async () => {
+  const act = vi.fn().mockResolvedValue(true),
+    user = userEvent.setup();
+  render(<SafetyPanel snapshot={snapshot} act={act} disabled={false} />);
+  await user.click(screen.getByRole("button", { name: "移除 /work" }));
+  expect(screen.getByRole("alert").textContent).toContain("阻止所有命令");
+  const save = screen.getByRole("button", { name: "保存安全设置" });
+  expect((save as HTMLButtonElement).disabled).toBe(true);
+  await user.click(save);
+  expect(act).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("checkbox", { name: "限制工作目录" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect((save as HTMLButtonElement).disabled).toBe(false);
+  await user.click(save);
+  expect(act.mock.calls[0][1].args).toMatchObject({
+    restrict_paths: false,
+    roots: [],
+  });
+});
+
+test("legacy empty restricted directories can be repaired by adding a directory", async () => {
+  const act = vi.fn().mockResolvedValue(true),
+    user = userEvent.setup();
+  render(
+    <SafetyPanel
+      snapshot={{ ...snapshot, safety: { ...safety, roots: [] } }}
+      act={act}
+      disabled={false}
+    />,
+  );
+  expect(screen.getByRole("alert")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "添加目录" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "允许的绝对目录" }),
+    "/work",
+  );
+  await user.click(screen.getByRole("button", { name: "添加", exact: true }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "保存安全设置" }));
+  expect(act.mock.calls[0][1].args).toMatchObject({
+    restrict_paths: true,
+    roots: ["/work"],
+  });
+});
+
 test("unsaved safety edits survive incoming snapshots and save failure", async () => {
   const act = vi.fn().mockResolvedValue(undefined),
     user = userEvent.setup();
@@ -227,7 +272,11 @@ test("invalid observation JSON never dispatches a backend action", async () => {
         backends: [{ name: "fixture", state: "running", command: "/fixture" }],
       }}
       act={act}
-      read={(command, args) => command === "cua_status" ? Promise.resolve({ state: "missing" }) : act(command, args)}
+      read={(command, args) =>
+        command === "cua_status"
+          ? Promise.resolve({ state: "missing" })
+          : act(command, args)
+      }
       app={null}
       mode="advanced"
     />,
@@ -296,7 +345,9 @@ test("settings disable disconnect with active tasks and retain all other prefere
     screen.getByRole("button", { name: "断开连接" }).hasAttribute("disabled"),
   ).toBe(true);
   await user.click(
-    screen.getByRole("checkbox", { name: /需要确认、失败或结果未知时发送通知/ }),
+    screen.getByRole("checkbox", {
+      name: /需要确认、失败或结果未知时发送通知/,
+    }),
   );
   expect(act).toHaveBeenCalledWith("save_preferences", {
     preferences: { ...app.preferences, notifications: false },

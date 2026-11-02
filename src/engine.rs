@@ -283,7 +283,20 @@ impl Engine {
         let _guard = self.submissions.lock().await;
         safety.validate()?;
         wire::persist(&self.data.join("safety.json"), &safety).await?;
-        *self.safety.lock().await = safety.clone();
+        let mut current = self.safety.lock().await;
+        crate::logging::event(
+            "worker",
+            "safety_updated",
+            json!({
+                "previous_restrict_paths": current.restrict_paths,
+                "previous_root_count": current.roots.len(),
+                "restrict_paths": safety.restrict_paths,
+                "root_count": safety.roots.len(),
+                "source": "local_control"
+            }),
+        );
+        *current = safety.clone();
+        drop(current);
         self.changed();
         Ok(json!(safety))
     }
