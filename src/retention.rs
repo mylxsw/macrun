@@ -133,6 +133,62 @@ fn directory_bytes(path: &Path) -> Result<u64> {
     Ok(bytes)
 }
 
+/// Inspect only Macrun-owned task data, never the command's working directory.
+pub fn task_info(data: &Path, ident: &str, active: bool) -> Result<Value> {
+    uuid::Uuid::parse_str(ident)?;
+    let root = data.join("tasks");
+    ensure!(
+        std::fs::symlink_metadata(&root)?.is_dir(),
+        "invalid task storage"
+    );
+    let path = root.join(ident);
+    ensure!(
+        std::fs::symlink_metadata(&path)?.is_dir(),
+        "invalid task directory"
+    );
+    let record_path = path.join("result.json");
+    ensure!(
+        std::fs::symlink_metadata(&record_path)?.is_file(),
+        "invalid task record"
+    );
+    let record: Value = serde_json::from_slice(&std::fs::read(record_path)?)?;
+    ensure!(record["task_id"] == ident, "task identity mismatch");
+    let reason = if active
+        || !terminal(&record)
+        || record["ended_at"]
+            .as_u64()
+            .is_none_or(|end| end > crate::model::now())
+    {
+        Some("active")
+    } else if path.join("process.json").try_exists()? {
+        Some("process_recovery")
+    } else if path.join("transfer.json").try_exists()? {
+        Some("transfer")
+    } else {
+        None
+    };
+    Ok(
+        serde_json::json!({"path":path,"bytes":directory_bytes(&path)?,"cleanable":reason.is_none(),"reason":reason}),
+    )
+}
+
+/// Explicit deletion follows the same ownership and deduplication rules as retention.
+pub fn delete_task(data: &Path, ident: &str, active: bool) -> Result<()> {
+    let info = task_info(data, ident, active)?;
+    ensure!(info["cleanable"] == true, "task is protected from cleanup");
+    let path = data.join("tasks").join(ident);
+    let _lease = crate::workspace::Lease::for_cleanup(std::slice::from_ref(&path))?;
+    let record: Value = serde_json::from_slice(&std::fs::read(path.join("result.json"))?)?;
+    let dedup = data.join("dedup");
+    if let Ok(meta) = std::fs::symlink_metadata(&dedup) {
+        ensure!(meta.is_dir(), "invalid dedup directory");
+    }
+    let tombstone = serde_json::json!({"task_id":ident,"kind":record["kind"],"request_fingerprint":record["request_fingerprint"],"status":record["status"],"started_at":record["started_at"],"ended_at":record["ended_at"],"history_expired":true});
+    crate::wire::atomic_json(&dedup.join(format!("{ident}.json")), &tombstone)?;
+    std::fs::remove_dir_all(path)?;
+    Ok(())
+}
+
 struct StoredTask {
     path: std::path::PathBuf,
     record: Value,

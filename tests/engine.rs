@@ -260,6 +260,75 @@ async fn paginated_tool_counts_accumulate_distinct_names_and_reset_with_discover
 }
 
 #[tokio::test]
+async fn stale_cua_session_reconnects_observation_but_never_replays_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = WorkerConfig::default();
+    config.mcp.insert(
+        "fixture".into(),
+        macrun::config::Backend {
+            command: "python3".into(),
+            args: vec![format!(
+                "{}/tests/fixtures/mcp.py",
+                env!("CARGO_MANIFEST_DIR")
+            )],
+            env: Default::default(),
+            cwd: None,
+        },
+    );
+    config.screenshots.cua_backends.push("fixture".into());
+    let engine = Engine::open(dir.path().into(), config).unwrap();
+    let first = engine
+        .handle("mcp.tools", json!({"server":"fixture"}))
+        .await
+        .unwrap();
+    engine.restart_backend("fixture").await.unwrap();
+    let call = |tool: &str, arguments: Value| json!({"server":"fixture","session":first["session"],"tool":tool,"request_id":id(),"arguments":arguments});
+    let blocked = call("click", json!({}));
+    engine.handle("mcp.call", blocked.clone()).await.unwrap();
+    let result = wait(&engine, blocked["request_id"].as_str().unwrap()).await;
+    assert_eq!(result["status"], "failed");
+    assert!(
+        result["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("stale_session")
+    );
+    let prompt = call("check_permissions", json!({"prompt":true}));
+    engine.handle("mcp.call", prompt.clone()).await.unwrap();
+    assert_eq!(
+        wait(&engine, prompt["request_id"].as_str().unwrap()).await["status"],
+        "failed"
+    );
+    let capture_to_file = call(
+        "get_desktop_state",
+        json!({"screenshot_out_file":dir.path().join("image.png")}),
+    );
+    engine
+        .handle("mcp.call", capture_to_file.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        wait(&engine, capture_to_file["request_id"].as_str().unwrap()).await["status"],
+        "failed"
+    );
+    assert!(!dir.path().join("image.png").exists());
+    let mut old_image = call("get_window_state", json!({}));
+    old_image["coordinate_task_id"] = json!(id());
+    engine.handle("mcp.call", old_image.clone()).await.unwrap();
+    assert_eq!(
+        wait(&engine, old_image["request_id"].as_str().unwrap()).await["status"],
+        "failed"
+    );
+    let observe = call("start_session", json!({}));
+    engine.handle("mcp.call", observe.clone()).await.unwrap();
+    let result = wait(&engine, observe["request_id"].as_str().unwrap()).await;
+    assert_eq!(result["status"], "succeeded");
+    assert_ne!(result["result"]["session"], first["session"]);
+    assert!(result["result"]["session"].as_str().is_some());
+    engine.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn different_server_engines_do_not_overlap_on_the_same_desktop() {
     let root = tempfile::tempdir().unwrap();
     let mut config = WorkerConfig::default();

@@ -225,6 +225,27 @@ beforeEach(() => {
       if (!task) throw new Error("task does not exist");
       return structuredClone({ ...task, output: { text: task.output_tail } });
     }
+    if (command === "control" && args.action === "task_storage") {
+      const task = historyRecords.find(
+        (task) => task.task_id === args.args.task_id,
+      );
+      if (!task) throw new Error("task does not exist");
+      return {
+        path: `/tasks/${task.task_id}`,
+        bytes: 2097152,
+        cleanable: !!task.ended_at,
+      };
+    }
+    if (command === "control" && args.action === "task_delete") {
+      historyRecords = historyRecords.filter(
+        (task) => task.task_id !== args.args.task_id,
+      );
+      app.snapshot.tasks = app.snapshot.tasks.filter(
+        (task) => task.task_id !== args.args.task_id,
+      );
+      app.snapshot.total_tasks = historyRecords.length;
+      return { deleted: true };
+    }
     if (command === "control" && args.action === "pause") {
       app.snapshot.policy.paused = args.args.paused;
     }
@@ -671,6 +692,28 @@ test("large task history pages without mounting every row and searches beyond th
       action: "task_detail",
       args: { task_id: "history-1499", tail_bytes: 8192 },
     }),
+  );
+});
+
+test("task details show storage and clean a completed task", async () => {
+  largeHistory();
+  const user = userEvent.setup();
+  await mount();
+  await user.click(navigation().getByRole("button", { name: "活动" }));
+  await waitFor(() =>
+    expect(detail().getByText("/tasks/history-0000")).toBeTruthy(),
+  );
+  expect(detail().getByText("2.00 MiB")).toBeTruthy();
+  expect(detail().getByText("可以清理")).toBeTruthy();
+  await user.click(detail().getByRole("button", { name: "清理任务数据" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("control", {
+      action: "task_delete",
+      args: { task_id: "history-0000" },
+    }),
+  );
+  await waitFor(() =>
+    expect(taskList().queryByText("archive command 0")).toBeNull(),
   );
 });
 

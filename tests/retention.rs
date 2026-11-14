@@ -36,6 +36,36 @@ fn record(dir: &Path) -> Value {
 }
 
 #[test]
+fn explicit_cleanup_preserves_sources_and_dedup_and_refuses_protected_tasks() {
+    let data = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    fs::create_dir_all(data.path().join("dedup")).unwrap();
+    fs::write(source.path().join("source"), b"keep").unwrap();
+    let dir = task(data.path(), NOW, 123, 20);
+    std::os::unix::fs::symlink(source.path(), dir.join("workspace/link")).unwrap();
+    let ident = dir.file_name().unwrap().to_str().unwrap();
+    let info = retention::task_info(data.path(), ident, false).unwrap();
+    assert_eq!(info["cleanable"], true);
+    assert!(info["bytes"].as_u64().unwrap() >= 143);
+    assert!(retention::delete_task(data.path(), ident, true).is_err());
+    fs::write(dir.join("process.json"), b"{}").unwrap();
+    assert!(retention::delete_task(data.path(), ident, false).is_err());
+    fs::remove_file(dir.join("process.json")).unwrap();
+    fs::write(dir.join("transfer.json"), b"{}").unwrap();
+    assert!(retention::delete_task(data.path(), ident, false).is_err());
+    fs::remove_file(dir.join("transfer.json")).unwrap();
+    retention::delete_task(data.path(), ident, false).unwrap();
+    assert!(!dir.exists());
+    assert_eq!(fs::read(source.path().join("source")).unwrap(), b"keep");
+    let tombstone: Value = serde_json::from_slice(
+        &fs::read(data.path().join("dedup").join(format!("{ident}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tombstone["request_fingerprint"], "kept");
+    assert_eq!(tombstone["history_expired"], true);
+}
+
+#[test]
 fn legacy_policy_defaults_and_invalid_limits() {
     let mut policy: Safety = serde_json::from_value(json!({"retention_days":7})).unwrap();
     assert_eq!(policy.snapshot_retention_days, 1);

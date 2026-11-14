@@ -200,9 +200,11 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
           )}
         </div>
         <p className="muted">
-          {tr(
-            "系统设置中请启用 CuaDriver 的「辅助功能」和「屏幕与系统音频录制」。按系统提示重新打开 CuaDriver 后，返回此页会自动重新检测，也可点击「重新检测」。Macrun 自身的权限不代表后端已授权。",
-          )}
+          {authorized
+            ? tr("CuaDriver 系统权限已授权，正常重连无需再次授权。若操作仍失败，请检查后端状态。")
+            : tr(
+                "系统设置中请启用 CuaDriver 的「辅助功能」和「屏幕与系统音频录制」。按系统提示重新打开 CuaDriver 后，返回此页会自动重新检测，也可点击「重新检测」。Macrun 自身的权限不代表后端已授权。",
+              )}
         </p>
         {status?.state === "ready" && (
           <p role="status">

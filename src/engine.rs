@@ -94,6 +94,26 @@ fn redact_arguments(a: &Value) -> Value {
     }
     a
 }
+// Only calls that establish or observe a Cua session may cross a backend restart.
+// Never replay an input action or a request tied to an old screenshot.
+fn cua_reconnect_safe(a: &Value, method: &str, config: &WorkerConfig, name: &str) -> bool {
+    if method != "tools/call"
+        || a.get("coordinate_task_id").is_some()
+        || !config.screenshots.applies(name, &config.mcp[name].command)
+    {
+        return false;
+    }
+    match a["tool"].as_str() {
+        Some("start_session" | "list_apps" | "list_windows") => true,
+        Some("get_desktop_state" | "get_window_state") => {
+            a["arguments"]["screenshot_out_file"].is_null()
+        }
+        Some("check_permissions") => {
+            a["arguments"]["prompt"].is_null() || a["arguments"]["prompt"] == false
+        }
+        _ => false,
+    }
+}
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
         config.screenshots.validate()?;
@@ -744,6 +764,31 @@ impl Engine {
     }
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
         self.history.page(args).await
+    }
+    pub async fn local_task_storage(&self, ident: &str, delete: bool) -> Result<Value> {
+        let admission = self.submissions.clone().lock_owned().await;
+        let active = self.tasks.lock().await.contains_key(ident);
+        let data = self.data.clone();
+        let id = ident.to_owned();
+        let (guard, result) = wire::blocking(move || {
+            let result = if delete {
+                crate::retention::delete_task(&data, &id, active).map(|()| json!({"deleted":true}))
+            } else {
+                crate::retention::task_info(&data, &id, active)
+            };
+            (admission, result)
+        })
+        .await?;
+        let result = result?;
+        if delete {
+            self.history.removed(ident);
+            if let Some(store) = &self.metrics_store {
+                let _ = store.remove(ident);
+            }
+            self.changed();
+        }
+        drop(guard);
+        Ok(result)
     }
     pub fn metrics_data(&self) -> PathBuf {
         self.data.clone()
@@ -1537,8 +1582,12 @@ impl Engine {
         let mut guard = tokio::select! {v=tokio::time::timeout_at(deadline,slot.lock())=>v.map_err(|_|anyhow::anyhow!("timed_out waiting for backend"))?,_=cancel.cancelled()=>bail!("cancelled before backend dispatch"),_=stop_all.cancelled()=>bail!("cancelled before backend dispatch")};
         drop(backend_wait);
         if let Some(expected) = a["session"].as_str() {
-            if guard.as_ref().is_none_or(|c| c.generation != expected) {
-                bail!("stale_session: rediscover tools and observe the target again");
+            if guard.as_ref().is_none_or(|c| c.generation != expected)
+                && !cua_reconnect_safe(a, method, &self.config, name)
+            {
+                bail!(
+                    "stale_session: no action was dispatched; call mcp_tools to reconnect, then observe the target again. A new macOS permission grant is not implied."
+                );
             }
         } else if method == "tools/call" {
             bail!("stale_session: mcp.call requires session from mcp.tools");

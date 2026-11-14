@@ -1005,6 +1005,8 @@ async fn control(
         "restart_backend",
         "task_detail",
         "task_list",
+        "task_storage",
+        "task_delete",
         "prune",
         "observe",
         "self_test",

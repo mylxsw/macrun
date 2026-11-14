@@ -137,7 +137,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "mcp_call",
-            "Start a local MCP tool call. Optional wait_ms (up to 1000) waits briefly for completion. Requires session from mcp_tools. Poll task_get. Calls to one backend execute serially. CuaDriver screenshots fit the worker bounds by default; pixel actions use the latest returned screenshot for that session/target. screenshot_mode original bypasses optimization; jpeg opts into lossy compression. coordinate_task_id rejects superseded screenshot coordinates.",
+            "Start a local MCP tool call. Optional wait_ms (up to 1000) waits briefly for completion. Requires session from mcp_tools. Poll task_get. Safe CuaDriver session and observation calls can reconnect after a backend restart; use the session in the completed task's result for subsequent calls. Never automatically replay an input action with an unknown outcome. Calls to one backend execute serially. CuaDriver screenshots fit the worker bounds by default; pixel actions use the latest returned screenshot for that session/target. screenshot_mode original bypasses optimization; jpeg opts into lossy compression. coordinate_task_id rejects superseded screenshot coordinates.",
             json!({"screenshot_mode":{"type":"string","enum":["auto","png","jpeg","original"]},"coordinate_task_id":string,"server":string,"tool":string,"arguments":{"type":"object"},"session":string,"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000}}),
             &["server", "tool", "session", "request_id"],
         ),

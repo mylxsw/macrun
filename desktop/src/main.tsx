@@ -570,6 +570,42 @@ function App() {
   );
   const filtered = history.tasks;
   const sel = history.selectedTask;
+  const [taskStorage, setTaskStorage] = useState<{
+    id: string;
+    path: string;
+    bytes: number;
+    cleanable: boolean;
+    reason?: string;
+  } | null>(null);
+  const [taskStorageError, setTaskStorageError] = useState("");
+  useEffect(() => {
+    setTaskStorage(null);
+    setTaskStorageError("");
+    if (!available || page !== "tasks" || !sel?.task_id) return;
+    let cancelled = false;
+    const id = sel.task_id;
+    invoke<{
+      path: string;
+      bytes: number;
+      cleanable: boolean;
+      reason?: string;
+    }>("control", {
+      action: "task_storage",
+      args: {
+        task_id: id,
+        ...(sel.connection_id ? { connection_id: sel.connection_id } : {}),
+      },
+    })
+      .then((value) => {
+        if (!cancelled) setTaskStorage({ ...value, id });
+      })
+      .catch(() => {
+        if (!cancelled) setTaskStorageError(tr("无法读取任务存储信息"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [available, page, sel?.task_id, sel?.status, sel?.connection_id]);
   const summary =
     snapshot?.today_summary || (todaySummary(tasks) as Record<string, number>);
   const mainWindow = isTauri && !tray && !overlay && !border;
@@ -1545,6 +1581,34 @@ function App() {
                           </h3>
                         )}
                         <dl>
+                          <dt>{tr("开始时间")}</dt>
+                          <dd>{new Date(sel.started_at).toLocaleString()}</dd>
+                          <dt>{tr("结束时间")}</dt>
+                          <dd>
+                            {sel.ended_at
+                              ? new Date(sel.ended_at).toLocaleString()
+                              : tr("尚未结束")}
+                          </dd>
+                          <dt>{tr("任务数据目录")}</dt>
+                          <dd className="mono">
+                            {taskStorage?.id === sel.task_id
+                              ? taskStorage.path
+                              : taskStorageError || tr("正在读取…")}
+                          </dd>
+                          <dt>{tr("任务数据大小")}</dt>
+                          <dd>
+                            {taskStorage?.id === sel.task_id
+                              ? `${(taskStorage.bytes / 1024 / 1024).toFixed(2)} MiB`
+                              : taskStorageError || tr("正在读取…")}
+                          </dd>
+                          <dt>{tr("是否可以清理")}</dt>
+                          <dd>
+                            {taskStorage?.id === sel.task_id
+                              ? taskStorage.cleanable
+                                ? tr("可以清理")
+                                : tr("暂不可清理（任务运行中或数据仍受保护）")
+                              : taskStorageError || tr("正在读取…")}
+                          </dd>
                           <dt>{tr("项目")}</dt>
                           <dd>
                             {project.name}
@@ -1652,6 +1716,40 @@ function App() {
                               tr("暂无文本输出")}
                         </pre>
                         <div className="actions">
+                          <button
+                            disabled={
+                              !available ||
+                              taskStorage?.id !== sel.task_id ||
+                              !taskStorage.cleanable ||
+                              isPending("task_delete", sel.task_id)
+                            }
+                            onClick={async () => {
+                              const result = await act(
+                                "control",
+                                {
+                                  action: "task_delete",
+                                  args: {
+                                    task_id: sel.task_id,
+                                    ...(sel.connection_id
+                                      ? { connection_id: sel.connection_id }
+                                      : {}),
+                                  },
+                                },
+                                tr("任务数据已清理"),
+                              );
+                              if (result) {
+                                setSelected("");
+                                history.reload();
+                              }
+                            }}
+                          >
+                            {tr("清理任务数据")}
+                          </button>
+                          <small>
+                            {tr(
+                              "清理任务记录、日志和任务快照；不会删除原始工作目录。",
+                            )}
+                          </small>
                           {command && (
                             <button
                               onClick={() =>

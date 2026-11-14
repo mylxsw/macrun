@@ -788,6 +788,24 @@ async function invoke(command: string, args: Record<string, any> = {}) {
       history.unshift(task);
       update();
       return { task_id: task.task_id, status: "accepted" };
+    } else if (args.action === "task_storage") {
+      const task = history.find((task) => task.task_id === payload.task_id);
+      if (!task) throw new Error("测试任务不存在");
+      return {
+        path: `/tmp/macrun-visual-fixture/tasks/${task.task_id}`,
+        bytes: 2097152,
+        cleanable: !isActive(task),
+        reason: isActive(task) ? "active" : null,
+      };
+    } else if (args.action === "task_delete") {
+      const index = history.findIndex(
+        (task) => task.task_id === payload.task_id,
+      );
+      if (index < 0 || isActive(history[index]))
+        throw new Error("任务不能清理");
+      history.splice(index, 1);
+      update();
+      return { deleted: true };
     } else if (args.action === "task_detail") {
       const task = history.find((task) => task.task_id === args.args.task_id);
       if (!task) throw new Error("测试任务不存在");

@@ -14,6 +14,12 @@ fn driver_command(command: &str) -> bool {
         .file_name()
         .is_some_and(|v| v == "cua-driver")
 }
+fn driver_backend(b: &macrun::config::Backend, path: &Path) -> bool {
+    driver_command(&b.command)
+        && b.args.first().is_some_and(|arg| arg == "mcp")
+        && std::fs::canonicalize(macrun::config::expand(&b.command))
+            .is_ok_and(|resolved| resolved == path)
+}
 fn config(rt: &Runtime) -> Result<macrun::config::WorkerConfig> {
     let path = rt.settings.lock().unwrap().backend_config.clone();
     if path.is_empty() {
@@ -154,12 +160,7 @@ async fn inspect_candidates(
         {
             Ok(version) if !version.is_empty() => {
                 let resolved = std::fs::canonicalize(&path)?;
-                let configured = cfg.mcp.values().any(|b| {
-                    driver_command(&b.command)
-                        && b.args == ["mcp"]
-                        && std::fs::canonicalize(macrun::config::expand(&b.command))
-                            .is_ok_and(|p| p == resolved)
-                });
+                let configured = cfg.mcp.values().any(|b| driver_backend(b, &resolved));
                 return Ok(
                     json!({"state":"ready","path":resolved,"version":version,"configured":configured}),
                 );
@@ -292,11 +293,13 @@ pub async fn install_cua_driver(
 }
 fn with_driver(mut config: macrun::config::WorkerConfig, path: &str) -> Result<String> {
     // Idempotent, and never overwrite a custom backend occupying the usual name.
-    if !config
-        .mcp
-        .values()
-        .any(|b| b.command == path && b.args == ["mcp"])
-    {
+    let resolved = std::fs::canonicalize(path).ok();
+    if !config.mcp.values().any(|b| {
+        resolved
+            .as_ref()
+            .is_some_and(|path| driver_backend(b, path))
+            || (b.command == path && b.args.first().is_some_and(|arg| arg == "mcp"))
+    }) {
         let mut name = "cua".to_owned();
         let mut suffix = 2;
         while config.mcp.contains_key(&name) {
@@ -438,6 +441,25 @@ mod tests {
             .unwrap();
         assert_eq!(result["state"], "ready");
         assert_eq!(result["configured"], true);
+        let mut with_options: macrun::config::WorkerConfig = cfg.clone();
+        with_options
+            .mcp
+            .values_mut()
+            .next()
+            .unwrap()
+            .args
+            .extend(["--socket".into(), "/tmp/driver.sock".into()]);
+        let result = inspect_candidates(&with_options, vec![driver.clone()])
+            .await
+            .unwrap();
+        assert_eq!(result["configured"], true);
+        let again: macrun::config::WorkerConfig =
+            toml::from_str(&with_driver(with_options, driver.to_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(again.mcp.len(), 1);
+        assert_eq!(
+            again.mcp.values().next().unwrap().args,
+            ["mcp", "--socket", "/tmp/driver.sock"]
+        );
         std::fs::write(&driver, "#!/bin/sh\nexit 0\n").unwrap();
         assert_eq!(
             inspect_candidates(&cfg, vec![driver]).await.unwrap()["state"],

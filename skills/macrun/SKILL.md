@@ -60,7 +60,11 @@ There is no implicit synchronization before commands. Uncommitted source files a
 2. Read the discovered tool schema. Call `mcp_call` with `server`, that `session`, exact `tool`, original `arguments`, and a new UUID `request_id`. Poll `task_get` to completion.
 3. For a UI action, first obtain a current window state/screenshot and target identifiers. Use the backend's snapshot/element handles as required. The backend session is **not** a Cua window snapshot ID or Cua public session label.
 4. After an action, obtain a fresh observation and verify the requested effect. “AXPress succeeded” or “input sent” alone is not an outcome. Do not blindly reuse stale elements after a new snapshot.
-5. On a stale or invalid backend session, call `mcp_tools` again, then re-observe the UI. Preserve existing windows and user work; do not kill unrelated apps to recover a session.
+5. On a stale or invalid backend session, automatically call `mcp_tools` again and re-observe the UI before continuing. This is reconnecting the backend, not evidence that macOS permissions were revoked; do not ask the user to grant permissions unless the backend reports they are missing. Preserve existing windows and user work; do not kill unrelated apps to recover a session. Never automatically repeat an action whose outcome is unknown.
+
+When using CuaDriver, choose the application or window from the user's task and the current app/window list; do not ask the user to assign it again when the target is clear. Current CuaDriver supports an implicit session, so a separate `start_session` and persistent capture-scope assignment are normally unnecessary. Use fresh window state to select the target for each action. If the target is ambiguous or macOS itself reports missing authorization, ask for the specific missing information or permission.
+
+If a CuaDriver session has expired, Macrun can reconnect automatically for session creation and read-only observation. Read the `session` returned in the completed task's result and use it on subsequent calls. Input actions and screenshot-bound operations are not automatically replayed; rediscover and observe again when they report a stale session.
 
 Backend calls execute serially per backend; desktop tool calls from different server connections also serialize on the same physical client. Macrun forwards original results rather than translating every backend into Cua-specific methods. Completed image blocks are surfaced by `task_get` to the agent; inspect those images when visual verification matters.
 

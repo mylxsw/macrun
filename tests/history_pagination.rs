@@ -155,7 +155,7 @@ async fn snapshot_keeps_old_active_rows_and_detail_reads_only_requested_output_t
 async fn history_pagination_is_available_over_the_private_control_socket() {
     let data = tempfile::tempdir().unwrap();
     let engine = Engine::open(data.path().into(), WorkerConfig::default()).unwrap();
-    let task_id = record(data.path(), 0, model::now(), "failed");
+    let task_id = record(data.path(), 0, model::now() - 1_000, "failed");
     let path = data.path().join("tasks").join(&task_id).join("result.json");
     let mut failed: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     failed["error"] = json!({"code":"fixture_failed","message":"Expected test failure"});
@@ -190,6 +190,24 @@ async fn history_pagination_is_available_over_the_private_control_socket() {
     assert_eq!(detail["status"], "failed");
     assert_eq!(detail["error"]["code"], "fixture_failed");
     assert_eq!(detail["output"]["text"], "historical-output");
+    let storage = macrun::local::request(&socket, "task_storage", json!({"task_id":task_id}))
+        .await
+        .unwrap();
+    assert_eq!(storage["cleanable"], true);
+    assert!(storage["bytes"].as_u64().unwrap() > 0);
+    macrun::local::request(&socket, "task_delete", json!({"task_id":task_id}))
+        .await
+        .unwrap();
+    let page = macrun::local::request(&socket, "task_list", json!({"limit":50}))
+        .await
+        .unwrap();
+    assert_eq!(page["total"], 0);
+    assert!(
+        data.path()
+            .join("dedup")
+            .join(format!("{task_id}.json"))
+            .exists()
+    );
     assert!(
         macrun::local::request(&socket, "task_detail", json!({"task_id":uuid::Uuid::nil()}))
             .await

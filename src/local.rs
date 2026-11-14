@@ -464,6 +464,16 @@ async fn dispatch_one(
                 .await
         }
         "task_detail" => engine.handle("task.get", a.clone()).await,
+        "task_storage" => {
+            engine
+                .local_task_storage(crate::files::string(a, "task_id")?, false)
+                .await
+        }
+        "task_delete" => {
+            engine
+                .local_task_storage(crate::files::string(a, "task_id")?, true)
+                .await
+        }
         "pause" => {
             engine
                 .set_policy(
