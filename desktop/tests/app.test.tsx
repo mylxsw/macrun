@@ -232,7 +232,7 @@ beforeEach(() => {
       if (!task) throw new Error("task does not exist");
       return {
         path: `/tasks/${task.task_id}`,
-        bytes: 2097152,
+        bytes: 512,
         cleanable: !!task.ended_at,
       };
     }
@@ -703,7 +703,7 @@ test("task details show storage and clean a completed task", async () => {
   await waitFor(() =>
     expect(detail().getByText("/tasks/history-0000")).toBeTruthy(),
   );
-  expect(detail().getByText("2.00 MiB")).toBeTruthy();
+  expect(detail().getByText("512 B")).toBeTruthy();
   expect(detail().getByText("可以清理")).toBeTruthy();
   await user.click(detail().getByRole("button", { name: "清理任务数据" }));
   await waitFor(() =>

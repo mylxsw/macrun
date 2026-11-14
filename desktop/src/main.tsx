@@ -1598,7 +1598,11 @@ function App() {
                           <dt>{tr("任务数据大小")}</dt>
                           <dd>
                             {taskStorage?.id === sel.task_id
-                              ? `${(taskStorage.bytes / 1024 / 1024).toFixed(2)} MiB`
+                              ? taskStorage.bytes < 1024
+                                ? `${taskStorage.bytes} B`
+                                : taskStorage.bytes < 1024 * 1024
+                                  ? `${(taskStorage.bytes / 1024).toFixed(2)} KiB`
+                                  : `${(taskStorage.bytes / 1024 / 1024).toFixed(2)} MiB`
                               : taskStorageError || tr("正在读取…")}
                           </dd>
                           <dt>{tr("是否可以清理")}</dt>
