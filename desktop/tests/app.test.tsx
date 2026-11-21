@@ -835,6 +835,61 @@ test("pending actions only disable their own controls and keep emergency stop av
   expect(pause.hasAttribute("disabled")).toBe(false);
 });
 
+test("a fresh launch reads the configured driver's grants without desktop calls or user setup", async () => {
+  app.snapshot.policy.desktop_enabled = true;
+  app.snapshot.tasks = [];
+  app.snapshot.total_tasks = app.snapshot.active_count = 0;
+  const command = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
+  app.snapshot.backends.push({
+    name: "computer",
+    state: "not_started",
+    command,
+    session: "",
+    tool_count: 0,
+  });
+  const original = bridge.invoke.getMockImplementation()!;
+  let screenRecording: boolean | null = true;
+  bridge.invoke.mockImplementation((cmd, args) =>
+    cmd === "cua_status"
+      ? Promise.resolve({
+          state: "ready",
+          configured: true,
+          permission_backends: { computer: command },
+          permissions: {
+            accessibility: true,
+            screen_recording: screenRecording,
+          },
+        })
+      : original(cmd, args),
+  );
+  const user = userEvent.setup();
+  await mount();
+  await screen.findByText("一切就绪");
+  await user.click(navigation().getByRole("button", { name: "本机" }));
+  await screen.findByText("桌面：可以使用");
+  expect(screen.queryByRole("button", { name: "实拍核对" })).toBeNull();
+  screenRecording = null;
+  fireEvent.focus(window);
+  await screen.findByText("桌面：状态待确认");
+  expect(screen.queryByText(/桌面：还差/)).toBeNull();
+  screenRecording = false;
+  fireEvent.focus(window);
+  await screen.findByText("桌面：还差 1 步");
+  expect(
+    screen.getAllByText("请为 CuaDriver 开启屏幕录制权限").length,
+  ).toBeGreaterThan(0);
+  screenRecording = true;
+  fireEvent.focus(window);
+  await screen.findByText("桌面：可以使用");
+  expect(
+    bridge.invoke.mock.calls.some(
+      ([cmd, args]) =>
+        ["configure_cua_driver", "grant_cua_permissions"].includes(cmd) ||
+        args?.action === "observe",
+    ),
+  ).toBe(false);
+});
+
 test("waiting for CuaDriver permissions keeps other app actions available", async () => {
   const original = bridge.invoke.getMockImplementation()!;
   let finish!: () => void;

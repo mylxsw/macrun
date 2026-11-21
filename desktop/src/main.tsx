@@ -1,3 +1,4 @@
+import { useCuaStatus } from "./CuaSetup";
 import { tr, getLocale, setLanguage, refreshSystemLanguage } from "./i18n.mjs";
 import { useLanguage } from "./useLanguage";
 import {
@@ -615,11 +616,22 @@ function App() {
     undefined,
     mainWindow && !!app && (page === "desktop" || page === "live"),
   );
+  const cua = useCuaStatus(
+    undefined,
+    mainWindow &&
+      !!app &&
+      (page === "desktop" ||
+        (page === "live" &&
+          !!snapshot?.backends.some(
+            (b) => b.command.split("/").pop() === "cua-driver",
+          ))),
+  );
   const status = readHealth(
     snapshot,
     app,
     available,
     permissionState.permissions,
+    cua.status,
   );
   const servers = serverViews(
     app?.settings,
@@ -1952,6 +1964,7 @@ function App() {
                     act={act}
                     app={app}
                     mode="advanced"
+                    cua={cua}
                   />
                   <BackendPanel
                     snapshot={snapshot}

@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Act } from "./Features";
 
-type DriverStatus = {
+export type DriverStatus = {
   state: "missing" | "ready" | "unsupported" | "broken" | "busy";
   configured?: boolean;
+  permission_backends?: Record<string, string>;
   version?: string;
   detail?: string;
   permissions?: {
@@ -16,15 +17,10 @@ type DriverStatus = {
 };
 const readNative: Act = (command, args) => invoke(command, args);
 
-export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
+export function useCuaStatus(read: Act = readNative, enabled = true) {
   const [status, setStatus] = useState<DriverStatus | null>(null);
-  const [pending, setPending] = useState("");
-  const [grantPending, setGrantPending] = useState(false);
-  const [error, setError] = useState("");
   const [detectionError, setDetectionError] = useState("");
-  const [notice, setNotice] = useState("");
   const locked = useRef(false);
-  const granting = useRef(false);
   const mounted = useRef(false);
   const checking = useRef<Promise<void> | null>(null);
   const readRef = useRef(read);
@@ -55,6 +51,7 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
     return checking.current;
   }, []);
   useEffect(() => {
+    if (!enabled) return;
     mounted.current = true;
     const refresh = async () => {
       if (locked.current || document.visibilityState === "hidden") return;
@@ -74,7 +71,33 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
       document.removeEventListener("visibilitychange", refresh);
       window.clearInterval(timer);
     };
-  }, [detect]);
+  }, [detect, enabled]);
+  return { status, detectionError, detect, locked };
+}
+
+export function CuaSetup({
+  act,
+  read = readNative,
+  shared,
+}: {
+  act: Act;
+  read?: Act;
+  shared?: ReturnType<typeof useCuaStatus>;
+}) {
+  const own = useCuaStatus(read, !shared);
+  const { status, detectionError, detect, locked } = shared || own;
+  const [pending, setPending] = useState("");
+  const [grantPending, setGrantPending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const granting = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const mutate = async (command: string, args?: Record<string, unknown>) => {
     const result = await act(command, args);
     if (result === undefined || result === false)
@@ -99,7 +122,7 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
   const configure = async () => {
     // Re-read immediately before stopping: never trust a stale UI snapshot or
     // interrupt work that started after the button was rendered.
-    const state = await readRef.current("app_state");
+    const state = await read("app_state");
     if (typeof state?.worker_running !== "boolean" || state.worker_starting)
       throw new Error(tr("执行器状态尚未就绪，请稍后重试。"));
     if (state.worker_running) await mutate("stop_worker", { onlyIfIdle: true });
@@ -109,7 +132,7 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
       if (state.worker_running) await mutate("start_worker");
     }
     await detect();
-    setNotice(tr("Cua Driver 已接入。授权后请在下方通过后端实拍验证截图。"));
+    setNotice(tr("Cua Driver 已接入。"));
   };
   const grant = async () => {
     if (locked.current || granting.current) return;
@@ -119,8 +142,7 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
     setNotice("");
     try {
       await mutate("grant_cua_permissions");
-      if (mounted.current)
-        setNotice(tr("CuaDriver 授权流程已结束。请通过 Macrun 后端实拍验证。"));
+      if (mounted.current) setNotice(tr("CuaDriver 授权流程已结束。"));
     } catch (e) {
       if (mounted.current) setError(String(e));
     } finally {
@@ -193,18 +215,26 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
                   {tr("接入 Macrun（空闲时重连）")}
                 </button>
               )}
-              <button disabled={!!pending || grantPending} onClick={grant}>
-                {tr("授权 CuaDriver 截图与控制")}
-              </button>
+              {(!authorized || grantPending) && (
+                <button disabled={!!pending || grantPending} onClick={grant}>
+                  {tr("授权 CuaDriver 截图与控制")}
+                </button>
+              )}
             </>
           )}
         </div>
         <p className="muted">
           {authorized
-            ? tr("CuaDriver 系统权限已授权，正常重连无需再次授权。若操作仍失败，请检查后端状态。")
-            : tr(
-                "系统设置中请启用 CuaDriver 的「辅助功能」和「屏幕与系统音频录制」。按系统提示重新打开 CuaDriver 后，返回此页会自动重新检测，也可点击「重新检测」。Macrun 自身的权限不代表后端已授权。",
-              )}
+            ? tr(
+                "CuaDriver 系统权限已授权，正常重连无需再次授权。若操作仍失败，请检查后端状态。",
+              )
+            : status?.configured &&
+                status.permissions?.accessibility !== false &&
+                status.permissions?.screen_recording !== false
+              ? tr("暂时无法读取权限，Macrun 会自动重新检测。")
+              : tr(
+                  "系统设置中请启用 CuaDriver 的「辅助功能」和「屏幕与系统音频录制」。按系统提示重新打开 CuaDriver 后，返回此页会自动重新检测，也可点击「重新检测」。Macrun 自身的权限不代表后端已授权。",
+                )}
         </p>
         {status?.state === "ready" && (
           <p role="status">
@@ -219,7 +249,7 @@ export function CuaSetup({ act, read = readNative }: { act: Act; read?: Act }) {
         {grantPending && (
           <p role="status">
             {authorized
-              ? tr("CuaDriver 两项权限已授权。可继续通过 Macrun 后端实拍验证。")
+              ? tr("CuaDriver 两项权限已授权。")
               : tr(
                   "等待 CuaDriver 授权与重启；此页会自动检测，可继续其他操作。",
                 )}

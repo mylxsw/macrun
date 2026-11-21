@@ -184,7 +184,7 @@ export function ThisMac({
     check.key === "backend" ? (
       <button onClick={openTechnical}>{tr("配置后端")}</button>
     ) : check.key === "verified" ? (
-      <button onClick={openTechnical}>{tr("实拍核对")}</button>
+      <button onClick={openTechnical}>{check.action}</button>
     ) : null;
   const commands = health.commands
     ? {
@@ -236,18 +236,27 @@ export function ThisMac({
             };
   const desktop = !health.desktopEnabled
     ? {
+        tone: "",
         title: tr("桌面：已关闭"),
         detail: tr("命令和文件不受影响；Agent 的桌面请求会被拒绝。"),
       }
     : missing.length
       ? {
+          tone: "warn",
           title: tr("桌面：还差 {0} 步", missing.length),
           detail: missing[0].detail,
         }
-      : {
-          title: tr("桌面：可以使用"),
-          detail: tr("后端已实测可用，图形会话正常。"),
-        };
+      : health.desktopUnknown
+        ? {
+            tone: "",
+            title: tr("桌面：状态待确认"),
+            detail: health.desktop.find((c) => c.ok === null)?.detail,
+          }
+        : {
+            tone: "ok",
+            title: tr("桌面：可以使用"),
+            detail: health.desktop.find((c) => c.key === "verified")?.detail,
+          };
   return (
     <div className="v4-mac">
       <div className="v4-ready">
@@ -261,14 +270,8 @@ export function ThisMac({
           </div>
           {commands.action}
         </div>
-        <div
-          className={
-            !health.desktopEnabled ? "" : missing.length ? "warn" : "ok"
-          }
-        >
-          <span
-            className={`v4-ico ${!health.desktopEnabled ? "" : missing.length ? "warn" : "ok"}`}
-          >
+        <div className={desktop.tone}>
+          <span className={`v4-ico ${desktop.tone}`}>
             <MousePointer2 size={15} />
           </span>
           <div className="grow">
@@ -355,7 +358,7 @@ export function ThisMac({
           <div className="v4-group" aria-label={tr("桌面控制检查")}>
             {health.desktop.map((c) => (
               <div className="v4-check" key={c.key}>
-                <Mark ok={c.key === "enabled" ? c.ok : c.ok} />
+                <Mark ok={c.ok} />
                 <div className="grow">
                   <b>{c.title}</b>
                   <p>{c.detail}</p>

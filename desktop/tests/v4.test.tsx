@@ -179,9 +179,13 @@ test("desktop checks only claim what Macrun can observe", () => {
   expect(unverified.find((c) => c.key === "backend")?.detail).toBe(
     "computer · 首次调用时启动",
   );
-  expect(unverified.find((c) => c.key === "verified")?.ok).toBe(false);
+  expect(unverified.find((c) => c.key === "verified")?.ok).toBeNull();
   expect(unverified.find((c) => c.key === "session")?.ok).toBe(false);
-  const failedCall = task("bad", { kind: "mcp.call", status: "unknown" });
+  const failedCall = task("bad", {
+    kind: "mcp.call",
+    arguments: { server: "computer" },
+    status: "unknown",
+  });
   expect(
     desktopChecks(
       makeSnapshot([failedCall], { backends: [backend] }),
@@ -189,9 +193,12 @@ test("desktop checks only claim what Macrun can observe", () => {
     ).find((c) => c.key === "verified")?.detail,
   ).toMatch(/没有成功/);
   const ok = desktopChecks(
-    makeSnapshot([task("call", { kind: "mcp.call" })], {
-      backends: [{ ...backend, state: "ready", tool_count: 34 }],
-    }),
+    makeSnapshot(
+      [task("call", { kind: "mcp.call", arguments: { server: "computer" } })],
+      {
+        backends: [{ ...backend, state: "ready", tool_count: 34 }],
+      },
+    ),
     { graphical_session: true },
   );
   expect(ok.every((c) => c.ok)).toBe(true);
@@ -205,7 +212,9 @@ test("desktop checks only claim what Macrun can observe", () => {
     desktopMissing: 1,
   });
   expect(healthLine(h)).toBe("命令可用 · 桌面需要 1 步");
-  expect(healthLine({ ...h, desktopMissing: 0 })).toBe("一切就绪");
+  expect(healthLine({ ...h, desktopMissing: 0, desktopUnknown: false })).toBe(
+    "一切就绪",
+  );
   expect(healthLine({ ...h, desktopEnabled: false })).toBe(
     "命令可用 · 桌面已关闭",
   );
@@ -416,11 +425,20 @@ test("presets apply command and desktop rules together and recognise custom", as
 });
 
 function renderMac(over: Partial<React.ComponentProps<typeof ThisMac>> = {}) {
-  const snapshot = makeSnapshot([], {
-    backends: [
-      { name: "computer", state: "ready", command: "cua", tool_count: 3 },
+  const snapshot = makeSnapshot(
+    [
+      task("bad", {
+        kind: "mcp.call",
+        status: "failed",
+        arguments: { server: "computer" },
+      }),
     ],
-  });
+    {
+      backends: [
+        { name: "computer", state: "ready", command: "cua", tool_count: 3 },
+      ],
+    },
+  );
   const props = {
     snapshot,
     app,

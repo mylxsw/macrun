@@ -224,13 +224,11 @@ test("permission recovery remains translated when language changes during a gran
   await screen.findByText(
     "CuaDriver permissions: Accessibility: Not granted; Screen Recording: Unknown.",
   );
-  await userEvent
-    .setup()
-    .click(
-      screen.getByRole("button", {
-        name: "Grant CuaDriver screenshot and control permissions",
-      }),
-    );
+  await userEvent.setup().click(
+    screen.getByRole("button", {
+      name: "Grant CuaDriver screenshot and control permissions",
+    }),
+  );
   expect(
     screen.getByText(/Waiting for CuaDriver permissions and restart/),
   ).toBeTruthy();
@@ -260,12 +258,10 @@ test("permission recovery remains translated when language changes during a gran
   await screen.findByText(/The CuaDriver permission flow has finished/);
   expect(screen.queryByText(/Waiting for CuaDriver/)).toBeNull();
   expect(
-    screen
-      .getByRole("button", {
-        name: "Grant CuaDriver screenshot and control permissions",
-      })
-      .hasAttribute("disabled"),
-  ).toBe(false);
+    screen.queryByRole("button", {
+      name: "Grant CuaDriver screenshot and control permissions",
+    }),
+  ).toBeNull();
 });
 
 test("visible polling refreshes after a restart without overlapping reads and cleans up", async () => {

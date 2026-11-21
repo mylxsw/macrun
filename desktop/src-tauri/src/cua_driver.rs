@@ -161,8 +161,19 @@ async fn inspect_candidates(
             Ok(version) if !version.is_empty() => {
                 let resolved = std::fs::canonicalize(&path)?;
                 let configured = cfg.mcp.values().any(|b| driver_backend(b, &resolved));
+                // Only the default MCP transport uses the daemon whose OS grants
+                // we query. A direct or custom socket backend can have another identity.
+                let permission_backends: std::collections::BTreeMap<_, _> = cfg
+                    .mcp
+                    .iter()
+                    .filter(|(_, b)| {
+                        b.args == ["mcp"] && b.env.is_empty() && driver_backend(b, &resolved)
+                    })
+                    .map(|(name, b)| (name, &b.command))
+                    .collect();
                 return Ok(
-                    json!({"state":"ready","path":resolved,"version":version,"configured":configured}),
+                    json!({"state":"ready","path":resolved,"version":version,"configured":configured,
+                           "permission_backends":permission_backends}),
                 );
             }
             Ok(_) => failure = Some(tr("Cua Driver 没有返回版本信息").to_owned()),
@@ -441,6 +452,10 @@ mod tests {
             .unwrap();
         assert_eq!(result["state"], "ready");
         assert_eq!(result["configured"], true);
+        assert_eq!(
+            result["permission_backends"]["cua"],
+            driver.to_str().unwrap()
+        );
         let mut with_options: macrun::config::WorkerConfig = cfg.clone();
         with_options
             .mcp
@@ -453,6 +468,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["configured"], true);
+        assert_eq!(result["permission_backends"], json!({}));
         let again: macrun::config::WorkerConfig =
             toml::from_str(&with_driver(with_options, driver.to_str().unwrap()).unwrap()).unwrap();
         assert_eq!(again.mcp.len(), 1);

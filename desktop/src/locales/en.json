@@ -982,5 +982,20 @@
   "任务数据已清理": "Task data cleaned up",
   "清理任务数据": "Clean up task data",
   "清理任务记录、日志和任务快照；不会删除原始工作目录。": "Removes the task record, logs, and task snapshot. The original working directory is kept.",
-  "CuaDriver 系统权限已授权，正常重连无需再次授权。若操作仍失败，请检查后端状态。": "CuaDriver has system permissions. Reconnecting normally does not require granting them again. Check the backend status if an operation still fails."
+  "CuaDriver 系统权限已授权，正常重连无需再次授权。若操作仍失败，请检查后端状态。": "CuaDriver has system permissions. Reconnecting normally does not require granting them again. Check the backend status if an operation still fails.",
+  "Cua Driver 已接入。": "Cua Driver is connected.",
+  "CuaDriver 授权流程已结束。": "The CuaDriver permission flow has finished.",
+  "CuaDriver 两项权限已授权。": "Both CuaDriver permissions are granted.",
+  "CuaDriver 系统权限": "CuaDriver permissions",
+  "请为 CuaDriver 开启{0}权限": "Grant CuaDriver access to {0}.",
+  "辅助功能": "Accessibility",
+  "屏幕录制": "Screen Recording",
+  "、": " and ",
+  "辅助功能和屏幕录制均已授权": "Accessibility and Screen Recording are both granted.",
+  "暂时无法读取权限，Macrun 会自动重新检测。": "Permissions are currently unavailable. Macrun will check again automatically.",
+  "查看授权": "View permissions",
+  "最近桌面调用": "Latest desktop call",
+  "暂无调用记录，首次使用时可查看结果。": "No calls recorded yet. Results appear after the first call.",
+  "桌面：状态待确认": "Desktop: status unknown",
+  "命令可用 · 桌面状态待确认": "Commands available · Desktop status unknown"
 }

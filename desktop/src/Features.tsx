@@ -29,7 +29,7 @@ import {
   projectOf,
 } from "./model.mjs";
 import "./features.css";
-import { CuaSetup } from "./CuaSetup";
+import { CuaSetup, type useCuaStatus } from "./CuaSetup";
 import appIcon from "./assets/macrun-icon.png";
 export type Act = (
   c: string,
@@ -1230,6 +1230,7 @@ export function BackendPanel({
   active = true,
   read = readNative,
   shared,
+  cua,
 }: {
   snapshot: Snapshot | null;
   act: Act;
@@ -1239,6 +1240,7 @@ export function BackendPanel({
   read?: Act;
   /** Permission state owned by a parent that also shows it elsewhere. */
   shared?: PermissionChecks;
+  cua?: ReturnType<typeof useCuaStatus>;
 }) {
   const own = usePermissionChecks(
     read,
@@ -1562,7 +1564,7 @@ export function BackendPanel({
       )}
       {mode !== "permissions" && (
         <div className="backend-advanced">
-          <CuaSetup act={act} read={read} />
+          <CuaSetup act={act} read={read} shared={cua} />
           <details className="feature-disclosure card">
             <summary>{tr("后端实拍与状态核对")}</summary>
             <div className="feature-disclosure-body">

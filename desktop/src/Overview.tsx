@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Folder,
+  CircleHelp,
   LoaderCircle,
   MousePointer2,
   RefreshCw,
@@ -343,7 +344,12 @@ export function Overview({
           {subtitle && <p>{subtitle}</p>}
         </div>
         <button className="v4-health" onClick={() => onPage("desktop")}>
-          {health.commands && !health.desktopMissing ? (
+          {health.commands &&
+          health.desktopEnabled &&
+          !health.desktopMissing &&
+          health.desktopUnknown ? (
+            <CircleHelp size={13} />
+          ) : health.commands && !health.desktopMissing ? (
             <Check size={13} className="v4-ok" />
           ) : (
             <TriangleAlert size={13} className="v4-warn-icon" />
