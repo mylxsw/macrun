@@ -38,6 +38,26 @@ pub fn signal_group(pid: u32, sig: i32) {
         libc::kill(-(pid as i32), sig);
     }
 }
+
+#[cfg(target_os = "macos")]
+fn macos_system_scratch() -> Option<&'static Path> {
+    static SCRATCH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    SCRATCH
+        .get_or_init(|| {
+            let output = std::process::Command::new("/usr/bin/getconf")
+                .arg("DARWIN_USER_TEMP_DIR")
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let path =
+                std::fs::canonicalize(std::str::from_utf8(&output.stdout).ok()?.trim_end()).ok()?;
+            (path.starts_with("/private/var/folders") && path.ends_with("T")).then_some(path)
+        })
+        .as_deref()
+}
+
 pub(crate) fn shell_command(
     command: &str,
     allowed_roots: Option<&[PathBuf]>,
@@ -49,6 +69,15 @@ pub(crate) fn shell_command(
             "(version 1) (allow default) (deny file-write*) (allow file-write* (literal \"/dev/null\"))",
         );
         let mut args = Vec::new();
+        // macOS frameworks use this directory for atomic file replacement,
+        // even when the command's TMPDIR points to its workspace.
+        if let Some(path) = macos_system_scratch() {
+            profile.push_str(" (allow file-write* (subpath (param \"MACRUN_SYSTEM_SCRATCH\")))");
+            args.extend([
+                "-D".into(),
+                format!("MACRUN_SYSTEM_SCRATCH={}", path.display()),
+            ]);
+        }
         for (index, root) in roots.iter().enumerate() {
             use std::fmt::Write;
             let key = format!("MACRUN_ROOT_{index}");

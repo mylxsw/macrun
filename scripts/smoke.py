@@ -4,7 +4,7 @@ import base64,json,os,pathlib,socket,subprocess,sys,tempfile,time,uuid
 import sqlite3,struct
 binary=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
 fixture=pathlib.Path('tests/fixtures/mcp.py').resolve()
-root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-generic-'))
+root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-generic-',dir='/tmp')).resolve()
 source=root/'source';source.mkdir();allowed=root.resolve()/'allowed work';mirror=allowed/'mirror';server=root/'server';worker=root/'worker'
 sock=str(root/'cli.sock')
 control_sock=str(root/'control.sock')

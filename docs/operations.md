@@ -155,11 +155,20 @@ the work directory. Relative paths start there, and absolute paths are accepted
 inside that directory. The work directory is also reported by `macrun status`.
 
 The worker rejects out-of-directory sync, file operations, and command start
-requests with `path_denied`. On macOS, direct writes from the command and its
-child processes are confined to the work directory. `TMPDIR` defaults to the
+requests with `path_denied`. On macOS, commands can write to the work directory
+and the account's macOS-managed temporary folder. `TMPDIR` defaults to the
 command's working directory. Point writable caches and build outputs into the
 work directory. Private snapshots run under `.macrun/snapshots/` within it and
 follow task retention.
+
+Swift Package Manager uses its own sandbox by default. When running it through
+Macrun on macOS, pass `--disable-sandbox` so the build uses Macrun's existing
+write restrictions, and store its writable caches and state in the project.
+
+```sh
+swift build --disable-sandbox --cache-path .build/macrun-cache \
+  --config-path .build/macrun-config --security-path .build/macrun-security
+```
 
 ## Command descendants and stalled tests
 
