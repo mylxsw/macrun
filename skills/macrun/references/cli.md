@@ -18,7 +18,7 @@ For a server with multiple clients, choose a stable ID from `macrun status` (`wo
 The source directory contains `macrun.toml`:
 
 ```toml
-remote_root = "/path/on/worker/project"
+remote_root = "project"
 exclude = ["node_modules", "dist", ".env", ".env.*"]
 sync_timeout_seconds = 120
 ```
@@ -35,14 +35,14 @@ Stop it with Ctrl-C when appropriate. Do not launch duplicate watchers for the s
 
 ```bash
 # Generate a UUID, record it, then substitute it below.
-macrun exec --request-id UUID --cwd /path/on/worker/project --timeout 3600 'pwd; uname -m'
+macrun exec --request-id UUID --cwd project --timeout 3600 'pwd; uname -m'
 macrun task UUID
 macrun task UUID --offset 65536
 macrun cancel UUID
 
-macrun call file.read --args '{"path":"/path/on/worker/report.txt","offset":0,"length":65536,"text":true}'
-macrun upload ./local-input.zip /path/on/worker/input.zip
-macrun download /path/on/worker/report.txt ./local-report.txt
+macrun call file.read --args '{"path":"/Users/YOU/macrun-work/project/report.txt","offset":0,"length":65536,"text":true}'
+macrun upload ./local-input.zip /Users/YOU/macrun-work/project/input.zip
+macrun download /Users/YOU/macrun-work/project/report.txt ./local-report.txt
 
 macrun call mcp.servers
 macrun call mcp.tools --args '{"server":"BACKEND_NAME"}'

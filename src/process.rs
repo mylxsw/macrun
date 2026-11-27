@@ -38,6 +38,34 @@ pub fn signal_group(pid: u32, sig: i32) {
         libc::kill(-(pid as i32), sig);
     }
 }
+pub(crate) fn shell_command(
+    command: &str,
+    allowed_roots: Option<&[PathBuf]>,
+) -> Outcome<(&'static str, Vec<String>)> {
+    let shell_args = vec!["-c".into(), command.into()];
+    #[cfg(target_os = "macos")]
+    if let Some(roots) = allowed_roots {
+        let mut profile = String::from(
+            "(version 1) (allow default) (deny file-write*) (allow file-write* (literal \"/dev/null\"))",
+        );
+        let mut args = Vec::new();
+        for (index, root) in roots.iter().enumerate() {
+            use std::fmt::Write;
+            let key = format!("MACRUN_ROOT_{index}");
+            let root = root.to_str().ok_or_else(|| {
+                Fault::new("path_denied", "allowed directory must be a UTF-8 path")
+            })?;
+            write!(profile, " (allow file-write* (subpath (param \"{key}\")))").unwrap();
+            args.extend(["-D".into(), format!("{key}={root}")]);
+        }
+        args.extend(["-p".into(), profile, "/bin/sh".into()]);
+        args.extend(shell_args);
+        return Ok(("/usr/bin/sandbox-exec", args));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = allowed_roots;
+    Ok(("/bin/sh", shell_args))
+}
 // Execution parameters stay explicit at the two call sites.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(

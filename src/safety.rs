@@ -61,6 +61,27 @@ impl Default for Safety {
     }
 }
 impl Safety {
+    /// Resolve worker-side command and synchronization paths against the first
+    /// configured directory when the caller does not supply an absolute path.
+    pub(crate) fn work_path(&self, path: Option<&str>) -> Result<PathBuf> {
+        let path = path
+            .filter(|path| !path.is_empty())
+            .map(crate::config::expand);
+        if !self.restrict_paths {
+            return path
+                .ok_or_else(|| anyhow::anyhow!("cwd is required when directory limits are off"));
+        }
+        let default = self.roots.first().ok_or_else(|| {
+            crate::model::Fault::new("path_denied", "add an allowed directory in Macrun Desktop")
+        })?;
+        let resolved = match path {
+            Some(path) if path.is_absolute() => path,
+            Some(path) => default.join(path),
+            None => default.clone(),
+        };
+        self.check(&resolved)?;
+        Ok(resolved)
+    }
     pub fn validate(&mut self) -> Result<()> {
         ensure!(
             !self.restrict_paths || !self.roots.is_empty(),
@@ -99,15 +120,15 @@ impl Safety {
         if !self.restrict_paths {
             return Ok(());
         }
-        ensure!(
-            !self.roots.is_empty(),
-            "path_denied: path restrictions enabled with no allowed directories; add an allowed directory or disable path restrictions in Macrun Desktop settings"
-        );
-        ensure!(path.is_absolute(), "path_denied: absolute path required");
+        let denied = |message: &str| crate::model::Fault::new("path_denied", message);
+        if self.roots.is_empty() {
+            return Err(denied("path restrictions enabled with no allowed directories; add an allowed directory or disable path restrictions in Macrun Desktop settings").into());
+        }
+        ensure!(path.is_absolute(), denied("absolute path required"));
         // Reject parent components even when the path does not exist yet.
         ensure!(
             !path.components().any(|c| matches!(c, Component::ParentDir)),
-            "path_denied: parent traversal"
+            denied("parent traversal")
         );
         let mut ancestor = path;
         let mut suffix = Vec::new();
@@ -121,14 +142,21 @@ impl Safety {
                 .parent()
                 .ok_or_else(|| anyhow::anyhow!("invalid path"))?;
         }
-        let mut resolved = std::fs::canonicalize(ancestor)?;
+        let mut resolved = std::fs::canonicalize(ancestor)
+            .map_err(|error| denied(&format!("cannot resolve path: {error}")))?;
         for part in suffix.into_iter().rev() {
             resolved.push(part);
         }
-        ensure!(
-            self.roots.iter().any(|root| resolved.starts_with(root)),
-            "path_denied: outside allowed directories"
-        );
+        if !self.roots.iter().any(|root| resolved.starts_with(root)) {
+            let message = match self.roots.as_slice() {
+                [root] => format!(
+                    "outside allowed directories; use a path under {}",
+                    root.display()
+                ),
+                _ => "outside allowed directories; use a path inside an allowed directory".into(),
+            };
+            return Err(denied(&message).into());
+        }
         Ok(())
     }
     pub fn approval_required(&self, command: &str) -> bool {

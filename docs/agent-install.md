@@ -101,7 +101,7 @@ On the server, in a separate shell:
 export PATH="$HOME/.local/bin:$PATH"
 export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
 macrun status
-macrun exec --cwd /tmp 'hostname; uname -m; echo macrun-install-ok'
+macrun exec 'hostname; uname -m; echo macrun-install-ok'
 macrun task TASK_UUID
 ```
 
@@ -178,7 +178,7 @@ Skip this step if no source project/destination is selected, and state that clea
 Server-side project `macrun.toml`:
 
 ```toml
-remote_root = "/absolute/worker/path/to/project"
+remote_root = "project"
 exclude = ["node_modules", "dist", ".env", ".env.*"]
 sync_timeout_seconds = 120
 ```

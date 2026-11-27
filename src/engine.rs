@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 type Slot = Arc<Mutex<Option<Client>>>;
 pub struct Engine {
     data: PathBuf,
+    work_directory: Option<PathBuf>,
     history: crate::history::TaskHistory,
     metrics_store: Option<crate::metrics::Store>,
     config: WorkerConfig,
@@ -116,6 +117,14 @@ fn cua_reconnect_safe(a: &Value, method: &str, config: &WorkerConfig, name: &str
 }
 impl Engine {
     pub fn open(data: PathBuf, config: WorkerConfig) -> Result<Arc<Self>> {
+        Self::open_with_work_directory(data, config, None)
+    }
+
+    pub(crate) fn open_with_work_directory(
+        data: PathBuf,
+        config: WorkerConfig,
+        work_directory: Option<PathBuf>,
+    ) -> Result<Arc<Self>> {
         config.screenshots.validate()?;
         anyhow::ensure!(
             config
@@ -193,11 +202,15 @@ impl Engine {
         } else {
             Policy::default()
         };
-        let safety = if data.join("safety.json").exists() {
+        let mut safety = if data.join("safety.json").exists() {
             serde_json::from_slice(&std::fs::read(data.join("safety.json"))?)?
         } else {
             crate::safety::Safety::default()
         };
+        if let Some(root) = &work_directory {
+            safety.restrict_paths = true;
+            safety.roots = vec![root.clone()];
+        }
         let (changes, _) = watch::channel(0);
         Ok(Arc::new(Self {
             history: crate::history::TaskHistory::new(data.clone()),
@@ -207,6 +220,7 @@ impl Engine {
                 })
                 .ok(),
             data,
+            work_directory,
             config,
             submissions: Arc::new(Mutex::new(())),
             tasks: Mutex::new(BTreeMap::new()),
@@ -222,6 +236,9 @@ impl Engine {
             storage: Mutex::new(None),
             last_auto_prune: std::sync::Mutex::new(None),
         }))
+    }
+    pub(crate) fn work_directory(&self) -> Option<&std::path::Path> {
+        self.work_directory.as_deref()
     }
     fn fingerprint(&self, a: &Value) -> Result<String> {
         Ok(
@@ -301,6 +318,10 @@ impl Engine {
     }
     pub async fn set_safety(&self, mut safety: crate::safety::Safety) -> Result<Value> {
         let _guard = self.submissions.lock().await;
+        if let Some(root) = &self.work_directory {
+            safety.restrict_paths = true;
+            safety.roots = vec![root.clone()];
+        }
         safety.validate()?;
         wire::persist(&self.data.join("safety.json"), &safety).await?;
         let mut current = self.safety.lock().await;
@@ -398,6 +419,18 @@ impl Engine {
             safety.check(&expand(string(args, field)?))?;
         }
         Ok(())
+    }
+    pub(crate) async fn sync_root(&self, path: &str) -> Result<PathBuf> {
+        let safety = self.safety.lock().await;
+        let root = safety.work_path(Some(path))?;
+        anyhow::ensure!(
+            root.is_absolute(),
+            Fault::new(
+                "path_denied",
+                "relative sync destinations require a configured working directory"
+            )
+        );
+        Ok(root)
     }
     pub async fn restart_backend(&self, name: &str) -> Result<Value> {
         let slot = self
@@ -759,7 +792,7 @@ impl Engine {
             backends.push(json!({"name":name,"state":state,"session":session,"command":self.config.mcp[name].command,"tool_count":tool_count,"tiers":tiers}));
         }
         Ok(
-            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"storage":self.storage.lock().await.clone(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"allow_rules":self.allow_rules().await,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
+            json!({"today_summary":summary,"task_counts":task_counts,"workspaces":workspaces.values().collect::<Vec<_>>(),"work_directory":self.work_directory(),"storage":self.storage.lock().await.clone(),"safety":self.safety.lock().await.clone(),"policy":self.policy().await,"tasks":tasks,"total_tasks":total,"active_count":self.active_count().await,"backends":backends,"allow_rules":self.allow_rules().await,"version":env!("CARGO_PKG_VERSION"),"protocol":crate::model::PROTOCOL}),
         )
     }
     pub async fn local_task_list(&self, args: Value) -> Result<Value> {
@@ -1038,7 +1071,11 @@ impl Engine {
             .remove("request_id");
         if kind == "exec.start" {
             string(&a, "command")?;
-            string(&a, "cwd")?;
+            for field in ["cwd", "workspace_root"] {
+                if !a[field].is_null() {
+                    string(&a, field)?;
+                }
+            }
             if let Some(outputs) = a.get("outputs") {
                 let outputs: Vec<String> = serde_json::from_value(outputs.clone())?;
                 anyhow::ensure!(
@@ -1099,6 +1136,7 @@ impl Engine {
             bail!("timeout_seconds must be positive");
         }
         let _guard = self.submissions.lock().await;
+        let request_fingerprint = self.fingerprint(&a)?;
         let path = dir.join("result.json");
         let tombstone = self.data.join("dedup").join(format!("{task_id}.json"));
         if path.exists() || tombstone.exists() {
@@ -1107,7 +1145,7 @@ impl Engine {
             } else {
                 &tombstone
             })?)?;
-            if v["kind"] != kind || v["request_fingerprint"] != json!(self.fingerprint(&a)?) {
+            if v["kind"] != kind || v["request_fingerprint"] != request_fingerprint {
                 bail!("request_id already belongs to a different operation");
             }
             return Ok(json!({"task_id":task_id,"status":v["status"],"duplicate":true}));
@@ -1115,6 +1153,21 @@ impl Engine {
         self.check_admission(kind).await?;
         if self.tasks.lock().await.len() >= 128 {
             return Err(crate::model::Fault::new("busy", "task capacity reached").into());
+        }
+        if kind == "exec.start" {
+            let safety = self.safety.lock().await;
+            let workspace = a["workspace_root"]
+                .as_str()
+                .map(|path| safety.work_path(Some(path)))
+                .transpose()?;
+            let cwd = match (a["cwd"].as_str(), &workspace) {
+                (None, Some(root)) => root.clone(),
+                (path, _) => safety.work_path(path)?,
+            };
+            a["cwd"] = json!(cwd);
+            if let Some(root) = workspace {
+                a["workspace_root"] = json!(root);
+            }
         }
         self.check_paths(kind, &a).await?;
         let tier = if kind == "mcp.call" {
@@ -1156,7 +1209,7 @@ impl Engine {
         };
         let needs_approval = needs_approval && rule.is_none();
         let capture = self.metrics_capture(&a);
-        let mut initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":self.fingerprint(&a)?,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
+        let mut initial = json!({"task_id":task_id,"kind":kind,"arguments":redact_arguments(&a),"request_fingerprint":request_fingerprint,"status":"accepted","started_at":now(),"result_path":path,"output_path":dir.join("output.log")});
         if let Some(tier) = tier {
             initial["desktop_tier"] = json!(tier);
         }
@@ -1331,7 +1384,9 @@ impl Engine {
             .as_str()
             .map(expand)
             .unwrap_or_else(|| cwd.clone());
-        self.safety.lock().await.check(&root)?;
+        let safety = self.safety.lock().await.clone();
+        safety.check(&root)?;
+        safety.check(&cwd)?;
         anyhow::ensure!(
             crate::workspace::resolve(&cwd)?.starts_with(crate::workspace::resolve(&root)?),
             "cwd is outside workspace_root"
@@ -1355,7 +1410,13 @@ impl Engine {
                     .as_str(),
             );
             let source = root.clone();
-            let destination = dir.join("workspace");
+            let destination = match &self.work_directory {
+                Some(work) => {
+                    crate::snapshot::prepare_task_workspace(work, dir, &self.fingerprint_key)?
+                }
+                None => dir.join("workspace"),
+            };
+            safety.check(&destination)?;
             let output = destination.clone();
             let guard = lease.as_ref().unwrap().clone();
             let relative = crate::workspace::resolve(&cwd)?
@@ -1373,8 +1434,16 @@ impl Engine {
             )?));
         }
         let _lease = lease;
-        let env: BTreeMap<String, String> =
+        let mut env: BTreeMap<String, String> =
             serde_json::from_value(a.get("env").cloned().unwrap_or(json!({})))?;
+        if safety.restrict_paths {
+            env.entry("TMPDIR".into())
+                .or_insert_with(|| run_cwd.to_string_lossy().into_owned());
+        }
+        let (program, args) = process::shell_command(
+            string(a, "command")?,
+            safety.restrict_paths.then_some(safety.roots.as_slice()),
+        )?;
         let (tx, mut rx) = mpsc::channel(64);
         let p = dir.join("output.log");
         let mut writer = tokio::task::JoinSet::new();
@@ -1390,8 +1459,8 @@ impl Engine {
         });
         let execution = crate::metrics::phase("process_run");
         let r = process::run_command_until(
-            "/bin/sh",
-            &["-c".into(), string(a, "command")?.into()],
+            program,
+            &args,
             &run_cwd,
             &env,
             deadline,

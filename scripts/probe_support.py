@@ -45,7 +45,7 @@ class Services:
         return child
 
     def worker(self, address=None, config=None):
-        args = ["worker", "--server", address or f"127.0.0.1:{self.port}", "--cert", str(self.root / "server/cert.der"), "--token-file", str(self.root / "server/token"), "--data", str(self.root / "worker")]
+        args = ["worker", "--server", address or f"127.0.0.1:{self.port}", "--cert", str(self.root / "server/cert.der"), "--token-file", str(self.root / "server/token"), "--data", str(self.root / "worker"), "--work-directory", str(self.root)]
         if config:
             args += ["--config", str(config)]
         self.spawn(args)

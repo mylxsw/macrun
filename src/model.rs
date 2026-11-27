@@ -7,6 +7,7 @@ use std::{
 };
 
 pub const PROTOCOL: u32 = 2;
+pub const WORKSPACE_PATHS: &str = "workspace_paths_v1";
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

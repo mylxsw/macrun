@@ -784,13 +784,6 @@ button.v4-preset.on {
   color: #8e8d88;
   font-size: 11px;
 }
-.v4-perm .path-controls {
-  margin-top: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
 .v4-perm-foot {
   margin: 0;
   padding: 9px 14px 11px;

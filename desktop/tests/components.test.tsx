@@ -100,80 +100,28 @@ test("approval buttons only send the selected task decision", async () => {
   );
 });
 
-test("empty restricted directories show a warning and cannot be saved", async () => {
-  const act = vi.fn().mockResolvedValue(true),
-    user = userEvent.setup();
-  render(<SafetyPanel snapshot={snapshot} act={act} disabled={false} />);
-  await user.click(screen.getByRole("button", { name: "移除 /work" }));
-  expect(screen.getByRole("alert").textContent).toContain("阻止所有命令");
-  const save = screen.getByRole("button", { name: "保存安全设置" });
-  expect((save as HTMLButtonElement).disabled).toBe(true);
-  await user.click(save);
-  expect(act).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("checkbox", { name: "限制工作目录" }));
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect((save as HTMLButtonElement).disabled).toBe(false);
-  await user.click(save);
-  expect(act.mock.calls[0][1].args).toMatchObject({
-    restrict_paths: false,
-    roots: [],
-  });
-});
-
-test("legacy empty restricted directories can be repaired by adding a directory", async () => {
-  const act = vi.fn().mockResolvedValue(true),
-    user = userEvent.setup();
-  render(
-    <SafetyPanel
-      snapshot={{ ...snapshot, safety: { ...safety, roots: [] } }}
-      act={act}
-      disabled={false}
-    />,
-  );
-  expect(screen.getByRole("alert")).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "添加目录" }));
-  await user.type(
-    screen.getByRole("textbox", { name: "允许的绝对目录" }),
-    "/work",
-  );
-  await user.click(screen.getByRole("button", { name: "添加", exact: true }));
-  expect(screen.queryByRole("alert")).toBeNull();
-  await user.click(screen.getByRole("button", { name: "保存安全设置" }));
-  expect(act.mock.calls[0][1].args).toMatchObject({
-    restrict_paths: true,
-    roots: ["/work"],
-  });
-});
-
 test("unsaved safety edits survive incoming snapshots and save failure", async () => {
   const act = vi.fn().mockResolvedValue(undefined),
     user = userEvent.setup();
   const { rerender } = render(
     <SafetyPanel snapshot={snapshot} act={act} disabled={false} />,
   );
-  await user.click(screen.getByRole("button", { name: "添加目录" }));
-  await user.type(
-    screen.getByRole("textbox", { name: "允许的绝对目录" }),
-    "/new",
-  );
-  await user.click(screen.getByRole("button", { name: "添加", exact: true }));
-  await user.click(screen.getByRole("button", { name: "移除 /work" }));
+  const ownChoice = screen.getByRole("button", { name: "风险命令先问" });
+  await user.click(ownChoice);
   rerender(
     <SafetyPanel
-      snapshot={{ ...snapshot, safety: { ...safety, roots: ["/remote"] } }}
+      snapshot={{ ...snapshot, safety: { ...safety, approval: "direct" } }}
       act={act}
       disabled={false}
     />,
   );
-  expect(screen.getByText("/new")).toBeTruthy();
-  expect(screen.queryByText("/remote")).toBeNull();
+  expect(ownChoice.getAttribute("aria-pressed")).toBe("true");
   await user.click(screen.getByRole("button", { name: "保存安全设置" }));
-  expect(act.mock.calls[0][1].args.roots).toEqual(["/new"]);
+  expect(act.mock.calls[0][1].args.approval).toBe("risk");
   expect(screen.getByText("更改尚未保存")).toBeTruthy();
-  expect(screen.getByText("/new")).toBeTruthy();
 });
 
-test("safety saving keeps a retention change received while editing paths", async () => {
+test("safety saving keeps a retention change received while editing approval", async () => {
   const act = vi.fn().mockResolvedValue(true),
     user = userEvent.setup();
   const { rerender } = render(
@@ -455,34 +403,17 @@ test("replay reloads a running record after completion and then caches its scree
   expect(act).toHaveBeenCalledTimes(2);
 });
 
-test("directory restrictions are visibly off until enabled and explicitly saved", async () => {
-  const user = userEvent.setup(),
-    act = vi.fn().mockResolvedValue(undefined);
+test("the worker's fixed work folder is shown without a directory toggle", () => {
   render(
     <SafetyPanel
-      snapshot={{ ...snapshot, safety: { ...safety, restrict_paths: false } }}
-      act={act}
+      snapshot={{ ...snapshot, work_directory: "/Users/example/macrun-work" }}
+      act={vi.fn()}
       disabled={false}
     />,
   );
-  const restriction = screen.getByRole("checkbox", {
-    name: "限制工作目录",
-  }) as HTMLInputElement;
-  expect(restriction.checked).toBe(false);
-  expect(
-    screen.getByText(
-      "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。",
-    ),
-  ).toBeTruthy();
-  expect(restriction.closest("details")).toBeNull();
-  await user.click(restriction);
-  expect(act).not.toHaveBeenCalled();
-  expect(screen.getByText("更改尚未保存")).toBeTruthy();
-  await user.click(screen.getByRole("button", { name: "保存安全设置" }));
-  expect(act.mock.calls[0][1].args).toMatchObject({
-    restrict_paths: true,
-    roots: ["/work"],
-  });
+  const workFolder = screen.getByText("Macrun 工作目录").closest(".v4-perm") as HTMLElement;
+  expect(within(workFolder).getByText("/Users/example/macrun-work")).toBeTruthy();
+  expect(within(workFolder).queryByRole("checkbox")).toBeNull();
 });
 
 const migrationProps = () => ({

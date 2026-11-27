@@ -62,14 +62,11 @@ export function Access({
         ))}
       </div>
       <p className="v4-note">
-        {tr(
-          "{0}这些规则在 Macrun 内生效；命令仍以你的用户身份运行，不是沙箱。",
-          current === "custom"
-            ? tr(
-                "当前为自定义设置。选择上面的预设可一次改好命令和桌面规则；目录限制不受预设影响。",
-              )
-            : tr("修改下面任意一项后显示为“自定义”。"),
-        )}
+        {current === "custom"
+          ? tr(
+              "当前为自定义设置。选择上面的预设可一次改好命令和桌面规则；目录限制不受预设影响。",
+            )
+          : tr("修改下面任意一项后显示为“自定义”。")}
       </p>
       <div className="v4-cols access">
         <div className="v4-group">

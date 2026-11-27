@@ -439,6 +439,23 @@ async fn handle_cli(mut socket: UnixStream, state: Shared, data: PathBuf) -> Res
         .await?;
         return Ok(());
     }
+    if !std::path::Path::new(&project.remote_root).is_absolute()
+        && !project.remote_root.starts_with("~/")
+        && !supports_workspace_paths(&peer)
+    {
+        drop(s);
+        log.send(
+            &mut socket,
+            &Reply::Error {
+                error: Fault::new(
+                    "invalid_config",
+                    "relative remote_root requires a worker with working-directory support",
+                ),
+            },
+        )
+        .await?;
+        return Ok(());
+    }
     let job_id = id();
     let directory = data.join("sync-jobs").join(&job_id);
     std::fs::create_dir_all(&directory)?;
@@ -621,6 +638,11 @@ impl Drop for SyncStreams {
         let _ = self.recv.stop(2u32.into());
     }
 }
+fn supports_workspace_paths(peer: &Peer) -> bool {
+    peer.status["capabilities"]
+        .as_array()
+        .is_some_and(|features| features.iter().any(|feature| feature == WORKSPACE_PATHS))
+}
 async fn execute_inner(
     task: &mut Task,
     peer: &Peer,
@@ -647,6 +669,7 @@ async fn execute_inner(
         .as_array()
         .is_some_and(|c| c.iter().any(|v| v == "sync_stream_v1"));
     task.request.args["stream_sync"] = json!(streamed);
+    task.request.args[WORKSPACE_PATHS] = json!(supports_workspace_paths(peer));
     task.request.args["optimized_sync"] = json!(
         streamed
             && task.request.args["optimized_sync"] != false
@@ -658,8 +681,10 @@ async fn execute_inner(
         let manifest = task.manifest.take().unwrap_or_default();
         task.request.args["manifest_digest"] = json!(sync::digest(&manifest)?);
         wire::send(&mut send, task).await?;
-        let Event::ManifestMatch { matched } = wire::recv(&mut recv).await? else {
-            anyhow::bail!("expected manifest negotiation")
+        let matched = match wire::recv(&mut recv).await? {
+            Event::ManifestMatch { matched } => matched,
+            Event::Done { error: Some(error) } => return Err(error.into()),
+            _ => anyhow::bail!("expected manifest negotiation"),
         };
         if !matched {
             sync::send_manifest(&mut send, &manifest).await?;

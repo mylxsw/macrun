@@ -24,7 +24,7 @@ try:
  run([str(binary),'init','--data',str(server)])
  run(['docker','run','--rm','-d','--platform','linux/amd64','--name',name,'-p',f'127.0.0.1:{port}:7443/udp','-v',f'{server}:/state','-v',f'{source}:/source:ro',image,'serve','--data','/state'])
  started=True
- log=open(root/'worker.log','w');wrk=subprocess.Popen([str(binary),'worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(cfg)],stdout=log,stderr=log)
+ log=open(root/'worker.log','w');wrk=subprocess.Popen([str(binary),'worker','--server',f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--work-directory',str(root),'--config',str(cfg)],stdout=log,stderr=log)
  for _ in range(100):
   v=json.loads(run(['docker','exec',name,'macrun','status']))
   if v['connected']:break

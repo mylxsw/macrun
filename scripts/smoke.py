@@ -5,7 +5,7 @@ import sqlite3,struct
 binary=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'target/debug/macrun').resolve()
 fixture=pathlib.Path('tests/fixtures/mcp.py').resolve()
 root=pathlib.Path(tempfile.mkdtemp(prefix='macrun-generic-'))
-source=root/'source';source.mkdir();mirror=root/'mirror';server=root/'server';worker=root/'worker'
+source=root/'source';source.mkdir();allowed=root.resolve()/'allowed work';mirror=allowed/'mirror';server=root/'server';worker=root/'worker'
 sock=str(root/'cli.sock')
 control_sock=str(root/'control.sock')
 with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
@@ -58,8 +58,11 @@ try:
   if pathlib.Path(sock).exists():break
   time.sleep(.05)
  assert 'worker_offline' in cli('exec','--cwd','/tmp','true',ok=False)
- wrkargs=['worker','--server',(f'{transport}://' if transport!='quic' else '')+f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--config',str(config),'--control-socket',control_sock]
+ worker.mkdir()
+ (worker/'safety.json').write_text(json.dumps({'restrict_paths':False,'roots':[str(root)]}))
+ wrkargs=['worker','--server',(f'{transport}://' if transport!='quic' else '')+f'127.0.0.1:{port}','--cert',str(server/'cert.der'),'--token-file',str(server/'token'),'--data',str(worker),'--work-directory',str(allowed),'--config',str(config),'--control-socket',control_sock]
  wrk=spawn(wrkargs);ready()
+ assert call('status')['worker']['work_directory']==str(allowed)
  assert call('status')['worker']['transport']==('quic' if transport=='quic' else 'tcp_tls')
  # Malformed IDs must return an actionable error without killing the CLI connection.
  assert 'invalid_argument' in cli('call','sync.get','--args','{"job_id":"project-name"}',ok=False)
@@ -150,6 +153,47 @@ try:
   time.sleep(.1)
  else:raise AssertionError('restart did not mark unknown')
  assert not (mirror/'restart-count').exists()
+
+ # A saved legacy policy cannot override the worker's fixed work directory.
+ preserved=control('safety',restrict_paths=False,roots=[str(root)])
+ assert preserved['restrict_paths'] and preserved['roots']==[str(allowed)]
+ project=allowed/'project'
+ project_config=source/'macrun.toml'
+ project_config.write_text('remote_root = "project"\n')
+ synced=json.loads(cli('sync'))
+ assert pathlib.Path(synced['workspace_root'])==project
+ assert (project/'watched').read_text()=='auto'
+ snapshot=json.loads(cli('exec','--snapshot','--workspace-root',str(project),'--generation',synced['generation'],'pwd; wc -c < watched'))
+ snap=done(snapshot['task_id'])
+ assert snap['status']=='succeeded',snap
+ copy=pathlib.Path(snap['result']['workspace'])
+ assert copy.is_relative_to(allowed) and (copy/'watched').read_text()=='auto'
+ control('task_delete',task_id=snapshot['task_id'])
+ assert not copy.exists() and (project/'watched').read_text()=='auto'
+ launched=json.loads(cli('exec','--workspace-root',str(project),'--generation',synced['generation'],'pwd'))
+ assert done(launched['task_id'])['output']['text'].strip()==str(project)
+ launched=json.loads(cli('exec','--cwd','project','pwd'))
+ assert done(launched['task_id'])['output']['text'].strip()==str(project)
+ launched=json.loads(cli('exec','pwd'))
+ assert done(launched['task_id'])['output']['text'].strip()==str(allowed)
+ assert 'path_denied' in cli('exec','--cwd',str(root),'touch rejected',ok=False)
+ assert not (root/'rejected').exists()
+ assert 'path_denied' in cli('call','file.write','--args',json.dumps({'path':str(root/'rejected'),'text':'bad'}),ok=False)
+ assert not (root/'rejected').exists()
+ outside=root.resolve()/'rejected-mirror'
+ for destination in (str(outside), '../rejected-mirror'):
+  project_config.write_text(f'remote_root = {json.dumps(destination)}\n')
+  assert 'path_denied' in cli('sync',ok=False)
+  assert not outside.exists()
+ if sys.platform=='darwin':
+  (project/'shortcut').symlink_to(root.resolve(), target_is_directory=True)
+  command='printf valid > within; /bin/sh -c \'printf invalid > shortcut/rejected\''
+  launched=json.loads(cli('exec','--cwd','project',command))
+  assert done(launched['task_id'])['status']=='failed'
+  assert (project/'within').read_text()=='valid'
+  assert not (root/'rejected').exists()
+ print('PASS: restricted sync and command directories, rejected outside paths, and macOS shell write limits')
+
  wrk.terminate();wrk.wait(timeout=10)
  # Desktop queries this same local index while the worker is stopped.
  with sqlite3.connect(f'file:{worker / "metrics.sqlite"}?mode=ro',uri=True) as db:

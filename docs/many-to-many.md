@@ -8,7 +8,7 @@ Start the existing server as usual, and connect each client with its own invitat
 
 ```sh
 macrun --socket /path/to/control.sock status
-macrun --socket /path/to/control.sock --client CLIENT_UUID exec --cwd /tmp 'uname -m'
+macrun --socket /path/to/control.sock --client CLIENT_UUID exec 'uname -m'
 macrun --socket /path/to/control.sock --client CLIENT_UUID task RETURNED_TASK_UUID
 macrun --socket /path/to/control.sock --client CLIENT_UUID --workspace /path/to/project sync
 macrun --socket /path/to/control.sock --client CLIENT_UUID mcp

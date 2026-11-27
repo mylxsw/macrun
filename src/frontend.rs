@@ -78,8 +78,8 @@ pub fn tools() -> Vec<Value> {
         tool(
             "exec_start",
             "Start a worker-owned shell command. Optional wait_ms (up to 1000) returns a completed result when ready. Save task_id; poll task_get. Reuse the same UUID request_id after uncertain delivery, never a new ID. No implicit synchronization.",
-            json!({"command":string,"cwd":string,"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string,"snapshot":{"type":"boolean"},"outputs":{"type":"array","items":{"type":"string"},"maxItems":32}}),
-            &["command", "cwd", "request_id"],
+            json!({"command":string,"cwd":{"type":"string","description":"Worker directory. Relative paths start at the worker’s work directory. If omitted, use workspace_root or the work directory. For project commands, use the workspace_root returned by sync."},"env":{"type":"object","additionalProperties":{"type":"string"}},"timeout_seconds":{"type":"integer","minimum":1},"request_id":string,"wait_ms":{"type":"integer","minimum":0,"maximum":1000},"workspace_root":string,"generation":string,"snapshot":{"type":"boolean"},"outputs":{"type":"array","items":{"type":"string"},"maxItems":32}}),
+            &["command", "request_id"],
         ),
         tool(
             "task_get",
@@ -149,7 +149,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "sync_start",
-            "Start one directory synchronization from Linux workspace/macrun.toml. Poll sync_get until succeeded before executing commands. Continuous synchronization uses the sync --watch CLI.",
+            "Start a synchronization from the server workspace/macrun.toml. A relative remote_root starts at the worker’s work directory. Poll sync_get until succeeded and use its workspace_root for commands. Continuous synchronization uses the sync --watch CLI.",
             json!({"workspace":string,"strict":{"type":"boolean"}}),
             &[],
         ),

@@ -117,7 +117,7 @@ for line in sys.stdin:
 ''')
         config = root / "worker.toml"
         config.write_text("\n".join(f'[mcp.{name}]\ncommand = {json.dumps(sys.executable)}\nargs = {json.dumps([str(fixture), str(root / "image.png")])}\n' for name in ("a", "b")))
-        spawn(["worker", "--server", f"127.0.0.1:{port}", "--cert", str(server / "cert.der"), "--token-file", str(server / "token"), "--data", str(worker), "--config", str(config)])
+        spawn(["worker", "--server", f"127.0.0.1:{port}", "--cert", str(server / "cert.der"), "--token-file", str(server / "token"), "--data", str(worker), "--work-directory", str(root), "--config", str(config)])
         wait_for(lambda: request("status")["connected"])
 
         small = source / "small"

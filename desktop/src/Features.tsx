@@ -782,9 +782,7 @@ export function SafetyPanel({
   const [draft, setDraft] = useState<Snapshot["safety"] | null>(
       snapshot?.safety || null,
     ),
-    [dirty, setDirty] = useState(false),
-    [adding, setAdding] = useState(false),
-    [path, setPath] = useState("");
+    [dirty, setDirty] = useState(false);
   useEffect(() => {
     if (snapshot?.safety && !dirty) setDraft(snapshot.safety);
   }, [snapshot?.safety, dirty]);
@@ -794,15 +792,6 @@ export function SafetyPanel({
       setDraft({ ...draft, [k]: v });
     }
   };
-  const addPath = () => {
-    const root = path.trim();
-    if (!draft || !root) return;
-    update("roots", [...new Set([...draft.roots, root])]);
-    setPath("");
-    setAdding(false);
-  };
-  const missingRoots =
-    !!draft?.restrict_paths && !draft.roots.some((root) => root.trim());
   return (
     <div className="safety-card">
       <div className="v4-perm">
@@ -847,93 +836,11 @@ export function SafetyPanel({
           <Folder size={15} />
         </span>
         <div className="grow">
-          <b>{tr("可以使用的目录")}</b>
-          <p>
-            {!draft
-              ? tr("连接执行器后可设置目录限制。")
-              : draft.restrict_paths
-                ? tr("命令的工作目录、文件读写和同步目标必须位于这些目录之内。")
-                : tr(
-                    "目录限制未开启，以下目录不会约束命令、文件读写或同步目标。",
-                  )}
-          </p>
-          <div className="path-controls">
-            {draft?.roots.map((root) => (
-              <span className="pathchip mono" key={root}>
-                {root}
-                <button
-                  aria-label={tr("移除 {0}", root)}
-                  className="icon-button"
-                  disabled={disabled}
-                  onClick={() =>
-                    update(
-                      "roots",
-                      draft.roots.filter((p) => p !== root),
-                    )
-                  }
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-            {adding ? (
-              <form
-                className="path-entry"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addPath();
-                }}
-              >
-                <input
-                  autoFocus
-                  aria-label={tr("允许的绝对目录")}
-                  placeholder="/absolute/path"
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") setAdding(false);
-                  }}
-                />
-                <button type="submit" disabled={!path.trim() || disabled}>
-                  {tr("添加")}
-                </button>
-                <button type="button" onClick={() => setAdding(false)}>
-                  {tr("取消")}
-                </button>
-              </form>
-            ) : (
-              <button
-                className="v4-link"
-                disabled={disabled || !draft}
-                onClick={() => setAdding(true)}
-              >
-                <Plus size={13} />
-                {tr("添加目录")}
-              </button>
-            )}
-          </div>
+          <b>{tr("Macrun 工作目录")}</b>
+          <p className="mono">{snapshot?.work_directory || "~/macrun-work"}</p>
+          <p>{tr("Macrun 在这里同步文件和运行命令。任务生成的文件也保存在这里。")}</p>
         </div>
-        <label className="path-policy-toggle">
-          <small>
-            {draft?.restrict_paths ? tr("仅限这些目录") : tr("任意目录")}
-          </small>
-          <input
-            className="switch"
-            type="checkbox"
-            aria-label={tr("限制工作目录")}
-            checked={draft?.restrict_paths || false}
-            disabled={disabled || !draft}
-            onChange={(e) => update("restrict_paths", e.target.checked)}
-          />
-        </label>
       </div>
-      {missingRoots && (
-        <p role="alert">
-          {tr(
-            "请至少添加一个允许目录，或关闭目录限制；当前设置会阻止所有命令、文件操作和同步。",
-          )}
-        </p>
-      )}
       {includeExtras && (
         <>
           <div className="v4-perm">
@@ -987,7 +894,7 @@ export function SafetyPanel({
           </button>
           <button
             className="primary"
-            disabled={disabled || missingRoots}
+            disabled={disabled}
             onClick={async () => {
               const saved = await act(
                 "control",
@@ -998,7 +905,6 @@ export function SafetyPanel({
                     retention_days: includeRetention
                       ? draft?.retention_days
                       : snapshot?.safety.retention_days,
-                    roots: draft?.roots.filter((r) => r.trim()),
                   },
                 },
                 tr("安全设置已保存"),

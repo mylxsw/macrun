@@ -64,6 +64,9 @@ enum Cmd {
         data: PathBuf,
         #[arg(long)]
         config: Option<PathBuf>,
+        /// Fixed workspace for this worker. Defaults to ~/macrun-work.
+        #[arg(long)]
+        work_directory: Option<PathBuf>,
         /// Private local control socket for the desktop application.
         #[arg(long)]
         control_socket: Option<PathBuf>,
@@ -81,8 +84,9 @@ enum Cmd {
         args: String,
     },
     Exec {
+        /// A path in the worker's work directory. Defaults to --workspace-root or the work directory.
         #[arg(long)]
-        cwd: String,
+        cwd: Option<String>,
         #[arg(long)]
         workspace_root: Option<String>,
         #[arg(long)]
@@ -168,6 +172,7 @@ async fn entry() -> anyhow::Result<()> {
             token_stdin,
             data,
             config,
+            work_directory,
             control_socket,
             parent_pipe,
         } => {
@@ -196,6 +201,7 @@ async fn entry() -> anyhow::Result<()> {
                     control_socket,
                     tokens,
                     parent_pipe,
+                    work_directory,
                 )
                 .await;
             }
@@ -210,6 +216,7 @@ async fn entry() -> anyhow::Result<()> {
                 control_socket,
                 injected,
                 parent_pipe,
+                work_directory,
             )
             .await;
         }

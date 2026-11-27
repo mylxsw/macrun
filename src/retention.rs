@@ -133,6 +133,52 @@ fn directory_bytes(path: &Path) -> Result<u64> {
     Ok(bytes)
 }
 
+fn workspace_bytes(path: &Path) -> Result<u64> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => directory_bytes(path),
+        Ok(_) => Ok(0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn task_usage(path: &Path, workspace: &Path) -> Result<(u64, u64)> {
+    let bytes = if path.exists() {
+        directory_bytes(path)?
+    } else {
+        0
+    };
+    let workspace_bytes = workspace_bytes(workspace)?;
+    let total = if workspace.starts_with(path) {
+        bytes
+    } else {
+        bytes.saturating_add(workspace_bytes)
+    };
+    Ok((total, workspace_bytes))
+}
+
+fn remove_workspace(task: &Path, workspace: &Path) -> Result<()> {
+    ensure!(
+        crate::snapshot::task_workspace(task)? == workspace,
+        "task snapshot path changed"
+    );
+    if std::fs::symlink_metadata(workspace).is_ok_and(|meta| meta.is_dir()) {
+        std::fs::remove_dir_all(workspace)?;
+    }
+    if !workspace.starts_with(task) {
+        match std::fs::remove_dir(workspace.parent().unwrap()) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
 /// Inspect only Macrun-owned task data, never the command's working directory.
 pub fn task_info(data: &Path, ident: &str, active: bool) -> Result<Value> {
     uuid::Uuid::parse_str(ident)?;
@@ -167,9 +213,8 @@ pub fn task_info(data: &Path, ident: &str, active: bool) -> Result<Value> {
     } else {
         None
     };
-    Ok(
-        serde_json::json!({"path":path,"bytes":directory_bytes(&path)?,"cleanable":reason.is_none(),"reason":reason}),
-    )
+    let (bytes, _) = task_usage(&path, &crate::snapshot::task_workspace(&path)?)?;
+    Ok(serde_json::json!({"path":path,"bytes":bytes,"cleanable":reason.is_none(),"reason":reason}))
 }
 
 /// Explicit deletion follows the same ownership and deduplication rules as retention.
@@ -177,7 +222,8 @@ pub fn delete_task(data: &Path, ident: &str, active: bool) -> Result<()> {
     let info = task_info(data, ident, active)?;
     ensure!(info["cleanable"] == true, "task is protected from cleanup");
     let path = data.join("tasks").join(ident);
-    let _lease = crate::workspace::Lease::for_cleanup(std::slice::from_ref(&path))?;
+    let workspace = crate::snapshot::task_workspace(&path)?;
+    let _lease = crate::workspace::Lease::for_cleanup(&[path.clone(), workspace.clone()])?;
     let record: Value = serde_json::from_slice(&std::fs::read(path.join("result.json"))?)?;
     let dedup = data.join("dedup");
     if let Ok(meta) = std::fs::symlink_metadata(&dedup) {
@@ -185,12 +231,14 @@ pub fn delete_task(data: &Path, ident: &str, active: bool) -> Result<()> {
     }
     let tombstone = serde_json::json!({"task_id":ident,"kind":record["kind"],"request_fingerprint":record["request_fingerprint"],"status":record["status"],"started_at":record["started_at"],"ended_at":record["ended_at"],"history_expired":true});
     crate::wire::atomic_json(&dedup.join(format!("{ident}.json")), &tombstone)?;
+    remove_workspace(&path, &workspace)?;
     std::fs::remove_dir_all(path)?;
     Ok(())
 }
 
 struct StoredTask {
     path: std::path::PathBuf,
+    workspace: std::path::PathBuf,
     record: Value,
     bytes: u64,
     workspace_bytes: u64,
@@ -229,8 +277,13 @@ pub fn task_storage(
             continue;
         }
         let path = entry.path();
-        let bytes = match directory_bytes(&path) {
-            Ok(bytes) => bytes,
+        let usage = (|| -> Result<_> {
+            let workspace = crate::snapshot::task_workspace(&path)?;
+            let (bytes, workspace_bytes) = task_usage(&path, &workspace)?;
+            Ok((workspace, bytes, workspace_bytes))
+        })();
+        let (workspace, bytes, workspace_bytes) = match usage {
+            Ok(usage) => usage,
             Err(_) => {
                 report.errors += 1;
                 continue;
@@ -238,18 +291,6 @@ pub fn task_storage(
         };
         report.task_bytes = report.task_bytes.saturating_add(bytes);
         let ident = entry.file_name().to_string_lossy().into_owned();
-        let workspace = path.join("workspace");
-        let workspace_bytes = if std::fs::symlink_metadata(&workspace).is_ok_and(|m| m.is_dir()) {
-            match directory_bytes(&workspace) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    report.errors += 1;
-                    continue;
-                }
-            }
-        } else {
-            0
-        };
         report.workspace_bytes = report.workspace_bytes.saturating_add(workspace_bytes);
         if uuid::Uuid::parse_str(&ident).is_err() || active.contains(&ident) {
             continue;
@@ -313,6 +354,7 @@ pub fn task_storage(
         let record = serde_json::json!({"task_id":record["task_id"],"kind":record["kind"],"request_fingerprint":record["request_fingerprint"],"status":record["status"],"started_at":record["started_at"],"ended_at":record["ended_at"]});
         candidates.push(StoredTask {
             path,
+            workspace,
             record,
             bytes,
             workspace_bytes,
@@ -329,11 +371,11 @@ pub fn task_storage(
         let end = task.record["ended_at"].as_u64().unwrap();
         let expired = end < snapshot_cutoff;
         let pressure = report.task_bytes > report.limit_bytes && end < budget_cutoff;
-        let workspace = task.path.join("workspace");
+        let workspace = &task.workspace;
         // A symlink named workspace is unlinked only with its whole expired task.
-        if (expired || pressure) && std::fs::symlink_metadata(&workspace).is_ok_and(|m| m.is_dir())
-        {
-            let Ok(_lease) = crate::workspace::Lease::for_cleanup(std::slice::from_ref(&task.path))
+        if (expired || pressure) && std::fs::symlink_metadata(workspace).is_ok_and(|m| m.is_dir()) {
+            let Ok(_lease) =
+                crate::workspace::Lease::for_cleanup(&[task.path.clone(), workspace.clone()])
             else {
                 continue;
             };
@@ -343,7 +385,7 @@ pub fn task_storage(
                 // Expire the reference first. Failed deletion is retried on the next sweep.
                 record["workspace_expired"] = serde_json::json!(true);
                 crate::wire::atomic_json(&path, &record)?;
-                std::fs::remove_dir_all(&workspace)?;
+                remove_workspace(&task.path, workspace)?;
                 Ok(())
             })();
             if result.is_err() {
@@ -361,12 +403,12 @@ pub fn task_storage(
         {
             continue;
         }
-        let Ok(_lease) = crate::workspace::Lease::for_cleanup(std::slice::from_ref(&task.path))
+        let Ok(_lease) =
+            crate::workspace::Lease::for_cleanup(&[task.path.clone(), task.workspace.clone()])
         else {
             continue;
         };
-        let had_workspace =
-            std::fs::symlink_metadata(task.path.join("workspace")).is_ok_and(|m| m.is_dir());
+        let had_workspace = std::fs::symlink_metadata(&task.workspace).is_ok_and(|m| m.is_dir());
         let result = (|| -> Result<()> {
             let record = &task.record;
             let ident = record["task_id"].as_str().unwrap();
@@ -377,6 +419,7 @@ pub fn task_storage(
             let tombstone = serde_json::json!({"task_id":ident,"kind":record["kind"],"request_fingerprint":record["request_fingerprint"],"status":record["status"],"started_at":record["started_at"],"ended_at":record["ended_at"],"history_expired":true});
             // Persist dedup before removing data. A retry can never re-execute an expired request.
             crate::wire::atomic_json(&dedup.join(format!("{ident}.json")), &tombstone)?;
+            remove_workspace(&task.path, &task.workspace)?;
             std::fs::remove_dir_all(&task.path)?;
             Ok(())
         })();
@@ -422,20 +465,7 @@ pub fn task_storage(
 }
 
 fn update_usage(task: &mut StoredTask, report: &mut TaskStorage) {
-    let measured = (|| -> Result<(u64, u64)> {
-        let bytes = if task.path.exists() {
-            directory_bytes(&task.path)?
-        } else {
-            0
-        };
-        let workspace = task.path.join("workspace");
-        let workspace_bytes = if std::fs::symlink_metadata(&workspace).is_ok_and(|m| m.is_dir()) {
-            directory_bytes(&workspace)?
-        } else {
-            0
-        };
-        Ok((bytes, workspace_bytes))
-    })();
+    let measured = task_usage(&task.path, &task.workspace);
     let (bytes, workspace_bytes) = match measured {
         Ok(usage) => usage,
         Err(_) => {

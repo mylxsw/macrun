@@ -43,7 +43,7 @@ def done(ident):return until(lambda:(v if v.get('ended_at') else None) if (v:=re
 try:
     subprocess.run([str(binary),'init','--data',str(server)],check=True,stdout=subprocess.DEVNULL)
     srv=spawn(['--socket',cli_socket,'serve','--listen',f'127.0.0.1:{port}','--data',server])
-    args=['worker','--server',f'127.0.0.1:{port}','--cert',server/'cert.der','--token-file',server/'token','--data',worker,'--control-socket',control,'--parent-pipe','--config',config]
+    args=['worker','--server',f'127.0.0.1:{port}','--cert',server/'cert.der','--token-file',server/'token','--data',worker,'--work-directory',root,'--control-socket',control,'--parent-pipe','--config',config]
     wrk=spawn(args,True)
     until(lambda:cli('status')['connected'])
     assert ipc('snapshot')['connection']['state']=='connected'

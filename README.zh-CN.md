@@ -129,7 +129,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
 
 macrun status
-macrun exec --cwd /tmp 'hostname; uname -m; echo hello-from-mac'
+macrun exec 'hostname; uname -m; echo hello-from-mac'
 macrun task TASK_UUID
 ```
 
@@ -188,16 +188,16 @@ test -e ~/.agents/skills/macrun || cp -R skills/macrun ~/.agents/skills/macrun
 在 **Linux 上的源码项目** 中创建 `macrun.toml`：
 
 ```toml
-remote_root = "/Users/YOUR_USER/work/my-app"
+remote_root = "my-app"
 exclude = ["node_modules", "dist", ".env", ".env.*"]
 sync_timeout_seconds = 120
 ```
 
-把 `remote_root` 换成你希望同步到的 **Mac 目录**。在 Linux 项目目录中执行，并沿用前面设置的 `MACRUN_SOCKET`：
+Macrun 会自动创建 `~/macrun-work`，并将这个项目同步到其中的 `my-app` 子目录。在 Linux 项目目录中执行，并沿用前面设置的 `MACRUN_SOCKET`：
 
 ```bash
 macrun sync
-macrun exec --cwd /Users/YOUR_USER/work/my-app 'make test'
+macrun exec --cwd my-app 'make test'
 macrun task TASK_UUID
 ```
 

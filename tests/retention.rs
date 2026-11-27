@@ -106,6 +106,39 @@ fn snapshots_expire_separately_without_following_links_or_deleting_sources() {
 }
 
 #[test]
+fn tracked_snapshot_in_work_folder_expires_and_leaves_project_files() {
+    let data = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let work = work.path().canonicalize().unwrap();
+    let old = task(data.path(), NOW - 2 * DAY, 0, 32);
+    let ident = old.file_name().unwrap().to_str().unwrap();
+    let profile = "a".repeat(64);
+    let snapshot = work
+        .join(".macrun/snapshots")
+        .join(&profile)
+        .join(ident)
+        .join("workspace");
+    fs::create_dir_all(&snapshot).unwrap();
+    fs::write(snapshot.join("output"), vec![0; 1024]).unwrap();
+    fs::write(work.join("project-file"), "keep").unwrap();
+    wire::atomic_json(
+        &old.join("snapshot-root.json"),
+        &json!({"work":work,"profile":profile}),
+    )
+    .unwrap();
+    let report = sweep(data.path(), &Safety::default());
+    assert_eq!(report.workspaces_removed, 1);
+    assert_eq!(report.workspace_bytes, 0);
+    assert!(report.reclaimed_bytes > 900);
+    assert_eq!(record(&old)["workspace_expired"], true);
+    assert!(!snapshot.exists());
+    assert_eq!(
+        fs::read_to_string(work.join("project-file")).unwrap(),
+        "keep"
+    );
+}
+
+#[test]
 fn budget_reclaims_oldest_snapshots_before_results() {
     let data = tempfile::tempdir().unwrap();
     let oldest = task(data.path(), NOW - 3 * DAY, GIB, 32);

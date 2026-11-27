@@ -79,6 +79,7 @@ export type Snapshot = {
     policy: Snapshot["policy"];
   }[];
   today_summary: Record<string, number>;
+  work_directory?: string;
   safety: {
     restrict_paths: boolean;
     roots: string[];

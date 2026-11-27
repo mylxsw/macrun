@@ -22,7 +22,7 @@ pub struct Options {
     pub config: Option<PathBuf>,
 }
 pub async fn worker(opts: Options) -> Result<()> {
-    worker_managed(opts, None, None, false).await
+    worker_managed(opts, None, None, false, None).await
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Profile {
@@ -36,6 +36,7 @@ pub async fn worker_managed(
     control: Option<PathBuf>,
     injected_token: Option<String>,
     parent_pipe: bool,
+    work_directory: Option<PathBuf>,
 ) -> Result<()> {
     let mut tokens = std::collections::BTreeMap::new();
     if let Some(token) = injected_token {
@@ -50,6 +51,7 @@ pub async fn worker_managed(
         control,
         tokens,
         parent_pipe,
+        work_directory,
     )
     .await
 }
@@ -58,6 +60,7 @@ pub async fn worker_profiles(
     control: Option<PathBuf>,
     tokens: std::collections::BTreeMap<String, String>,
     parent_pipe: bool,
+    work_directory: Option<PathBuf>,
 ) -> Result<()> {
     anyhow::ensure!(
         !profiles.is_empty() && profiles.len() <= 16,
@@ -78,6 +81,17 @@ pub async fn worker_profiles(
             "duplicate connection id, data directory or server address"
         );
     }
+    let work_directory = work_directory
+        .or_else(|| std::env::home_dir().map(|home| home.join("macrun-work")))
+        .ok_or_else(|| {
+            anyhow::anyhow!("cannot find the worker's home directory; set --work-directory")
+        })?;
+    anyhow::ensure!(
+        work_directory.is_absolute(),
+        "work directory must be absolute"
+    );
+    std::fs::create_dir_all(&work_directory)?;
+    let work_directory = std::fs::canonicalize(work_directory)?;
     let mut locks = Vec::new();
     for profile in &profiles {
         locks.push(wire::lock(&profile.options.data)?);
@@ -117,7 +131,11 @@ pub async fn worker_profiles(
         } else {
             WorkerConfig::default()
         };
-        let engine = Engine::open(opts.data.clone(), config)?;
+        let engine = Engine::open_with_work_directory(
+            opts.data.clone(),
+            config,
+            Some(work_directory.clone()),
+        )?;
         engine.prune_history().await?;
         let endpoint = wire::client(&opts.cert)?;
         let token = tokens.get(&profile.id).cloned().unwrap_or(
@@ -254,7 +272,7 @@ async fn session(conn: crate::transport::Connection, state: &Session) -> Result<
     } = state;
     let (mut out, mut input) = conn.open_bi().await?;
     out.set_priority(10)?;
-    let status = json!({"ready":true,"transport":conn.name(),"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"capabilities":["sync_stream_v1", "sync_delta_pack_v1","binary_transfer_v1","artifact_refs_v1","performance_metrics_v1"],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
+    let status = json!({"ready":true,"transport":conn.name(),"platform":std::env::consts::OS,"version":env!("CARGO_PKG_VERSION"),"instance":instance,"client_id":client_id,"work_directory":engine.work_directory(),"capabilities":["sync_stream_v1", "sync_delta_pack_v1","binary_transfer_v1","artifact_refs_v1","performance_metrics_v1",WORKSPACE_PATHS],"name":sysinfo::System::host_name().unwrap_or_else(||"Macrun client".into())});
     wire::send(
         &mut out,
         &Control::Hello {
@@ -370,6 +388,27 @@ async fn handle(
         log.send(&mut out, &reply).await?;
         out.finish()?;
         return Ok(());
+    }
+    // Resolve on the worker before negotiating the manifest, using its current
+    // directory settings rather than the server's filesystem or home directory.
+    match engine.sync_root(&task.project.remote_root).await {
+        Ok(root) => task.project.remote_root = root.to_string_lossy().into_owned(),
+        Err(error) => {
+            log.status("failed");
+            if task.request.args["stream_sync"] == true
+                && task.request.args[WORKSPACE_PATHS] != true
+            {
+                // Older servers expect to finish manifest negotiation first.
+                wire::send(&mut out, &Event::ManifestMatch { matched: true }).await?;
+            }
+            let error = error
+                .downcast_ref::<Fault>()
+                .cloned()
+                .unwrap_or_else(|| Fault::new("invalid_config", error));
+            wire::send(&mut out, &Event::Done { error: Some(error) }).await?;
+            out.finish()?;
+            return Ok(());
+        }
     }
     let capture = engine.metrics_capture(&json!({"remote_root":task.project.remote_root}));
     capture.update(|m| {

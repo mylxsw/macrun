@@ -21,16 +21,16 @@ Commands, sync and file writes acquire process-wide exclusive path leases. Lease
 Successful sync returns `workspace_root` and `generation` (the committed manifest digest). For a build that must use that version:
 
 ```sh
-macrun exec --cwd /Users/YOU/work/app \
-  --workspace-root /Users/YOU/work/app --generation RETURNED_GENERATION \
+macrun exec --cwd app \
+  --workspace-root /Users/YOU/macrun-work/app --generation RETURNED_GENERATION \
   --wait-ms 250 'make test'
 ```
 
-The command checks the generation after acquiring its lease. A new/failed sync invalidates the old generation until a successful commit. Without `workspace_root`, the command leases its cwd; specifying the project root also covers sibling source directories. The lease lasts through process completion. Shell commands must respect their declared workspace; Macrun cannot prevent an arbitrary command or external editor from writing elsewhere. Generation denotes the last synchronized input, not a sandbox or a guarantee against external writes. Use separate output/cache directories and avoid changing source during a build.
+The command checks the generation after acquiring its lease. A new/failed sync invalidates the old generation until a successful commit. Without `workspace_root`, the command leases its cwd; specifying the project root also covers sibling source directories. The lease lasts through process completion. Generation denotes the last synchronized input. External editors remain outside the lease. On Mac, [the work directory](operations.md#macrun-work-directory) separately control where shell commands can write.
 
 There are four concurrent shell execution slots per worker process, eight binary transfer slots and a 128-active-task admission limit per Engine. Shell capacity waiting is cancellable and counts against its timeout. These conservative limits bound contention; tune them against actual build workloads before widening them. Backends share the `desktop` resource group by default. Independent resources can opt into separate groups as described below.
 
-Opt into a private committed-input copy with `exec --snapshot --workspace-root ROOT --generation DIGEST --cwd ROOT COMMAND` (`exec_start` accepts `snapshot: true`). Copying verifies the committed manifest, hashes and internal links under the original workspace lease. The command then leases its task-owned copy, allowing the source mirror to synchronize again. Copies are never hard links; command writes cannot modify the original through shared file inodes. The copy is retained with its task and removed by task retention. Keep build caches at explicit independent paths if you need reuse across snapshot builds. This is filesystem input isolation, not an OS sandbox: arbitrary shell commands can still address paths outside their cwd.
+Opt into a private committed-input copy with `exec --snapshot --workspace-root ROOT --generation DIGEST --cwd ROOT COMMAND` (`exec_start` accepts `snapshot: true`). Copying verifies the committed manifest, hashes and internal links under the original workspace lease. The command then leases its task-owned copy, allowing the source mirror to synchronize again. Copies have independent file inodes. The copy is retained with its task and removed by task retention. The worker runs the command from a private copy inside its work directory.
 
 ## Binary files and recovery
 

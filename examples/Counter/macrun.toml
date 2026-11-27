@@ -1,2 +1,2 @@
-remote_root = "~/macrun-workspaces/Counter"
+remote_root = "Counter"
 exclude = [".build", "DerivedData"]

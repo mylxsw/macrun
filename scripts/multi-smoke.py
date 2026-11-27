@@ -50,15 +50,15 @@ try:
     profiles=[dict(id='primary',name='Server One',server=servers[0][2],cert=str(servers[0][0]/'cert.der'),token_file=str(servers[0][0]/'token'),data=str(primary),config=None),dict(id=secondary.name,name='Server Two',server=servers[1][2],cert=str(servers[1][0]/'cert.der'),token_file=str(servers[1][0]/'token'),data=str(secondary),config=None)]
     manifest=root/'connections.json';manifest.write_text(json.dumps(profiles))
     (root/'control').mkdir(mode=0o700);control=root/'control'/'control.sock'
-    w1args=['worker','--connections',manifest,'--data',primary,'--control-socket',control]
+    w1args=['worker','--connections',manifest,'--data',primary,'--work-directory',root,'--control-socket',control]
     w1=spawn(*w1args)
-    w2=spawn('worker','--server',servers[0][2],'--cert',servers[0][0]/'cert.der','--token-file',servers[0][0]/'token','--data',other)
+    w2=spawn('worker','--server',servers[0][2],'--cert',servers[0][0]/'cert.der','--token-file',servers[0][0]/'token','--data',other,'--work-directory',root)
     wait(lambda:len(run('--socket',servers[0][1],'status')['workers'])==2)
     wait(lambda:len(run('--socket',servers[1][1],'status')['workers'])==1)
     client1=(primary/'client-id').read_text();client2=(other/'client-id').read_text()
     assert client1!=client2
     assert 'invalid_argument' in call(servers[0][1],'file.list',{'path':'/tmp','client_id':23},ok=False)
-    assert 'client_required' in call(servers[0][1],'exec.start',dict(command='true',cwd='/tmp',request_id=str(uuid.uuid4())),ok=False)
+    assert 'client_required' in call(servers[0][1],'exec.start',dict(command='true',cwd=str(root),request_id=str(uuid.uuid4())),ok=False)
     # Both clients can synchronize concurrently through the same server.
     sources=[]
     for index,client in enumerate([client1,client2]):
@@ -70,13 +70,13 @@ try:
     assert all(result['status']=='succeeded' for result in results)
     assert {result['client_id'] for result in results}=={client1,client2}
     assert all((mirror/'payload').stat().st_size==1024*1024 for _,mirror,_ in sources)
-    request=str(uuid.uuid4());marker=root/'marker';args=dict(command=f'printf x >> {marker}',cwd='/tmp',request_id=request)
+    request=str(uuid.uuid4());marker=root/'marker';args=dict(command=f'printf x >> {marker}',cwd=str(root),request_id=request)
     one=call(servers[0][1],'exec.start',args,client1)['task_id']
     # Shared cwd commands now hold an exclusive workspace lease. This case tests
     # profile-scoped dedup; overlapping workspace rejection has a separate probe.
     assert done(servers[0][1],client1,one)['status']=='succeeded'
     two=call(servers[1][1],'exec.start',args,client1)['task_id']
-    three=call(servers[0][1],'exec.start',dict(command='printf other-client',cwd='/tmp',request_id=str(uuid.uuid4())),client2)['task_id']
+    three=call(servers[0][1],'exec.start',dict(command='printf other-client',cwd=str(root),request_id=str(uuid.uuid4())),client2)['task_id']
     assert one!=two
     assert done(servers[0][1],client1,one)['status']=='succeeded'
     assert done(servers[1][1],client1,two)['status']=='succeeded'
@@ -90,11 +90,11 @@ try:
     assert local('task_detail',{'task_id':two})['connection_id']==secondary.name
     assert len(local('snapshot')['connections'])==2
     assert 'error' not in local('stop_all')
-    for server in servers:assert 'busy' in call(server[1],'exec.start',dict(command='true',cwd='/tmp',request_id=str(uuid.uuid4())),client1,ok=False)
+    for server in servers:assert 'busy' in call(server[1],'exec.start',dict(command='true',cwd=str(root),request_id=str(uuid.uuid4())),client1,ok=False)
     assert 'error' not in local('pause',{'paused':False})
     # One server can vanish while the other still completes an explicitly routed request.
     servers[1][3].send_signal(signal.SIGINT);servers[1][3].wait(timeout=10)
-    alive=call(servers[0][1],'exec.start',dict(command='printf survives',cwd='/tmp',request_id=str(uuid.uuid4())),client1)['task_id']
+    alive=call(servers[0][1],'exec.start',dict(command='printf survives',cwd=str(root),request_id=str(uuid.uuid4())),client1)['task_id']
     assert done(servers[0][1],client1,alive)['output']['text']=='survives'
     # Stable identity survives worker restart, and original request IDs remain idempotent.
     w1.send_signal(signal.SIGINT);w1.wait(timeout=10)

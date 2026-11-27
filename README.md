@@ -129,7 +129,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
 
 macrun status
-macrun exec --cwd /tmp 'hostname; uname -m; echo hello-from-mac'
+macrun exec 'hostname; uname -m; echo hello-from-mac'
 macrun task TASK_UUID
 ```
 
@@ -188,16 +188,16 @@ Copy the whole folder. These commands leave an existing installation untouched; 
 On **Linux**, create `macrun.toml` in the project you want to work on:
 
 ```toml
-remote_root = "/Users/YOUR_USER/work/my-app"
+remote_root = "my-app"
 exclude = ["node_modules", "dist", ".env", ".env.*"]
 sync_timeout_seconds = 120
 ```
 
-Replace `remote_root` with the intended **Mac destination**. From the Linux project directory, with `MACRUN_SOCKET` set as above:
+The worker creates `~/macrun-work` and syncs this project into its `my-app` subfolder. From the Linux project directory, with `MACRUN_SOCKET` set as above:
 
 ```bash
 macrun sync
-macrun exec --cwd /Users/YOUR_USER/work/my-app 'make test'
+macrun exec --cwd my-app 'make test'
 macrun task TASK_UUID
 ```
 

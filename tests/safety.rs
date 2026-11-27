@@ -32,6 +32,36 @@ fn allowlist_checks_nonexistent_paths_symlinks_and_parent_traversal() {
     std::os::unix::fs::symlink(outside.path(), d.path().join("link")).unwrap();
     assert!(p.check(&d.path().join("link/new")).is_err());
 }
+
+#[tokio::test]
+async fn restricted_commands_default_to_the_allowed_root_and_keep_retry_identity() {
+    let state = tempfile::tempdir().unwrap();
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let e = Engine::open(state.path().into(), WorkerConfig::default()).unwrap();
+    let args = json!({"command":"pwd > launched","request_id":macrun::model::id()});
+    assert!(e.handle("exec.start", args.clone()).await.is_err());
+
+    for root in [first.path(), second.path()] {
+        e.set_safety(Safety {
+            restrict_paths: true,
+            roots: vec![root.into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        let task = e.handle("exec.start", args.clone()).await.unwrap();
+        wait_for_status(&e, task["task_id"].as_str().unwrap(), "succeeded").await;
+        assert_eq!(task["duplicate"] == true, root == second.path());
+    }
+    assert_eq!(
+        std::fs::read_to_string(first.path().join("launched"))
+            .unwrap()
+            .trim(),
+        first.path().canonicalize().unwrap().to_str().unwrap()
+    );
+    assert!(!second.path().join("launched").exists());
+}
 #[tokio::test]
 async fn empty_restricted_roots_cannot_replace_saved_policy() {
     let d = tempfile::tempdir().unwrap();

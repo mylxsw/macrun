@@ -99,7 +99,7 @@ On the agent host, use the actual socket:
 ```bash
 export MACRUN_SOCKET="$HOME/.local/share/macrun-server/control.sock"
 "$HOME/.local/bin/macrun" status
-"$HOME/.local/bin/macrun" exec --cwd /tmp 'hostname; uname -m; echo macrun-ok'
+"$HOME/.local/bin/macrun" exec 'hostname; uname -m; echo macrun-ok'
 "$HOME/.local/bin/macrun" task TASK_UUID
 ```
 
@@ -140,7 +140,26 @@ Existing `safety.json` files pick up these defaults; no migration is needed. Loc
 
 This is a soft budget: active tasks, data in use by commands or downloads, unresolved process recovery journals, and results from the past hour are protected. Cleanup retries on later sweeps; protected data can temporarily exceed the budget. Usage and reclaimed bytes are logical file sizes sampled during the sweep, not physical filesystem free space. Malformed or mismatched records are left intact and reported as errors; symlinked task directories are skipped. Inspect ownership/permissions before manually repairing these entries. Partial directory deletion is retried using its durable deduplication record.
 
-Only real UUID-named directories under the worker's `tasks/` with matching terminal records are eligible. Original command working directories, synchronized project roots, mirror metadata, credentials, application/service logs and unrelated files are outside this policy. Keep build-cache and log rotation policies for those locations. Resumable upload staging files keep their existing 24-hour inactivity cutoff and destination lease protection; their task ownership journal remains until cleanup can safely handle the staging files. Sync incoming staging files are checked on subsequent sync, and server sync-job records retain their separate 30-day cleanup.
+Only real UUID-named directories under the worker's `tasks/` with matching terminal records and their tracked snapshots are eligible. Original command working directories, synchronized project roots, mirror metadata, credentials, application/service logs and unrelated files are outside this policy. Keep build-cache and log rotation policies for those locations. Resumable upload staging files keep their existing 24-hour inactivity cutoff and destination lease protection; their task ownership journal remains until cleanup can safely handle the staging files. Sync incoming staging files are checked on subsequent sync, and server sync-job records retain their separate 30-day cleanup.
+
+## Macrun work directory
+
+The worker creates and uses `~/macrun-work` automatically. Macrun Desktop shows
+its path under **Macrun work folder**. A standalone worker can be started with
+`--work-directory /full/path/to/folder` to use a different fixed folder.
+
+Set each project's `remote_root` in `macrun.toml` to a relative subfolder such
+as `gul-715/tf`. Use the `workspace_root` returned by a successful sync when
+executing project commands. Commands without `cwd` or `workspace_root` start in
+the work directory. Relative paths start there, and absolute paths are accepted
+inside that directory. The work directory is also reported by `macrun status`.
+
+The worker rejects out-of-directory sync, file operations, and command start
+requests with `path_denied`. On macOS, direct writes from the command and its
+child processes are confined to the work directory. `TMPDIR` defaults to the
+command's working directory. Point writable caches and build outputs into the
+work directory. Private snapshots run under `.macrun/snapshots/` within it and
+follow task retention.
 
 ## Command descendants and stalled tests
 
